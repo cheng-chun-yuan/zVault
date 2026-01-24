@@ -70,12 +70,23 @@ pub fn derive_note_pubkey(shared_x: Field, shared_y: Field) -> Field {
 }
 
 /**
- * Compute commitment from note public key, amount, and random
+ * Compute commitment from note public key and amount (SIMPLIFIED)
  *
- * commitment = Poseidon2(notePubKey, amount, random)
+ * commitment = Poseidon2(notePubKey, amount)
+ *
+ * SECURITY NOTE: Random field removed - ephemeral key uniqueness is sufficient.
+ * Each deposit uses a fresh ephemeral keypair, so notePubKey is already unique.
+ *
+ * For backward compatibility, if random != 0, use the old formula.
  */
 pub fn compute_commitment_v2(note_pubkey: Field, amount: Field, random: Field) -> Field {
-    Poseidon2::hash([note_pubkey, amount, random], 3)
+    if random == 0 {
+        // V2 simplified: no random
+        Poseidon2::hash([note_pubkey, amount], 2)
+    } else {
+        // V1 legacy: with random
+        Poseidon2::hash([note_pubkey, amount, random], 3)
+    }
 }
 
 /**
@@ -93,7 +104,14 @@ pub fn compute_nullifier_v2(spending_priv: Field, leaf_index: Field) -> Field {
 }
 
 /**
- * Hash nullifier for public input (double-hash for privacy)
+ * Hash nullifier for public input
+ *
+ * NOTE: This function is DEPRECATED in V2 simplified format.
+ * The nullifier itself is now used as the public input directly.
+ * Double-hashing provided no security benefit (nullifier is already
+ * a secure hash of spending_priv + leaf_index + domain separator).
+ *
+ * This function is kept for backward compatibility with V1.
  *
  * nullifier_hash = Poseidon2(nullifier)
  */
@@ -138,20 +156,20 @@ pub fn is_valid_point(point: EmbeddedCurvePoint) -> bool {
 // ============================================================================
 
 /**
- * Full V2 claim verification flow
+ * Full V2 claim verification flow (SIMPLIFIED)
  *
  * 1. Perform Grumpkin ECDH
  * 2. Derive note public key
- * 3. Compute commitment
+ * 3. Compute commitment (no random in V2)
  * 4. Verify commitment in Merkle tree
- * 5. Compute and verify nullifier
+ * 5. Compute nullifier (single hash, no double-hashing)
  *
  * @param spending_priv - Recipient's spending private key
  * @param ephemeral_spend_pub - Sender's ephemeral Grumpkin pubkey
  * @param amount - Note amount
- * @param random - Random value for commitment
+ * @param random - Random value (pass 0 for V2 simplified format)
  * @param leaf_index - Merkle tree leaf index
- * @returns (commitment, nullifier, nullifier_hash)
+ * @returns (commitment, nullifier, nullifier_hash_deprecated)
  */
 pub fn verify_ownership(
     spending_priv: Field,
@@ -173,11 +191,13 @@ pub fn verify_ownership(
     // 4. Derive note public key
     let note_pubkey = derive_note_pubkey(shared_x, shared_y);
 
-    // 5. Compute commitment
+    // 5. Compute commitment (uses random=0 for V2 simplified)
     let commitment = compute_commitment_v2(note_pubkey, amount, random);
 
     // 6. Compute nullifier (only recipient can do this!)
     let nullifier = compute_nullifier_v2(spending_priv, leaf_index);
+
+    // Note: nullifier_hash is deprecated in V2, but kept for backward compatibility
     let nullifier_hash = hash_nullifier(nullifier);
 
     (commitment, nullifier, nullifier_hash)

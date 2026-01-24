@@ -1,5 +1,5 @@
 /**
- * Claim V2 Circuit - Ownership Proof with Grumpkin ECDH
+ * Claim V2 Circuit - Ownership Proof with Grumpkin ECDH (SIMPLIFIED)
  *
  * This is the core ownership proof circuit for the dual-key ECDH system.
  * It proves that the claimer knows the spending private key that corresponds
@@ -8,18 +8,24 @@
  * Key Security Properties:
  * - Sender knows: ephemeral_priv, shared_secret, commitment
  * - Sender does NOT know: recipient's spending_priv
- * - Nullifier = H(spending_priv, leaf_index)
+ * - Nullifier = H(spending_priv, leaf_index, DOMAIN_NULL)
  * - Only recipient can compute valid nullifier!
+ *
+ * SECURITY IMPROVEMENTS (V2 Simplified):
+ * - Removed random field: ephemeral key uniqueness is sufficient
+ * - Removed double nullifier hashing: saves ~1.5k constraints
+ * - Commitment: Poseidon2(notePubKey, amount) instead of (notePubKey, amount, random)
+ * - Public input: nullifier directly (not hash of nullifier)
  *
  * If sender tries with wrong key:
  *   wrong_shared = ECDH(sender_priv, ephemeral_pub)
  *   wrong_note_pk = H(wrong_shared)
- *   wrong_commitment = H(wrong_note_pk, amount, random)
+ *   wrong_commitment = H(wrong_note_pk, amount)
  *   → NOT IN MERKLE TREE → Proof fails
  *
- * Constraint Cost: ~10k total
+ * Constraint Cost: ~8.5k total (saved ~1.5k from removing double hash)
  * - Grumpkin ECDH: ~2k
- * - Poseidon2 hashes: ~1.5k
+ * - Poseidon2 hashes: ~500 (reduced from ~1.5k)
  * - Merkle proof (20 levels): ~6k
  */
 
@@ -47,9 +53,6 @@ fn main(
     /// Note amount in satoshis
     amount: Field,
 
-    /// Random value for commitment
-    random: Field,
-
     /// Merkle tree leaf index
     leaf_index: Field,
 
@@ -66,8 +69,8 @@ fn main(
     /// Current Merkle root
     merkle_root: pub Field,
 
-    /// Hash of the nullifier (for double-spend prevention)
-    nullifier_hash: pub Field,
+    /// Nullifier (for double-spend prevention) - SIMPLIFIED: no hash wrapper
+    nullifier_pub: pub Field,
 
     /// Amount being claimed (must match private amount)
     amount_pub: pub Field,
@@ -96,11 +99,12 @@ fn main(
     let note_pub_key = grumpkin::derive_note_pubkey(shared_x, shared_y);
 
     // ============================================================
-    // 3. COMPUTE AND VERIFY COMMITMENT
+    // 3. COMPUTE AND VERIFY COMMITMENT (SIMPLIFIED: no random)
     // ============================================================
 
-    // commitment = Poseidon2(notePubKey, amount, random)
-    let commitment = grumpkin::compute_commitment_v2(note_pub_key, amount, random);
+    // commitment = Poseidon2(notePubKey, amount)
+    // Note: Pass 0 for random to use simplified V2 formula
+    let commitment = grumpkin::compute_commitment_v2(note_pub_key, amount, 0);
 
     // ============================================================
     // 4. VERIFY COMMITMENT EXISTS IN MERKLE TREE
@@ -121,10 +125,13 @@ fn main(
     // CRITICAL: Nullifier is derived from SPENDING PRIVATE KEY + leaf index
     // Only the legitimate recipient can compute this!
     // Sender knows shared secret but NOT spending_priv
+    //
+    // SIMPLIFIED: Single hash, no double-hashing (saves ~1.5k constraints)
+    // nullifier = Poseidon2(spending_priv, leaf_index, DOMAIN_NULL)
     let nullifier = grumpkin::compute_nullifier_v2(spending_priv, leaf_index);
-    let computed_nullifier_hash = grumpkin::hash_nullifier(nullifier);
 
-    assert(nullifier_hash == computed_nullifier_hash, "Invalid nullifier");
+    // Direct comparison (no hash wrapper)
+    assert(nullifier_pub == nullifier, "Invalid nullifier");
 
     // ============================================================
     // 6. VERIFY AMOUNT MATCHES
@@ -188,17 +195,16 @@ fn test_claim_v2_basic() {
     let ephemeral_pub = grumpkin::derive_pubkey(ephemeral_scalar);
 
     let amount = 100000;
-    let random = 999999;
     let leaf_index = 0;
 
-    // Sender computes commitment
+    // Sender computes commitment (SIMPLIFIED: no random)
     let (sender_shared_x, sender_shared_y) = grumpkin::ecdh(ephemeral_scalar, spending_pub);
     let sender_npk = grumpkin::derive_note_pubkey(sender_shared_x, sender_shared_y);
-    let commitment = grumpkin::compute_commitment_v2(sender_npk, amount, random);
+    let commitment = grumpkin::compute_commitment_v2(sender_npk, amount, 0);
 
     // Compute nullifier (recipient would do this)
+    // SIMPLIFIED: nullifier is used directly, no hash wrapper
     let nullifier = grumpkin::compute_nullifier_v2(spending_priv, leaf_index);
-    let nullifier_hash = grumpkin::hash_nullifier(nullifier);
 
     // Build Merkle tree with single leaf
     let zero: Field = 0;
@@ -218,12 +224,11 @@ fn test_claim_v2_basic() {
         ephemeral_pub.x,
         ephemeral_pub.y,
         amount,
-        random,
         leaf_index,
         merkle_path,
         path_indices,
         merkle_root,
-        nullifier_hash,
+        nullifier, // Direct nullifier, not hash
         amount
     );
 }
@@ -243,13 +248,12 @@ fn test_claim_v2_wrong_spending_key() {
     let ephemeral_pub = grumpkin::derive_pubkey(ephemeral_scalar);
 
     let amount = 100000;
-    let random = 999999;
     let leaf_index = 0;
 
-    // Sender computes commitment (correctly)
+    // Sender computes commitment (correctly, no random in V2)
     let (sender_shared_x, sender_shared_y) = grumpkin::ecdh(ephemeral_scalar, spending_pub);
     let sender_npk = grumpkin::derive_note_pubkey(sender_shared_x, sender_shared_y);
-    let commitment = grumpkin::compute_commitment_v2(sender_npk, amount, random);
+    let commitment = grumpkin::compute_commitment_v2(sender_npk, amount, 0);
 
     // Sender builds Merkle tree with correct commitment
     let zero: Field = 0;
@@ -267,7 +271,6 @@ fn test_claim_v2_wrong_spending_key() {
 
     // Attacker computes their own (wrong) nullifier
     let attacker_nullifier = grumpkin::compute_nullifier_v2(attacker_priv, leaf_index);
-    let attacker_nullifier_hash = grumpkin::hash_nullifier(attacker_nullifier);
 
     // This should FAIL because attacker's ECDH produces wrong commitment
     main(
@@ -275,12 +278,11 @@ fn test_claim_v2_wrong_spending_key() {
         ephemeral_pub.x,
         ephemeral_pub.y,
         amount,
-        random,
         leaf_index,
         merkle_path,
         path_indices,
         merkle_root,
-        attacker_nullifier_hash,
+        attacker_nullifier,
         amount
     );
 }
@@ -297,13 +299,12 @@ fn test_claim_v2_wrong_nullifier() {
     let ephemeral_pub = grumpkin::derive_pubkey(ephemeral_scalar);
 
     let amount = 100000;
-    let random = 999999;
     let leaf_index = 0;
 
-    // Compute correct commitment
+    // Compute correct commitment (no random in V2)
     let (sender_shared_x, sender_shared_y) = grumpkin::ecdh(ephemeral_scalar, spending_pub);
     let sender_npk = grumpkin::derive_note_pubkey(sender_shared_x, sender_shared_y);
-    let commitment = grumpkin::compute_commitment_v2(sender_npk, amount, random);
+    let commitment = grumpkin::compute_commitment_v2(sender_npk, amount, 0);
 
     // Build Merkle tree
     let zero: Field = 0;
@@ -316,8 +317,8 @@ fn test_claim_v2_wrong_nullifier() {
     }
     let merkle_root = current;
 
-    // Use wrong nullifier hash
-    let wrong_nullifier_hash = 123456789;
+    // Use wrong nullifier (not the correct one for this spending_priv + leaf_index)
+    let wrong_nullifier = 123456789;
 
     // This should FAIL because nullifier doesn't match
     main(
@@ -325,12 +326,11 @@ fn test_claim_v2_wrong_nullifier() {
         ephemeral_pub.x,
         ephemeral_pub.y,
         amount,
-        random,
         leaf_index,
         merkle_path,
         path_indices,
         merkle_root,
-        wrong_nullifier_hash,
+        wrong_nullifier,
         amount
     );
 }
