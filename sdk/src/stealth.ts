@@ -196,11 +196,11 @@ export async function createStealthDeposit(
 
   // Compute note public key using Poseidon2
   // notePubKey = Poseidon2(spendShared.x, spendShared.y, DOMAIN_NPK)
-  const notePubKey = deriveNotePubKey(spendShared.x, spendShared.y);
+  const notePubKey = await deriveNotePubKey(spendShared.x, spendShared.y);
 
   // Compute commitment using Poseidon2 (SIMPLIFIED: no random)
   // commitment = Poseidon2(notePubKey, amount)
-  const commitmentBigint = poseidon2ComputeCommitment(notePubKey, amountSats, 0n);
+  const commitmentBigint = await poseidon2ComputeCommitment(notePubKey, amountSats, 0n);
   const commitment = bigintToBytes(commitmentBigint);
 
   return {
@@ -315,8 +315,8 @@ export async function prepareClaimInputs(
   const spendShared = grumpkinEcdh(keys.spendingPrivKey, note.ephemeralSpendPub);
 
   // Verify commitment matches (sanity check)
-  const notePubKey = deriveNotePubKey(spendShared.x, spendShared.y);
-  const expectedCommitment = poseidon2ComputeCommitment(notePubKey, note.amount, 0n);
+  const notePubKey = await deriveNotePubKey(spendShared.x, spendShared.y);
+  const expectedCommitment = await poseidon2ComputeCommitment(notePubKey, note.amount, 0n);
   const actualCommitment = bytesToBigint(note.commitment);
 
   if (expectedCommitment !== actualCommitment) {
@@ -328,7 +328,7 @@ export async function prepareClaimInputs(
   // CRITICAL: Nullifier from spending private key + leaf index
   // nullifier = Poseidon2(spendingPrivKey, leafIndex, DOMAIN_NULL)
   // Only recipient can compute this!
-  const nullifier = poseidon2ComputeNullifier(keys.spendingPrivKey, BigInt(note.leafIndex));
+  const nullifier = await poseidon2ComputeNullifier(keys.spendingPrivKey, BigInt(note.leafIndex));
 
   return {
     // Private inputs

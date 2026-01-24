@@ -70,6 +70,10 @@ export { deriveTaprootAddress, verifyTaprootAddress, createP2TRScriptPubkey, par
 // ==========================================================================
 export { createClaimLink, parseClaimLink, isValidClaimLinkFormat, shortenClaimLink, createProtectedClaimLink, extractAmountFromClaimLink, encodeClaimLink, decodeClaimLink, generateClaimUrl, parseClaimUrl, } from "./claim-link";
 // ==========================================================================
+// WASM Prover (Browser + Node.js)
+// ==========================================================================
+export { initProver, isProverAvailable, generateClaimProof as generateClaimProofWasm, generateSplitProof as generateSplitProofWasm, generateTransferProof as generateTransferProofWasm, generateWithdrawProof as generateWithdrawProofWasm, verifyProof as verifyProofWasm, setCircuitPath, getCircuitPath, circuitExists, proofToBytes, cleanup as cleanupProver, } from "./prover";
+// ==========================================================================
 // ChadBuffer utilities (for SPV verification)
 // ==========================================================================
 export { uploadTransactionToBuffer, closeBuffer, readBufferData, fetchRawTransaction, fetchMerkleProof, prepareVerifyDeposit, CHADBUFFER_PROGRAM_ID, } from "./chadbuffer";

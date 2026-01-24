@@ -20,21 +20,28 @@
   },
   "files": [
     "dist",
-    "src"
+    "src",
+    "circuits"
   ],
   "scripts": {
     "build": "tsc",
     "clean": "rm -rf dist",
     "prepublishOnly": "bun run build",
-    "test": "bun test"
+    "test": "bun test",
+    "copy-circuits": "mkdir -p circuits && cp ../noir-circuits/claim/target/zvault_claim.json circuits/ && cp ../noir-circuits/split/target/zvault_split.json circuits/ && cp ../noir-circuits/transfer/target/zvault_transfer.json circuits/ && cp ../noir-circuits/partial_withdraw/target/zvault_partial_withdraw.json circuits/"
   },
   "dependencies": {
+    "@aztec/bb.js": "3.0.0-nightly.20251104",
+    "@aztec/foundation": "^2.1.11",
     "@noble/curves": "^2.0.1",
     "@noble/hashes": "^1.3.0",
+    "@noir-lang/noir_js": "1.0.0-beta.15",
     "@solana/spl-token": "^0.4.0",
     "@solana/web3.js": "^1.95.0",
+    "@zkpassport/poseidon2": "^0.6.2",
     "bech32": "^2.0.0",
     "ed2curve": "^0.3.0",
+    "poseidon-lite": "^0.3.0",
     "tweetnacl": "^1.0.3"
   },
   "devDependencies": {

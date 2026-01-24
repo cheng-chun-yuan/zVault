@@ -14,11 +14,14 @@
     "init": "bun run scripts/deploy-and-seed.ts"
   },
   "dependencies": {
+    "@noble/hashes": "^2.0.1",
     "@solana/spl-token": "^0.4.14",
-    "@solana/web3.js": "^1.98.4"
+    "@solana/web3.js": "^1.98.4",
+    "@zvault/sdk": "file:../sdk"
   },
   "devDependencies": {
     "@types/node": "^22.0.0",
+    "react": "^19.0.0",
     "typescript": "^5.0.0"
   }
 }

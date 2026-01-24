@@ -46,6 +46,7 @@ export { createMerkleProof, createMerkleProofFromBigints, proofToNoirFormat, pro
 export { deriveTaprootAddress, verifyTaprootAddress, createP2TRScriptPubkey, parseP2TRScriptPubkey, isValidBitcoinAddress, getInternalKey, createCustomInternalKey, } from "./taproot";
 export { createClaimLink, parseClaimLink, isValidClaimLinkFormat, shortenClaimLink, createProtectedClaimLink, extractAmountFromClaimLink, encodeClaimLink, decodeClaimLink, generateClaimUrl, parseClaimUrl, type ClaimLinkData, } from "./claim-link";
 export type { NoirProof, CircuitType } from "./proof";
+export { initProver, isProverAvailable, generateClaimProof as generateClaimProofWasm, generateSplitProof as generateSplitProofWasm, generateTransferProof as generateTransferProofWasm, generateWithdrawProof as generateWithdrawProofWasm, verifyProof as verifyProofWasm, setCircuitPath, getCircuitPath, circuitExists, proofToBytes, cleanup as cleanupProver, type ProofData, type MerkleProofInput, type ClaimInputs as ProverClaimInputs, type SplitInputs, type TransferInputs, type WithdrawInputs, } from "./prover";
 export { uploadTransactionToBuffer, closeBuffer, readBufferData, fetchRawTransaction, fetchMerkleProof, prepareVerifyDeposit, CHADBUFFER_PROGRAM_ID, } from "./chadbuffer";
 export { verifyDeposit, derivePoolStatePDA, deriveLightClientPDA, deriveBlockHeaderPDA, deriveCommitmentTreePDA, deriveDepositRecordPDA, buildMerkleProof, } from "./verify-deposit";
 export type { DepositCredentials, ClaimResult, SplitResult } from "./zvault";

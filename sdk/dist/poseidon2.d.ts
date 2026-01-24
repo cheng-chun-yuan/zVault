@@ -1,78 +1,66 @@
 /**
  * Poseidon2 Hash Implementation for BN254
  *
- * This implementation matches Noir's Poseidon2 hash function used in circuits.
- * It's essential that this produces identical outputs to ensure commitment
- * verification succeeds on-chain.
+ * Uses @aztec/foundation which matches Noir's Poseidon2 exactly.
  *
- * CRITICAL: This must match the Noir circuit's Poseidon2 output exactly.
- * Any mismatch will cause claim proofs to fail.
- *
- * Security Properties:
- * - Uses BN254 scalar field (same as Noir's embedded curve)
- * - Implements full Poseidon2 permutation with correct round constants
- * - Sponge construction with rate=2, capacity=1
+ * VERIFIED: aztec/foundation output matches Noir circuit output.
  */
 export declare const BN254_SCALAR_FIELD = 21888242871839275222246405745257275088548364400416034343698204186575808495617n;
 /**
- * Poseidon2 sponge hash
- *
- * Matches Noir's Poseidon2::hash() function.
- * Uses rate=2, capacity=1 sponge construction.
+ * Poseidon2 hash matching Noir's implementation
  *
  * @param inputs - Array of field elements to hash
- * @param len - Number of elements (for padding)
- * @returns Hash output as field element
+ * @param len - Optional length (defaults to inputs.length)
+ * @returns Hash result as bigint
  */
-export declare function poseidon2Hash(inputs: bigint[], len?: number): bigint;
+export declare function poseidon2Hash(inputs: bigint[], len?: number): Promise<bigint>;
+export declare function poseidon2HashSync(inputs: bigint[]): bigint;
 /**
- * Compute note public key from ECDH shared secret
- *
- * notePubKey = Poseidon2(shared_x, shared_y, DOMAIN_NPK)
- *
- * This must match Noir's grumpkin::derive_note_pubkey()
+ * Initialize synchronous Poseidon2 (preloads WASM)
  */
-export declare function deriveNotePubKey(sharedX: bigint, sharedY: bigint): bigint;
+export declare function initPoseidon2Sync(): Promise<void>;
 /**
- * Compute V2 commitment from note public key, amount, and random
- *
- * commitment = Poseidon2(notePubKey, amount, random)
- *
- * This must match Noir's grumpkin::compute_commitment_v2()
+ * Compute note from nullifier and secret
+ * note = poseidon2([nullifier, secret])
  */
-export declare function computeCommitmentV2(notePubKey: bigint, amount: bigint, random: bigint): bigint;
+export declare function computeNote(nullifier: bigint, secret: bigint): Promise<bigint>;
 /**
- * Compute V2 nullifier from spending private key and leaf index
- *
- * nullifier = Poseidon2(spending_priv, leaf_index, DOMAIN_NULL)
- *
- * CRITICAL: This is what prevents sender from claiming recipient's funds.
- * This must match Noir's grumpkin::compute_nullifier_v2()
+ * Compute commitment from note and amount
+ * commitment = poseidon2([note, amount])
  */
-export declare function computeNullifierV2(spendingPriv: bigint, leafIndex: bigint): bigint;
+export declare function computeCommitment(note: bigint, amount: bigint): Promise<bigint>;
 /**
- * Hash nullifier for public input
- *
- * nullifier_hash = Poseidon2(nullifier)
- *
- * NOTE: This double-hashing is being evaluated for removal.
- * See security audit Phase 3 recommendation.
+ * Compute nullifier hash for double-spend prevention
+ * nullifier_hash = poseidon2([nullifier])
  */
-export declare function hashNullifier(nullifier: bigint): bigint;
+export declare function hashNullifier(nullifier: bigint): Promise<bigint>;
 /**
- * Compute V1 commitment from nullifier, secret, and amount
+ * V1 Commitment: commitment = hash(hash(nullifier, secret), amount)
  *
- * note = Poseidon2(nullifier, secret)
- * commitment = Poseidon2(note, amount)
- *
- * This must match Noir's zvault_utils::compute_commitment_from_secrets()
+ * Used by: claim, split, transfer circuits
+ * Matches: zvault_utils::compute_commitment_from_secrets()
  */
-export declare function computeCommitmentV1(nullifier: bigint, secret: bigint, amount: bigint): bigint;
+export declare function computeCommitmentV1(nullifier: bigint, secret: bigint, amount: bigint): Promise<bigint>;
 /**
- * Compute V1 nullifier hash
- *
- * nullifier_hash = Poseidon2(nullifier)
- *
- * This must match Noir's zvault_utils::compute_nullifier_hash()
+ * V1 Nullifier Hash
+ * Matches: zvault_utils::compute_nullifier_hash()
  */
-export declare function computeNullifierHashV1(nullifier: bigint): bigint;
+export declare function computeNullifierHashV1(nullifier: bigint): Promise<bigint>;
+/**
+ * Derive note public key from ECDH shared secret
+ * notePubKey = poseidon2([sharedX, sharedY])
+ */
+export declare function deriveNotePubKey(sharedX: bigint, sharedY: bigint): Promise<bigint>;
+/**
+ * V2 Commitment: commitment = hash(notePubKey, amount, random)
+ *
+ * Used by: ECDH stealth circuits
+ * Matches: grumpkin::compute_commitment_v2()
+ */
+export declare function computeCommitmentV2(notePubKey: bigint, amount: bigint, random: bigint): Promise<bigint>;
+/**
+ * V2 Nullifier: nullifier = hash(spendingPriv, leafIndex)
+ *
+ * Used by: ECDH stealth circuits
+ */
+export declare function computeNullifierV2(spendingPriv: bigint, leafIndex: bigint): Promise<bigint>;

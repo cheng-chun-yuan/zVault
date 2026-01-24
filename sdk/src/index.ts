@@ -213,10 +213,35 @@ export {
 } from "./claim-link";
 
 // ==========================================================================
-// ZK proof generation (Noir UltraHonk) - Node.js only
+// ZK proof generation (Noir UltraHonk) - CLI/Node.js only
 // ==========================================================================
 
 export type { NoirProof, CircuitType } from "./proof";
+
+// ==========================================================================
+// WASM Prover (Browser + Node.js)
+// ==========================================================================
+
+export {
+  initProver,
+  isProverAvailable,
+  generateClaimProof as generateClaimProofWasm,
+  generateSplitProof as generateSplitProofWasm,
+  generateTransferProof as generateTransferProofWasm,
+  generateWithdrawProof as generateWithdrawProofWasm,
+  verifyProof as verifyProofWasm,
+  setCircuitPath,
+  getCircuitPath,
+  circuitExists,
+  proofToBytes,
+  cleanup as cleanupProver,
+  type ProofData,
+  type MerkleProofInput,
+  type ClaimInputs as ProverClaimInputs,
+  type SplitInputs,
+  type TransferInputs,
+  type WithdrawInputs,
+} from "./prover";
 
 // ==========================================================================
 // ChadBuffer utilities (for SPV verification)

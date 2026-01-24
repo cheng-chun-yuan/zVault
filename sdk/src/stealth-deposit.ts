@@ -167,11 +167,11 @@ export async function prepareStealthDeposit(params: {
 
   // Compute commitment using Poseidon2 (SIMPLIFIED: no random)
   // notePubKey = Poseidon2(spendShared.x, spendShared.y, DOMAIN_NPK)
-  const notePubKey = deriveNotePubKey(spendShared.x, spendShared.y);
+  const notePubKey = await deriveNotePubKey(spendShared.x, spendShared.y);
 
   // commitment = Poseidon2(notePubKey, amount, 0)
   // Note: random is 0 in simplified format
-  const commitmentBigint = computeCommitmentV2(notePubKey, amountSats, 0n);
+  const commitmentBigint = await computeCommitmentV2(notePubKey, amountSats, 0n);
   const commitment = bigintToBytes(commitmentBigint);
 
   // Build OP_RETURN data (simplified format)
