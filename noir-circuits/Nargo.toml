@@ -1,0 +1,9 @@
+[workspace]
+members = [
+    "claim",
+    "transfer",
+    "split",
+    "partial_withdraw",
+    "helpers",
+    "utils"
+]

@@ -1,0 +1,14 @@
+# Transfer Circuit Test Inputs
+# Private inputs
+nullifier = "12345"
+secret = "67890"
+amount = "1000000"
+merkle_path = ["0", "0", "0", "0", "0", "0", "0", "0", "0", "0"]
+path_indices = ["0", "0", "0", "0", "0", "0", "0", "0", "0", "0"]
+output_nullifier = "11111"
+output_secret = "22222"
+
+# Public inputs (computed using Poseidon2)
+merkle_root = "0x2e85ac0d549a4ec46222019fec1f4653462f77c32a3bf40d1fa514dc25af3482"
+nullifier_hash = "0x1fed07ad686a727dfc33b91206d526e61f519dca9c5054ae729231c201717633"
+output_commitment = "0x105010d1bd070921268d13134773a2a607ce2af4cd7e303ab3453b248a247ebf"
