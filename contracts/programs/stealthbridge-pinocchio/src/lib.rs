@@ -53,6 +53,11 @@ pub const ID: Pubkey = [
 /// - DELEGATE_VIEWING_KEY (14): Add delegated viewing key
 /// - REVOKE_DELEGATION (15): Remove delegated viewing key
 /// - ANNOUNCE_STEALTH_V2 (16): Dual-key ECDH announcement
+///
+/// Optional .zkey name registry:
+/// - REGISTER_NAME (17): Register "alice.zkey"
+/// - UPDATE_NAME (18): Update keys for a name
+/// - TRANSFER_NAME (19): Transfer name ownership
 pub mod instruction {
     pub const INITIALIZE: u8 = 0;
     // Discriminators 1-3 removed (record_deposit, claim_direct, mint_to_commitment)
@@ -70,6 +75,10 @@ pub mod instruction {
     pub const DELEGATE_VIEWING_KEY: u8 = 14;
     pub const REVOKE_DELEGATION: u8 = 15;
     pub const ANNOUNCE_STEALTH_V2: u8 = 16;
+    // Optional .zkey name registry
+    pub const REGISTER_NAME: u8 = 17;
+    pub const UPDATE_NAME: u8 = 18;
+    pub const TRANSFER_NAME: u8 = 19;
 }
 
 entrypoint!(process_instruction);
@@ -128,6 +137,16 @@ pub fn process_instruction(
         }
         instruction::ANNOUNCE_STEALTH_V2 => {
             instructions::process_announce_stealth_v2(program_id, accounts, data)
+        }
+        // Optional .zkey name registry
+        instruction::REGISTER_NAME => {
+            instructions::process_register_name(program_id, accounts, data)
+        }
+        instruction::UPDATE_NAME => {
+            instructions::process_update_name(program_id, accounts, data)
+        }
+        instruction::TRANSFER_NAME => {
+            instructions::process_transfer_name(program_id, accounts, data)
         }
         _ => Err(ProgramError::InvalidInstructionData),
     }
@@ -212,6 +231,10 @@ mod tests {
             instruction::DELEGATE_VIEWING_KEY,
             instruction::REVOKE_DELEGATION,
             instruction::ANNOUNCE_STEALTH_V2,
+            // .zkey name registry
+            instruction::REGISTER_NAME,
+            instruction::UPDATE_NAME,
+            instruction::TRANSFER_NAME,
         ];
 
         for (i, &d1) in discriminators.iter().enumerate() {

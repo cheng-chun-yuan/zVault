@@ -12,6 +12,11 @@
 //! - announce_stealth_v2: Dual-key ECDH announcement (X25519 + Grumpkin)
 //! - register_viewing_key: Create viewing key registry for delegation
 //! - delegate_viewing_key: Add/revoke delegated viewing keys
+//!
+//! Optional .zkey name registry:
+//! - register_name: Register a human-readable name (e.g., "albert.zkey")
+//! - update_name: Update keys for a registered name
+//! - transfer_name: Transfer ownership of a name
 
 pub mod initialize;
 pub mod claim;
@@ -24,6 +29,7 @@ pub mod announce_stealth;
 pub mod announce_stealth_v2;
 pub mod register_viewing_key;
 pub mod delegate_viewing_key;
+pub mod register_name;
 
 pub use initialize::*;
 pub use claim::*;
@@ -36,3 +42,4 @@ pub use announce_stealth::*;
 pub use announce_stealth_v2::*;
 pub use register_viewing_key::*;
 pub use delegate_viewing_key::*;
+pub use register_name::*;

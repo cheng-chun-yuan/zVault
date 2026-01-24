@@ -120,6 +120,32 @@ export {
   type WalletSignerAdapter,
 } from "./keys";
 
+// Optional .zkey name registry
+export {
+  // Name utilities
+  isValidName,
+  normalizeName,
+  hashName,
+  formatZkeyName,
+  getNameValidationError,
+  // Instruction builders
+  buildRegisterNameData,
+  buildUpdateNameData,
+  buildTransferNameData,
+  // PDA derivation
+  NAME_REGISTRY_SEED,
+  deriveNameRegistryPDA,
+  // Parsing
+  parseNameEntry,
+  entryToStealthAddress,
+  // Constants
+  MAX_NAME_LENGTH,
+  NAME_REGEX,
+  // Types
+  type NameEntry,
+  type NameLookupResult,
+} from "./name-registry";
+
 // Note (shielded commitment) utilities
 export {
   generateNote,
