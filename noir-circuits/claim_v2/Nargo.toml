@@ -1,0 +1,8 @@
+[package]
+name = "zvault_claim_v2"
+type = "bin"
+authors = ["zVault Team"]
+
+[dependencies]
+poseidon = { tag = "v0.1.1", git = "https://github.com/noir-lang/poseidon" }
+zvault_utils = { path = "../utils" }

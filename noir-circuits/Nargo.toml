@@ -1,6 +1,7 @@
 [workspace]
 members = [
     "claim",
+    "claim_v2",
     "transfer",
     "split",
     "partial_withdraw",
