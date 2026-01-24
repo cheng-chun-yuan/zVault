@@ -9,7 +9,7 @@
 //! | `split_commitment` | Split 1 commitment into 2 (ZK proof, private) |
 //! | `request_redemption` | Prove ownership, burn from pool, queue BTC withdrawal |
 //! | `complete_redemption` | Relayer marks redemption complete |
-//! | `announce_stealth_v2` | Create stealth announcement (dual-key ECDH) |
+//! | `announce_stealth` | Create stealth announcement (dual-key ECDH) |
 //!
 //! ## Demo Operations (Testing only)
 //!
@@ -24,7 +24,7 @@ pub mod verify_deposit;
 pub mod split_commitment;
 pub mod request_redemption;
 pub mod complete_redemption;
-pub mod announce_stealth_v2;
+pub mod announce_stealth;
 
 // Demo/testing
 pub mod add_demo_note;
@@ -39,7 +39,7 @@ pub use verify_deposit::*;
 pub use split_commitment::*;
 pub use request_redemption::*;
 pub use complete_redemption::*;
-pub use announce_stealth_v2::*;
+pub use announce_stealth::*;
 pub use add_demo_note::*;
 pub use add_demo_stealth::*;
 pub use register_name::*;

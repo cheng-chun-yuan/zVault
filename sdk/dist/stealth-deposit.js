@@ -24,7 +24,7 @@ import { box } from "tweetnacl";
 import { bytesToBigint, bigintToBytes, BN254_FIELD_PRIME } from "./crypto";
 import { generateKeyPair as generateGrumpkinKeyPair, ecdh as grumpkinEcdh, pointToCompressedBytes, pointFromCompressedBytes, } from "./grumpkin";
 import { deriveTaprootAddress } from "./taproot";
-import { deriveNotePubKey, computeCommitmentV2 } from "./poseidon2";
+import { deriveNotePubKey, computeCommitment } from "./poseidon2";
 import { prepareVerifyDeposit, fetchRawTransaction, } from "./chadbuffer";
 import { derivePoolStatePDA, deriveLightClientPDA, deriveBlockHeaderPDA, deriveCommitmentTreePDA, deriveDepositRecordPDA, buildMerkleProof, } from "./verify-deposit";
 // ========== Constants ==========
@@ -73,10 +73,10 @@ export async function prepareStealthDeposit(params) {
     const spendShared = grumpkinEcdh(ephemeralSpend.privKey, recipientSpendPub);
     // Compute commitment using Poseidon2 (SIMPLIFIED: no random)
     // notePubKey = Poseidon2(spendShared.x, spendShared.y, DOMAIN_NPK)
-    const notePubKey = await deriveNotePubKey(spendShared.x, spendShared.y);
+    const notePubKey = deriveNotePubKey(spendShared.x, spendShared.y);
     // commitment = Poseidon2(notePubKey, amount, 0)
     // Note: random is 0 in simplified format
-    const commitmentBigint = await computeCommitmentV2(notePubKey, amountSats, 0n);
+    const commitmentBigint = computeCommitment(notePubKey, amountSats, 0n);
     const commitment = bigintToBytes(commitmentBigint);
     // Build OP_RETURN data (simplified format)
     const opReturnData = buildStealthOpReturn({
@@ -172,7 +172,7 @@ export function parseStealthOpReturn(data) {
  * Derive stealth announcement PDA
  */
 export function deriveStealthAnnouncementPDA(programId, ephemeralViewPub) {
-    return PublicKey.findProgramAddressSync([Buffer.from("stealth_v2"), ephemeralViewPub], programId);
+    return PublicKey.findProgramAddressSync([Buffer.from("stealth"), ephemeralViewPub], programId);
 }
 /**
  * Verify a stealth deposit on Solana

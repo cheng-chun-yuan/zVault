@@ -27,11 +27,17 @@
  * To mitigate: Use fresh ephemeral keys for each deposit and consider
  * additional privacy layers like mixers or delayed reveals.
  */
+// ========== Constants (defined before imports to ensure availability) ==========
+/** StealthAnnouncement account size (131 bytes) */
+export const STEALTH_ANNOUNCEMENT_SIZE = 131;
+/** Discriminator for StealthAnnouncement */
+export const STEALTH_ANNOUNCEMENT_DISCRIMINATOR = 0x08;
+// ========== Imports ==========
 import { box } from "tweetnacl";
 import { bigintToBytes, bytesToBigint } from "./crypto";
 import { generateKeyPair as generateGrumpkinKeyPair, ecdh as grumpkinEcdh, pointToCompressedBytes, pointFromCompressedBytes, } from "./grumpkin";
 import { deriveKeysFromWallet } from "./keys";
-import { deriveNotePubKey, computeCommitmentV2 as poseidon2ComputeCommitment, computeNullifierV2 as poseidon2ComputeNullifier, } from "./poseidon2";
+import { deriveNotePubKey, computeCommitment as poseidon2ComputeCommitment, computeNullifier as poseidon2ComputeNullifier, } from "./poseidon2";
 // ========== Type Guard ==========
 /**
  * Type guard to distinguish between WalletSignerAdapter and ZVaultKeys
@@ -42,25 +48,6 @@ export function isWalletAdapter(source) {
         "signMessage" in source &&
         typeof source.signMessage === "function");
 }
-// ========== On-chain Announcement ==========
-/**
- * Size of StealthAnnouncement account on-chain (SIMPLIFIED FORMAT)
- *
- * Layout (131 bytes):
- * - discriminator (1 byte)
- * - bump (1 byte)
- * - ephemeral_view_pub (32 bytes)
- * - ephemeral_spend_pub (33 bytes)
- * - amount_sats (8 bytes) - verified from BTC tx, stored directly
- * - commitment (32 bytes)
- * - leaf_index (8 bytes)
- * - created_at (8 bytes)
- *
- * SAVINGS: 24 bytes (from 155) by removing encrypted_amount and encrypted_random
- */
-export const STEALTH_ANNOUNCEMENT_SIZE = 131;
-/** Discriminator for StealthAnnouncement */
-export const STEALTH_ANNOUNCEMENT_DISCRIMINATOR = 0x08;
 // ========== Sender Functions ==========
 /**
  * Create a stealth deposit with dual-key ECDH
@@ -89,10 +76,10 @@ export async function createStealthDeposit(recipientMeta, amountSats) {
     const spendShared = grumpkinEcdh(ephemeralSpend.privKey, recipientSpendPub);
     // Compute note public key using Poseidon2
     // notePubKey = Poseidon2(spendShared.x, spendShared.y, DOMAIN_NPK)
-    const notePubKey = await deriveNotePubKey(spendShared.x, spendShared.y);
+    const notePubKey = deriveNotePubKey(spendShared.x, spendShared.y);
     // Compute commitment using Poseidon2 (SIMPLIFIED: no random)
     // commitment = Poseidon2(notePubKey, amount)
-    const commitmentBigint = await poseidon2ComputeCommitment(notePubKey, amountSats, 0n);
+    const commitmentBigint = poseidon2ComputeCommitment(notePubKey, amountSats, 0n);
     const commitment = bigintToBytes(commitmentBigint);
     return {
         ephemeralViewPub: ephemeralView.publicKey,
@@ -178,8 +165,8 @@ export async function prepareClaimInputs(source, note, merkleProof) {
     // Grumpkin ECDH with spending key
     const spendShared = grumpkinEcdh(keys.spendingPrivKey, note.ephemeralSpendPub);
     // Verify commitment matches (sanity check)
-    const notePubKey = await deriveNotePubKey(spendShared.x, spendShared.y);
-    const expectedCommitment = await poseidon2ComputeCommitment(notePubKey, note.amount, 0n);
+    const notePubKey = deriveNotePubKey(spendShared.x, spendShared.y);
+    const expectedCommitment = poseidon2ComputeCommitment(notePubKey, note.amount, 0n);
     const actualCommitment = bytesToBigint(note.commitment);
     if (expectedCommitment !== actualCommitment) {
         throw new Error("Commitment mismatch - this note may not belong to you or the announcement is invalid");
@@ -187,7 +174,7 @@ export async function prepareClaimInputs(source, note, merkleProof) {
     // CRITICAL: Nullifier from spending private key + leaf index
     // nullifier = Poseidon2(spendingPrivKey, leafIndex, DOMAIN_NULL)
     // Only recipient can compute this!
-    const nullifier = await poseidon2ComputeNullifier(keys.spendingPrivKey, BigInt(note.leafIndex));
+    const nullifier = poseidon2ComputeNullifier(keys.spendingPrivKey, BigInt(note.leafIndex));
     return {
         // Private inputs
         spendingPrivKey: keys.spendingPrivKey,

@@ -4,7 +4,7 @@
 // Amount conservation: input_amount == output1_amount + output2_amount
 //
 // SECURITY IMPROVEMENTS:
-// - Standardized to 20-level tree (was 10, now matches claim_v2)
+// - Standardized to 20-level tree (~1M leaves)
 // - Added output nullifier uniqueness constraint
 // - Output nullifiers must be different from each other AND from input
 

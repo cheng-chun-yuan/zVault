@@ -1,6 +1,6 @@
 //! Verify Stealth Deposit instruction (Pinocchio)
 //!
-//! Combines verify_deposit + announce_stealth_v2 atomically.
+//! Combines verify_deposit + announce_stealth atomically.
 //! When a sender deposits BTC to a recipient's stealth address,
 //! after SPV verification the commitment goes directly to the recipient
 //! with a stealth announcement - no separate claim step needed.
@@ -36,7 +36,7 @@ use pinocchio_system::instructions::CreateAccount;
 use crate::error::ZVaultError;
 use crate::state::{
     BitcoinLightClient, BlockHeader, CommitmentTree, DepositRecord,
-    PoolState, StealthAnnouncementV2, TxMerkleProof, REQUIRED_CONFIRMATIONS,
+    PoolState, StealthAnnouncement, TxMerkleProof, REQUIRED_CONFIRMATIONS,
 };
 use crate::utils::bitcoin::{compute_tx_hash, ParsedTransaction};
 use crate::utils::chadbuffer::read_transaction_from_buffer;
@@ -137,7 +137,7 @@ impl StealthOpReturnData {
 
 /// Verify a Bitcoin stealth deposit via SPV proof and create announcement
 ///
-/// Combines verify_deposit + announce_stealth_v2 atomically.
+/// Combines verify_deposit + announce_stealth atomically.
 ///
 /// # Accounts
 /// 0. `[writable]` Pool state
@@ -294,7 +294,7 @@ pub fn process_verify_stealth_deposit(
 
     // Derive stealth announcement PDA (seeded by ephemeral_view_pub)
     let (expected_stealth_pda, stealth_bump) = pinocchio::pubkey::find_program_address(
-        &[StealthAnnouncementV2::SEED, &stealth_data.ephemeral_view_pub],
+        &[StealthAnnouncement::SEED, &stealth_data.ephemeral_view_pub],
         program_id,
     );
 
@@ -322,7 +322,7 @@ pub fn process_verify_stealth_deposit(
     // Create stealth announcement account
     let stealth_bump_bytes = [stealth_bump];
     let stealth_signer_seeds: [Seed; 3] = [
-        Seed::from(StealthAnnouncementV2::SEED),
+        Seed::from(StealthAnnouncement::SEED),
         Seed::from(stealth_data.ephemeral_view_pub.as_slice()),
         Seed::from(&stealth_bump_bytes),
     ];
@@ -331,8 +331,8 @@ pub fn process_verify_stealth_deposit(
     CreateAccount {
         from: submitter,
         to: stealth_announcement_info,
-        lamports: Rent::get()?.minimum_balance(StealthAnnouncementV2::SIZE),
-        space: StealthAnnouncementV2::SIZE as u64,
+        lamports: Rent::get()?.minimum_balance(StealthAnnouncement::SIZE),
+        space: StealthAnnouncement::SIZE as u64,
         owner: program_id,
     }.invoke_signed(&stealth_signer)?;
 
@@ -370,7 +370,7 @@ pub fn process_verify_stealth_deposit(
     // Initialize stealth announcement with leaf_index and verified amount
     {
         let mut ann_data = stealth_announcement_info.try_borrow_mut_data()?;
-        let announcement = StealthAnnouncementV2::init(&mut ann_data)?;
+        let announcement = StealthAnnouncement::init(&mut ann_data)?;
 
         announcement.bump = stealth_bump;
         announcement.ephemeral_view_pub = stealth_data.ephemeral_view_pub;

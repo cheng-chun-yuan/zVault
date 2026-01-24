@@ -1,26 +1,23 @@
-/**
- * Proof of Innocence Circuit
- *
- * Proves that a note originated from a verified BTC deposit without
- * revealing which specific deposit it came from.
- *
- * Use Cases:
- * - Compliance: Prove funds are from verified deposits (not mixing services)
- * - Exchange Integration: Demonstrate clean source of funds
- * - Regulatory: Voluntary disclosure without full de-anonymization
- *
- * Architecture:
- * ```
- * BTC Deposit → SPV Verify → Add to InnocenceTree
- *                                    ↓
- * User generates PoI proof proving:
- *   "My note came from a verified BTC deposit"
- *   Without revealing WHICH specific deposit
- * ```
- *
- * The InnocenceTree is a separate Merkle tree containing only commitments
- * from verified BTC deposits (not from private transfers/splits).
- */
+// Proof of Innocence Circuit
+//
+// Proves that a note originated from a verified BTC deposit without
+// revealing which specific deposit it came from.
+//
+// Use Cases:
+// - Compliance: Prove funds are from verified deposits (not mixing services)
+// - Exchange Integration: Demonstrate clean source of funds
+// - Regulatory: Voluntary disclosure without full de-anonymization
+//
+// Architecture:
+// BTC Deposit -> SPV Verify -> Add to InnocenceTree
+//                                      |
+//                                      v
+// User generates PoI proof proving:
+//   "My note came from a verified BTC deposit"
+//   Without revealing WHICH specific deposit
+//
+// The InnocenceTree is a separate Merkle tree containing only commitments
+// from verified BTC deposits (not from private transfers/splits).
 
 use dep::zvault_utils;
 use dep::zvault_utils::grumpkin;
@@ -34,42 +31,42 @@ fn main(
     // PRIVATE INPUTS (never revealed)
     // ============================================================
 
-    /// Grumpkin spending private key
+    // Grumpkin spending private key
     spending_priv: Field,
 
-    /// Sender's ephemeral Grumpkin public key (x-coordinate)
+    // Sender's ephemeral Grumpkin public key (x-coordinate)
     ephemeral_spend_pub_x: Field,
 
-    /// Sender's ephemeral Grumpkin public key (y-coordinate)
+    // Sender's ephemeral Grumpkin public key (y-coordinate)
     ephemeral_spend_pub_y: Field,
 
-    /// Note amount in satoshis
+    // Note amount in satoshis
     amount: Field,
 
-    /// Random value for commitment
+    // Random value for commitment
     random: Field,
 
-    /// Merkle tree leaf index in innocence tree
+    // Merkle tree leaf index in innocence tree
     leaf_index: Field,
 
-    /// Merkle path elements in innocence tree
+    // Merkle path elements in innocence tree
     innocence_merkle_path: [Field; 20],
 
-    /// Merkle path indices
+    // Merkle path indices
     innocence_path_indices: [u1; 20],
 
     // ============================================================
     // PUBLIC INPUTS
     // ============================================================
 
-    /// Root of the innocence tree (verified BTC deposits only)
+    // Root of the innocence tree (verified BTC deposits only)
     innocence_tree_root: pub Field,
 
-    /// Nullifier hash (links to the actual spending)
+    // Nullifier hash (links to the actual spending)
     nullifier_hash: pub Field,
 ) {
     // ============================================================
-    // 1. DERIVE COMMITMENT (Same as claim_v2)
+    // 1. DERIVE COMMITMENT (Same as stealth claim)
     // ============================================================
 
     // Grumpkin ECDH
@@ -84,7 +81,7 @@ fn main(
     let note_pub_key = grumpkin::derive_note_pubkey(shared_x, shared_y);
 
     // Compute commitment
-    let commitment = grumpkin::compute_commitment_v2(note_pub_key, amount, random);
+    let commitment = grumpkin::compute_stealth_commitment(note_pub_key, amount, random);
 
     // ============================================================
     // 2. VERIFY COMMITMENT IN INNOCENCE TREE
@@ -111,7 +108,7 @@ fn main(
     // ============================================================
 
     // This links the PoI proof to the actual spending
-    let nullifier = grumpkin::compute_nullifier_v2(spending_priv, leaf_index);
+    let nullifier = grumpkin::compute_stealth_nullifier(spending_priv, leaf_index);
     let computed_nullifier_hash = grumpkin::hash_nullifier(nullifier);
 
     assert(
@@ -186,10 +183,10 @@ fn test_proof_of_innocence_valid() {
     // Compute commitment
     let (sender_shared_x, sender_shared_y) = grumpkin::ecdh(ephemeral_scalar, spending_pub);
     let sender_npk = grumpkin::derive_note_pubkey(sender_shared_x, sender_shared_y);
-    let commitment = grumpkin::compute_commitment_v2(sender_npk, amount, random);
+    let commitment = grumpkin::compute_stealth_commitment(sender_npk, amount, random);
 
     // Compute nullifier
-    let nullifier = grumpkin::compute_nullifier_v2(spending_priv, leaf_index);
+    let nullifier = grumpkin::compute_stealth_nullifier(spending_priv, leaf_index);
     let nullifier_hash = grumpkin::hash_nullifier(nullifier);
 
     // Build innocence tree with this commitment
@@ -236,7 +233,7 @@ fn test_proof_of_innocence_not_in_tree() {
     let leaf_index = 0;
 
     // Compute nullifier
-    let nullifier = grumpkin::compute_nullifier_v2(spending_priv, leaf_index);
+    let nullifier = grumpkin::compute_stealth_nullifier(spending_priv, leaf_index);
     let nullifier_hash = grumpkin::hash_nullifier(nullifier);
 
     // Build innocence tree with DIFFERENT commitment (simulating funds
@@ -286,7 +283,7 @@ fn test_proof_of_innocence_wrong_nullifier() {
     // Compute commitment
     let (sender_shared_x, sender_shared_y) = grumpkin::ecdh(ephemeral_scalar, spending_pub);
     let sender_npk = grumpkin::derive_note_pubkey(sender_shared_x, sender_shared_y);
-    let commitment = grumpkin::compute_commitment_v2(sender_npk, amount, random);
+    let commitment = grumpkin::compute_stealth_commitment(sender_npk, amount, random);
 
     // Build innocence tree
     let zero: Field = 0;

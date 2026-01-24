@@ -11,7 +11,7 @@
 //! | `RedemptionRequest` | Pending BTC withdrawal request |
 //! | `BitcoinLightClient` | Bitcoin header chain state |
 //! | `BlockHeader` | Individual Bitcoin block header |
-//! | `StealthAnnouncementV2` | Stealth address announcement (ECDH) |
+//! | `StealthAnnouncement` | Stealth address announcement (dual-key ECDH) |
 
 // Core state
 pub mod pool;

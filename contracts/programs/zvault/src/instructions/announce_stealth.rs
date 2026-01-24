@@ -1,10 +1,12 @@
 //! Announce Stealth instruction
 //!
-//! Creates a stealth announcement for deposit discovery.
-//! Minimal 40-byte format for maximum privacy:
-//! - No recipient_hint (prevents linking deposits to same recipient)
-//! - No commitment (recipient computes from ECDH-derived secrets)
-//! - Recipient must try ECDH on all announcements
+//! Creates a stealth announcement with dual-key ECDH:
+//! - X25519 ephemeral key for off-chain scanning (viewing key)
+//! - Grumpkin ephemeral key for in-circuit spending proofs
+//!
+//! Key Separation:
+//! - Viewing key can decrypt amount but CANNOT derive nullifier
+//! - Spending key required for nullifier and proof generation
 
 use pinocchio::{
     account_info::AccountInfo,
@@ -17,31 +19,42 @@ use pinocchio::{
 
 use crate::state::{StealthAnnouncement, STEALTH_ANNOUNCEMENT_DISCRIMINATOR};
 
-/// Announce stealth instruction data (minimal format)
+/// Announce stealth instruction data
 /// Layout:
-/// - ephemeral_pubkey: [u8; 32] (required for ECDH)
-/// - encrypted_amount: [u8; 8] (required to compute commitment)
-/// Total: 40 bytes
+/// - ephemeral_view_pub: [u8; 32] (X25519 for scanning)
+/// - ephemeral_spend_pub: [u8; 33] (Grumpkin compressed for spending)
+/// - amount_sats: u64 (8 bytes, public amount from BTC tx)
+/// - commitment: [u8; 32]
+/// Total: 105 bytes
 pub struct AnnounceStealthData {
-    pub ephemeral_pubkey: [u8; 32],
-    pub encrypted_amount: [u8; 8],
+    pub ephemeral_view_pub: [u8; 32],
+    pub ephemeral_spend_pub: [u8; 33],
+    pub amount_sats: u64,
+    pub commitment: [u8; 32],
 }
 
 impl AnnounceStealthData {
     pub fn from_bytes(data: &[u8]) -> Result<Self, ProgramError> {
-        if data.len() < 40 {
+        if data.len() < 105 {
             return Err(ProgramError::InvalidInstructionData);
         }
 
-        let mut ephemeral_pubkey = [0u8; 32];
-        ephemeral_pubkey.copy_from_slice(&data[0..32]);
+        let mut ephemeral_view_pub = [0u8; 32];
+        ephemeral_view_pub.copy_from_slice(&data[0..32]);
 
-        let mut encrypted_amount = [0u8; 8];
-        encrypted_amount.copy_from_slice(&data[32..40]);
+        let mut ephemeral_spend_pub = [0u8; 33];
+        ephemeral_spend_pub.copy_from_slice(&data[32..65]);
+
+        let amount_sats = u64::from_le_bytes(data[65..73].try_into().unwrap());
+
+        let mut commitment = [0u8; 32];
+        commitment.copy_from_slice(&data[73..105]);
 
         Ok(Self {
-            ephemeral_pubkey,
-            encrypted_amount,
+            ephemeral_view_pub,
+            ephemeral_spend_pub,
+            amount_sats,
+            commitment,
         })
     }
 }
@@ -70,11 +83,14 @@ fn create_pda_account<'a>(
     create_account.invoke_signed(&[signer])
 }
 
-/// Announce a stealth deposit
+/// Announce a stealth deposit with dual-key ECDH
 ///
-/// Creates a PDA seeded by ephemeral_pubkey for recipient discovery.
-/// Recipient scans all announcements, tries ECDH with each ephemeral_pubkey,
-/// and checks if they can derive valid secrets.
+/// Creates a PDA seeded by ephemeral_view_pub for recipient discovery.
+///
+/// Recipient scanning flow:
+/// 1. X25519 ECDH with viewing key to see amount
+/// 2. Grumpkin ECDH with spending key in ZK circuit to prove ownership
+/// 3. Nullifier derived from spending key + leaf index (only recipient knows)
 pub fn process_announce_stealth(
     program_id: &Pubkey,
     accounts: &[AccountInfo],
@@ -95,8 +111,8 @@ pub fn process_announce_stealth(
         return Err(ProgramError::MissingRequiredSignature);
     }
 
-    // Verify PDA (seeded by ephemeral_pubkey for uniqueness)
-    let seeds: &[&[u8]] = &[StealthAnnouncement::SEED, &ix_data.ephemeral_pubkey];
+    // Verify PDA (seeded by ephemeral_view_pub for uniqueness)
+    let seeds: &[&[u8]] = &[StealthAnnouncement::SEED, &ix_data.ephemeral_view_pub];
     let (expected_pda, bump) = find_program_address(seeds, program_id);
     if stealth_announcement.key() != &expected_pda {
         return Err(ProgramError::InvalidSeeds);
@@ -106,7 +122,6 @@ pub fn process_announce_stealth(
     let account_data_len = stealth_announcement.data_len();
 
     if account_data_len > 0 {
-        // Account exists, check if initialized
         let ann_data = stealth_announcement.try_borrow_data()?;
         if ann_data[0] == STEALTH_ANNOUNCEMENT_DISCRIMINATOR {
             return Err(ProgramError::AccountAlreadyInitialized);
@@ -119,7 +134,7 @@ pub fn process_announce_stealth(
         let bump_bytes = [bump];
         let signer_seeds: &[&[u8]] = &[
             StealthAnnouncement::SEED,
-            &ix_data.ephemeral_pubkey,
+            &ix_data.ephemeral_view_pub,
             &bump_bytes,
         ];
 
@@ -142,8 +157,10 @@ pub fn process_announce_stealth(
         let announcement = StealthAnnouncement::init(&mut ann_data)?;
 
         announcement.bump = bump;
-        announcement.ephemeral_pubkey = ix_data.ephemeral_pubkey;
-        announcement.encrypted_amount = ix_data.encrypted_amount;
+        announcement.ephemeral_view_pub = ix_data.ephemeral_view_pub;
+        announcement.ephemeral_spend_pub = ix_data.ephemeral_spend_pub;
+        announcement.set_amount_sats(ix_data.amount_sats);
+        announcement.commitment = ix_data.commitment;
         announcement.set_created_at(clock.unix_timestamp);
     }
 

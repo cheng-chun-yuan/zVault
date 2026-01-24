@@ -23,7 +23,7 @@ use pinocchio::{
 };
 
 use crate::error::ZVaultError;
-use crate::state::{CommitmentTree, PoolState, StealthAnnouncementV2, STEALTH_ANNOUNCEMENT_V2_DISCRIMINATOR};
+use crate::state::{CommitmentTree, PoolState, StealthAnnouncement, STEALTH_ANNOUNCEMENT_DISCRIMINATOR};
 use crate::utils::validate_program_owner;
 
 /// Add demo stealth instruction data
@@ -143,7 +143,7 @@ pub fn process_add_demo_stealth(
     }
 
     // Verify stealth announcement PDA
-    let seeds: &[&[u8]] = &[StealthAnnouncementV2::SEED, &ix_data.ephemeral_view_pub];
+    let seeds: &[&[u8]] = &[StealthAnnouncement::SEED, &ix_data.ephemeral_view_pub];
     let (expected_pda, bump) = find_program_address(seeds, program_id);
     if stealth_announcement.key() != &expected_pda {
         return Err(ProgramError::InvalidSeeds);
@@ -167,16 +167,16 @@ pub fn process_add_demo_stealth(
     let account_data_len = stealth_announcement.data_len();
     if account_data_len > 0 {
         let ann_data = stealth_announcement.try_borrow_data()?;
-        if ann_data[0] == STEALTH_ANNOUNCEMENT_V2_DISCRIMINATOR {
+        if ann_data[0] == STEALTH_ANNOUNCEMENT_DISCRIMINATOR {
             return Err(ProgramError::AccountAlreadyInitialized);
         }
     } else {
         let rent = Rent::get()?;
-        let lamports = rent.minimum_balance(StealthAnnouncementV2::SIZE);
+        let lamports = rent.minimum_balance(StealthAnnouncement::SIZE);
 
         let bump_bytes = [bump];
         let signer_seeds: &[&[u8]] = &[
-            StealthAnnouncementV2::SEED,
+            StealthAnnouncement::SEED,
             &ix_data.ephemeral_view_pub,
             &bump_bytes,
         ];
@@ -187,7 +187,7 @@ pub fn process_add_demo_stealth(
             system_program,
             program_id,
             lamports,
-            StealthAnnouncementV2::SIZE as u64,
+            StealthAnnouncement::SIZE as u64,
             signer_seeds,
         )?;
     }
@@ -195,7 +195,7 @@ pub fn process_add_demo_stealth(
     // Initialize stealth announcement
     {
         let mut ann_data = stealth_announcement.try_borrow_mut_data()?;
-        let announcement = StealthAnnouncementV2::init(&mut ann_data)?;
+        let announcement = StealthAnnouncement::init(&mut ann_data)?;
 
         announcement.bump = bump;
         announcement.ephemeral_view_pub = ix_data.ephemeral_view_pub;

@@ -1,0 +1,20 @@
+{
+  "programs": {
+    "devnet": {
+      "zVault": "CBzbSQPcUXMYdmSvnA24HPZrDQPuEpq4qq2mcmErrWPR",
+      "btc_light_client": "8GCjjPpzRP1DhWa9PLcRhSV7aLFkE8x7vf5royAQzUfG"
+    },
+    "localnet": {
+      "zVault": "GvZEA9XztLjcxPy4LJwruttoiFWwXWd98jSDGqnWgL8P",
+      "btc_light_client": "8GCjjPpzRP1DhWa9PLcRhSV7aLFkE8x7vf5royAQzUfG"
+    },
+    "mainnet": {
+      "zVault": "",
+      "btc_light_client": ""
+    }
+  },
+  "defaultCluster": "devnet",
+  "wallet": {
+    "path": "~/.config/solana/johnny.json"
+  }
+}

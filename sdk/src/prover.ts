@@ -6,8 +6,8 @@
  */
 
 import {
-  computeNullifierHashV1,
-  computeCommitmentV1,
+  computeNullifierHashLegacy,
+  computeCommitmentLegacy,
 } from "./poseidon2";
 
 export interface MerkleProofInput {
@@ -312,7 +312,7 @@ export async function generateClaimProof(inputs: ClaimInputs): Promise<ProofData
   const pathIndices = inputs.merkleProof.indices;
 
   // Compute nullifier_hash = poseidon2([nullifier])
-  const nullifierHash = await computeNullifierHashV1(inputs.nullifier);
+  const nullifierHash = computeNullifierHashLegacy(inputs.nullifier);
 
   const circuitInputs: InputMap = {
     nullifier: inputs.nullifier.toString(),
@@ -366,13 +366,13 @@ export async function generateSplitProof(inputs: SplitInputs): Promise<ProofData
   const pathIndices = inputs.merkleProof.indices;
 
   // Compute required hashes
-  const inputNullifierHash = await computeNullifierHashV1(inputs.inputNullifier);
-  const outputCommitment1 = await computeCommitmentV1(
+  const inputNullifierHash = computeNullifierHashLegacy(inputs.inputNullifier);
+  const outputCommitment1 = computeCommitmentLegacy(
     inputs.output1Nullifier,
     inputs.output1Secret,
     inputs.output1Amount
   );
-  const outputCommitment2 = await computeCommitmentV1(
+  const outputCommitment2 = computeCommitmentLegacy(
     inputs.output2Nullifier,
     inputs.output2Secret,
     inputs.output2Amount

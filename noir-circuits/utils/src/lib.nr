@@ -1,12 +1,12 @@
 use dep::poseidon::poseidon2::Poseidon2;
 
-// Grumpkin ECDH module for V2 circuits
+// Grumpkin ECDH module for stealth circuits
 pub mod grumpkin;
 
 // Tree depth constants
 // STANDARDIZED: All circuits now use 20-level trees (~1M leaves)
-global TREE_DEPTH_V1: u32 = 10; // Legacy: ~1k leaves
-global TREE_DEPTH_V2: u32 = 20; // Standard: ~1M leaves
+global TREE_DEPTH_LEGACY: u32 = 10; // Legacy: ~1k leaves
+global TREE_DEPTH: u32 = 20; // Standard: ~1M leaves
 
 /**
  * Verify Merkle proof (10-level tree) - LEGACY

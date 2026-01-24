@@ -219,24 +219,24 @@ export declare function prepareWithdrawal(inputNote: NoteData, withdrawAmount: b
     changeAmount: bigint;
 };
 /**
- * V2 Note structure for dual-key ECDH system
+ * Stealth note structure for dual-key ECDH system
  *
- * Key differences from V1:
+ * Key differences from basic Note:
  * - Uses random value instead of nullifier/secret for commitment
  * - Stores ephemeral spending pubkey for proof generation
  * - Nullifier derived from (spendingPrivKey, leafIndex) in circuit
  */
-export interface NoteV2 {
+export interface StealthNote {
     /** Amount in satoshis */
     amount: bigint;
-    /** Random value for commitment (replaces nullifier/secret) */
+    /** Random value for commitment */
     random: bigint;
     /** Ephemeral Grumpkin spending public key (from sender) */
     ephemeralSpendPubX: bigint;
     ephemeralSpendPubY: bigint;
     /** Leaf index in Merkle tree (set when commitment added on-chain) */
     leafIndex: number;
-    /** Note public key = Poseidon2(ECDHShared.x, ECDHShared.y, DOMAIN_NPK) */
+    /** Note public key = Poseidon2(ECDHShared.x, ECDHShared.y) */
     notePubKey: bigint;
     /** Commitment = Poseidon2(notePubKey, amount, random) */
     commitment: bigint;
@@ -245,9 +245,9 @@ export interface NoteV2 {
     commitmentBytes: Uint8Array;
 }
 /**
- * Serializable V2 note data
+ * Serializable stealth note data
  */
-export interface SerializedNoteV2 {
+export interface SerializedStealthNote {
     amount: string;
     random: string;
     ephemeralSpendPubX: string;
@@ -257,31 +257,45 @@ export interface SerializedNoteV2 {
     commitment?: string;
 }
 /**
- * Create a V2 note from scanned announcement data
+ * Create a stealth note from scanned announcement data
  *
  * @param amount - Decrypted amount
  * @param random - Decrypted random value
  * @param ephemeralSpendPub - Sender's ephemeral Grumpkin pubkey
  * @param leafIndex - Merkle tree leaf index
- * @returns NoteV2 structure
+ * @returns StealthNote structure
  */
-export declare function createNoteV2(amount: bigint, random: bigint, ephemeralSpendPub: {
+export declare function createStealthNote(amount: bigint, random: bigint, ephemeralSpendPub: {
     x: bigint;
     y: bigint;
-}, leafIndex: number): NoteV2;
+}, leafIndex: number): StealthNote;
 /**
- * Update V2 note with computed values from circuit
+ * Update stealth note with computed values from circuit
  */
-export declare function updateNoteV2WithHashes(note: NoteV2, notePubKey: bigint, commitment: bigint): NoteV2;
+export declare function updateStealthNoteWithHashes(note: StealthNote, notePubKey: bigint, commitment: bigint): StealthNote;
 /**
- * Serialize V2 note for storage
+ * Serialize stealth note for storage
  */
-export declare function serializeNoteV2(note: NoteV2): SerializedNoteV2;
+export declare function serializeStealthNote(note: StealthNote): SerializedStealthNote;
 /**
- * Deserialize V2 note from storage
+ * Deserialize stealth note from storage
  */
-export declare function deserializeNoteV2(data: SerializedNoteV2): NoteV2;
+export declare function deserializeStealthNote(data: SerializedStealthNote): StealthNote;
 /**
- * Check if V2 note has computed hashes
+ * Check if stealth note has computed hashes
  */
-export declare function noteV2HasComputedHashes(note: NoteV2): boolean;
+export declare function stealthNoteHasComputedHashes(note: StealthNote): boolean;
+/** @deprecated Use StealthNote instead */
+export type NoteV2 = StealthNote;
+/** @deprecated Use SerializedStealthNote instead */
+export type SerializedNoteV2 = SerializedStealthNote;
+/** @deprecated Use createStealthNote instead */
+export declare const createNoteV2: typeof createStealthNote;
+/** @deprecated Use updateStealthNoteWithHashes instead */
+export declare const updateNoteV2WithHashes: typeof updateStealthNoteWithHashes;
+/** @deprecated Use serializeStealthNote instead */
+export declare const serializeNoteV2: typeof serializeStealthNote;
+/** @deprecated Use deserializeStealthNote instead */
+export declare const deserializeNoteV2: typeof deserializeStealthNote;
+/** @deprecated Use stealthNoteHasComputedHashes instead */
+export declare const noteV2HasComputedHashes: typeof stealthNoteHasComputedHashes;

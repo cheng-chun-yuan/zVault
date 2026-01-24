@@ -70,21 +70,21 @@ pub fn derive_note_pubkey(shared_x: Field, shared_y: Field) -> Field {
 }
 
 /**
- * Compute commitment from note public key and amount (SIMPLIFIED)
+ * Compute commitment from note public key and amount
  *
- * commitment = Poseidon2(notePubKey, amount)
+ * commitment = Poseidon2(notePubKey, amount) or Poseidon2(notePubKey, amount, random)
  *
- * SECURITY NOTE: Random field removed - ephemeral key uniqueness is sufficient.
+ * SECURITY NOTE: Random field is optional - ephemeral key uniqueness is sufficient.
  * Each deposit uses a fresh ephemeral keypair, so notePubKey is already unique.
  *
- * For backward compatibility, if random != 0, use the old formula.
+ * For backward compatibility, if random != 0, use the 3-input formula.
  */
-pub fn compute_commitment_v2(note_pubkey: Field, amount: Field, random: Field) -> Field {
+pub fn compute_stealth_commitment(note_pubkey: Field, amount: Field, random: Field) -> Field {
     if random == 0 {
-        // V2 simplified: no random
+        // Simplified: no random
         Poseidon2::hash([note_pubkey, amount], 2)
     } else {
-        // V1 legacy: with random
+        // With random for additional entropy
         Poseidon2::hash([note_pubkey, amount, random], 3)
     }
 }
@@ -99,19 +99,19 @@ pub fn compute_commitment_v2(note_pubkey: Field, amount: Field, random: Field) -
  *
  * nullifier = Poseidon2(spending_priv, leaf_index, DOMAIN_NULL)
  */
-pub fn compute_nullifier_v2(spending_priv: Field, leaf_index: Field) -> Field {
+pub fn compute_stealth_nullifier(spending_priv: Field, leaf_index: Field) -> Field {
     Poseidon2::hash([spending_priv, leaf_index, DOMAIN_NULL], 3)
 }
 
 /**
  * Hash nullifier for public input
  *
- * NOTE: This function is DEPRECATED in V2 simplified format.
+ * NOTE: This function is DEPRECATED in the simplified format.
  * The nullifier itself is now used as the public input directly.
  * Double-hashing provided no security benefit (nullifier is already
  * a secure hash of spending_priv + leaf_index + domain separator).
  *
- * This function is kept for backward compatibility with V1.
+ * This function is kept for backward compatibility.
  *
  * nullifier_hash = Poseidon2(nullifier)
  */
@@ -152,22 +152,22 @@ pub fn is_valid_point(point: EmbeddedCurvePoint) -> bool {
 }
 
 // ============================================================================
-// V2 Claim Circuit Helpers
+// Stealth Claim Circuit Helpers
 // ============================================================================
 
 /**
- * Full V2 claim verification flow (SIMPLIFIED)
+ * Full stealth claim verification flow
  *
  * 1. Perform Grumpkin ECDH
  * 2. Derive note public key
- * 3. Compute commitment (no random in V2)
+ * 3. Compute commitment
  * 4. Verify commitment in Merkle tree
  * 5. Compute nullifier (single hash, no double-hashing)
  *
  * @param spending_priv - Recipient's spending private key
  * @param ephemeral_spend_pub - Sender's ephemeral Grumpkin pubkey
  * @param amount - Note amount
- * @param random - Random value (pass 0 for V2 simplified format)
+ * @param random - Random value (pass 0 for simplified format)
  * @param leaf_index - Merkle tree leaf index
  * @returns (commitment, nullifier, nullifier_hash_deprecated)
  */
@@ -191,13 +191,13 @@ pub fn verify_ownership(
     // 4. Derive note public key
     let note_pubkey = derive_note_pubkey(shared_x, shared_y);
 
-    // 5. Compute commitment (uses random=0 for V2 simplified)
-    let commitment = compute_commitment_v2(note_pubkey, amount, random);
+    // 5. Compute commitment (uses random=0 for simplified format)
+    let commitment = compute_stealth_commitment(note_pubkey, amount, random);
 
     // 6. Compute nullifier (only recipient can do this!)
-    let nullifier = compute_nullifier_v2(spending_priv, leaf_index);
+    let nullifier = compute_stealth_nullifier(spending_priv, leaf_index);
 
-    // Note: nullifier_hash is deprecated in V2, but kept for backward compatibility
+    // Note: nullifier_hash is deprecated, but kept for backward compatibility
     let nullifier_hash = hash_nullifier(nullifier);
 
     (commitment, nullifier, nullifier_hash)
@@ -235,15 +235,15 @@ fn test_nullifier_derivation() {
     let spending_priv = 12345;
     let leaf_index = 0;
 
-    let nullifier = compute_nullifier_v2(spending_priv, leaf_index);
+    let nullifier = compute_stealth_nullifier(spending_priv, leaf_index);
     let nullifier_hash = hash_nullifier(nullifier);
 
     // Different leaf indices should produce different nullifiers
-    let nullifier2 = compute_nullifier_v2(spending_priv, 1);
+    let nullifier2 = compute_stealth_nullifier(spending_priv, 1);
     assert(nullifier != nullifier2);
 
     // Same inputs should produce same nullifier
-    let nullifier3 = compute_nullifier_v2(spending_priv, leaf_index);
+    let nullifier3 = compute_stealth_nullifier(spending_priv, leaf_index);
     assert(nullifier == nullifier3);
 }
 
@@ -265,7 +265,7 @@ fn test_verify_ownership() {
     // Simulate sender computing shared secret
     let (sender_shared_x, sender_shared_y) = ecdh(ephemeral_scalar, spending_pub);
     let sender_npk = derive_note_pubkey(sender_shared_x, sender_shared_y);
-    let sender_commitment = compute_commitment_v2(sender_npk, amount, random);
+    let sender_commitment = compute_stealth_commitment(sender_npk, amount, random);
 
     // Recipient verifies ownership
     let (commitment, _nullifier, _nullifier_hash) = verify_ownership(

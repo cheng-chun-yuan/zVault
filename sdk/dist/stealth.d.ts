@@ -27,6 +27,10 @@
  * To mitigate: Use fresh ephemeral keys for each deposit and consider
  * additional privacy layers like mixers or delayed reveals.
  */
+/** StealthAnnouncement account size (131 bytes) */
+export declare const STEALTH_ANNOUNCEMENT_SIZE = 131;
+/** Discriminator for StealthAnnouncement */
+export declare const STEALTH_ANNOUNCEMENT_DISCRIMINATOR = 8;
 import { type GrumpkinPoint } from "./grumpkin";
 import type { StealthMetaAddress, ZVaultKeys, WalletSignerAdapter } from "./keys";
 /**
@@ -101,9 +105,6 @@ export interface ClaimInputs {
  *
  * SAVINGS: 24 bytes (from 155) by removing encrypted_amount and encrypted_random
  */
-export declare const STEALTH_ANNOUNCEMENT_SIZE = 131;
-/** Discriminator for StealthAnnouncement */
-export declare const STEALTH_ANNOUNCEMENT_DISCRIMINATOR = 8;
 /**
  * Parsed stealth announcement from on-chain data (SIMPLIFIED)
  */

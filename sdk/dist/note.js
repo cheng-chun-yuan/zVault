@@ -332,15 +332,15 @@ export function prepareWithdrawal(inputNote, withdrawAmount) {
     return { changeNote, changeAmount };
 }
 /**
- * Create a V2 note from scanned announcement data
+ * Create a stealth note from scanned announcement data
  *
  * @param amount - Decrypted amount
  * @param random - Decrypted random value
  * @param ephemeralSpendPub - Sender's ephemeral Grumpkin pubkey
  * @param leafIndex - Merkle tree leaf index
- * @returns NoteV2 structure
+ * @returns StealthNote structure
  */
-export function createNoteV2(amount, random, ephemeralSpendPub, leafIndex) {
+export function createStealthNote(amount, random, ephemeralSpendPub, leafIndex) {
     return {
         amount,
         random,
@@ -354,9 +354,9 @@ export function createNoteV2(amount, random, ephemeralSpendPub, leafIndex) {
     };
 }
 /**
- * Update V2 note with computed values from circuit
+ * Update stealth note with computed values from circuit
  */
-export function updateNoteV2WithHashes(note, notePubKey, commitment) {
+export function updateStealthNoteWithHashes(note, notePubKey, commitment) {
     return {
         ...note,
         notePubKey,
@@ -365,9 +365,9 @@ export function updateNoteV2WithHashes(note, notePubKey, commitment) {
     };
 }
 /**
- * Serialize V2 note for storage
+ * Serialize stealth note for storage
  */
-export function serializeNoteV2(note) {
+export function serializeStealthNote(note) {
     const serialized = {
         amount: note.amount.toString(),
         random: note.random.toString(),
@@ -384,21 +384,31 @@ export function serializeNoteV2(note) {
     return serialized;
 }
 /**
- * Deserialize V2 note from storage
+ * Deserialize stealth note from storage
  */
-export function deserializeNoteV2(data) {
-    const note = createNoteV2(BigInt(data.amount), BigInt(data.random), {
+export function deserializeStealthNote(data) {
+    const note = createStealthNote(BigInt(data.amount), BigInt(data.random), {
         x: BigInt(data.ephemeralSpendPubX),
         y: BigInt(data.ephemeralSpendPubY),
     }, data.leafIndex);
     if (data.notePubKey && data.commitment) {
-        return updateNoteV2WithHashes(note, BigInt(data.notePubKey), BigInt(data.commitment));
+        return updateStealthNoteWithHashes(note, BigInt(data.notePubKey), BigInt(data.commitment));
     }
     return note;
 }
 /**
- * Check if V2 note has computed hashes
+ * Check if stealth note has computed hashes
  */
-export function noteV2HasComputedHashes(note) {
+export function stealthNoteHasComputedHashes(note) {
     return note.notePubKey !== 0n && note.commitment !== 0n;
 }
+/** @deprecated Use createStealthNote instead */
+export const createNoteV2 = createStealthNote;
+/** @deprecated Use updateStealthNoteWithHashes instead */
+export const updateNoteV2WithHashes = updateStealthNoteWithHashes;
+/** @deprecated Use serializeStealthNote instead */
+export const serializeNoteV2 = serializeStealthNote;
+/** @deprecated Use deserializeStealthNote instead */
+export const deserializeNoteV2 = deserializeStealthNote;
+/** @deprecated Use stealthNoteHasComputedHashes instead */
+export const noteV2HasComputedHashes = stealthNoteHasComputedHashes;

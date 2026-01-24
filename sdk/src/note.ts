@@ -462,22 +462,22 @@ export function prepareWithdrawal(
 }
 
 // ============================================================================
-// V2 Note Types (Dual-Key ECDH Support)
+// Stealth Note Types (Dual-Key ECDH Support)
 // ============================================================================
 
 /**
- * V2 Note structure for dual-key ECDH system
+ * Stealth note structure for dual-key ECDH system
  *
- * Key differences from V1:
+ * Key differences from basic Note:
  * - Uses random value instead of nullifier/secret for commitment
  * - Stores ephemeral spending pubkey for proof generation
  * - Nullifier derived from (spendingPrivKey, leafIndex) in circuit
  */
-export interface NoteV2 {
+export interface StealthNote {
   /** Amount in satoshis */
   amount: bigint;
 
-  /** Random value for commitment (replaces nullifier/secret) */
+  /** Random value for commitment */
   random: bigint;
 
   /** Ephemeral Grumpkin spending public key (from sender) */
@@ -487,7 +487,7 @@ export interface NoteV2 {
   /** Leaf index in Merkle tree (set when commitment added on-chain) */
   leafIndex: number;
 
-  /** Note public key = Poseidon2(ECDHShared.x, ECDHShared.y, DOMAIN_NPK) */
+  /** Note public key = Poseidon2(ECDHShared.x, ECDHShared.y) */
   notePubKey: bigint;
 
   /** Commitment = Poseidon2(notePubKey, amount, random) */
@@ -499,9 +499,9 @@ export interface NoteV2 {
 }
 
 /**
- * Serializable V2 note data
+ * Serializable stealth note data
  */
-export interface SerializedNoteV2 {
+export interface SerializedStealthNote {
   amount: string;
   random: string;
   ephemeralSpendPubX: string;
@@ -512,20 +512,20 @@ export interface SerializedNoteV2 {
 }
 
 /**
- * Create a V2 note from scanned announcement data
+ * Create a stealth note from scanned announcement data
  *
  * @param amount - Decrypted amount
  * @param random - Decrypted random value
  * @param ephemeralSpendPub - Sender's ephemeral Grumpkin pubkey
  * @param leafIndex - Merkle tree leaf index
- * @returns NoteV2 structure
+ * @returns StealthNote structure
  */
-export function createNoteV2(
+export function createStealthNote(
   amount: bigint,
   random: bigint,
   ephemeralSpendPub: { x: bigint; y: bigint },
   leafIndex: number
-): NoteV2 {
+): StealthNote {
   return {
     amount,
     random,
@@ -540,13 +540,13 @@ export function createNoteV2(
 }
 
 /**
- * Update V2 note with computed values from circuit
+ * Update stealth note with computed values from circuit
  */
-export function updateNoteV2WithHashes(
-  note: NoteV2,
+export function updateStealthNoteWithHashes(
+  note: StealthNote,
   notePubKey: bigint,
   commitment: bigint
-): NoteV2 {
+): StealthNote {
   return {
     ...note,
     notePubKey,
@@ -556,10 +556,10 @@ export function updateNoteV2WithHashes(
 }
 
 /**
- * Serialize V2 note for storage
+ * Serialize stealth note for storage
  */
-export function serializeNoteV2(note: NoteV2): SerializedNoteV2 {
-  const serialized: SerializedNoteV2 = {
+export function serializeStealthNote(note: StealthNote): SerializedStealthNote {
+  const serialized: SerializedStealthNote = {
     amount: note.amount.toString(),
     random: note.random.toString(),
     ephemeralSpendPubX: note.ephemeralSpendPubX.toString(),
@@ -578,10 +578,10 @@ export function serializeNoteV2(note: NoteV2): SerializedNoteV2 {
 }
 
 /**
- * Deserialize V2 note from storage
+ * Deserialize stealth note from storage
  */
-export function deserializeNoteV2(data: SerializedNoteV2): NoteV2 {
-  const note = createNoteV2(
+export function deserializeStealthNote(data: SerializedStealthNote): StealthNote {
+  const note = createStealthNote(
     BigInt(data.amount),
     BigInt(data.random),
     {
@@ -592,7 +592,7 @@ export function deserializeNoteV2(data: SerializedNoteV2): NoteV2 {
   );
 
   if (data.notePubKey && data.commitment) {
-    return updateNoteV2WithHashes(
+    return updateStealthNoteWithHashes(
       note,
       BigInt(data.notePubKey),
       BigInt(data.commitment)
@@ -603,8 +603,27 @@ export function deserializeNoteV2(data: SerializedNoteV2): NoteV2 {
 }
 
 /**
- * Check if V2 note has computed hashes
+ * Check if stealth note has computed hashes
  */
-export function noteV2HasComputedHashes(note: NoteV2): boolean {
+export function stealthNoteHasComputedHashes(note: StealthNote): boolean {
   return note.notePubKey !== 0n && note.commitment !== 0n;
 }
+
+// ============================================================================
+// Backwards Compatibility Aliases (deprecated)
+// ============================================================================
+
+/** @deprecated Use StealthNote instead */
+export type NoteV2 = StealthNote;
+/** @deprecated Use SerializedStealthNote instead */
+export type SerializedNoteV2 = SerializedStealthNote;
+/** @deprecated Use createStealthNote instead */
+export const createNoteV2 = createStealthNote;
+/** @deprecated Use updateStealthNoteWithHashes instead */
+export const updateNoteV2WithHashes = updateStealthNoteWithHashes;
+/** @deprecated Use serializeStealthNote instead */
+export const serializeNoteV2 = serializeStealthNote;
+/** @deprecated Use deserializeStealthNote instead */
+export const deserializeNoteV2 = deserializeStealthNote;
+/** @deprecated Use stealthNoteHasComputedHashes instead */
+export const noteV2HasComputedHashes = stealthNoteHasComputedHashes;

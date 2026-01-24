@@ -4,7 +4,7 @@
  * Universal prover that works in both Browser and Node.js environments.
  * Uses UltraHonk proofs via @aztec/bb.js with lazy loading.
  */
-import { computeNullifierHashV1, computeCommitmentV1, } from "./poseidon2";
+import { computeNullifierHashLegacy, computeCommitmentLegacy, } from "./poseidon2";
 // Environment detection
 const isBrowser = typeof window !== "undefined";
 const isNode = typeof process !== "undefined" && process.versions?.node;
@@ -229,7 +229,7 @@ export async function generateClaimProof(inputs) {
     const pathElements = inputs.merkleProof.siblings.map((s) => s.toString());
     const pathIndices = inputs.merkleProof.indices;
     // Compute nullifier_hash = poseidon2([nullifier])
-    const nullifierHash = await computeNullifierHashV1(inputs.nullifier);
+    const nullifierHash = computeNullifierHashLegacy(inputs.nullifier);
     const circuitInputs = {
         nullifier: inputs.nullifier.toString(),
         secret: inputs.secret.toString(),
@@ -260,9 +260,9 @@ export async function generateSplitProof(inputs) {
     const pathElements = inputs.merkleProof.siblings.map((s) => s.toString());
     const pathIndices = inputs.merkleProof.indices;
     // Compute required hashes
-    const inputNullifierHash = await computeNullifierHashV1(inputs.inputNullifier);
-    const outputCommitment1 = await computeCommitmentV1(inputs.output1Nullifier, inputs.output1Secret, inputs.output1Amount);
-    const outputCommitment2 = await computeCommitmentV1(inputs.output2Nullifier, inputs.output2Secret, inputs.output2Amount);
+    const inputNullifierHash = computeNullifierHashLegacy(inputs.inputNullifier);
+    const outputCommitment1 = computeCommitmentLegacy(inputs.output1Nullifier, inputs.output1Secret, inputs.output1Amount);
+    const outputCommitment2 = computeCommitmentLegacy(inputs.output2Nullifier, inputs.output2Secret, inputs.output2Amount);
     const circuitInputs = {
         input_nullifier: inputs.inputNullifier.toString(),
         input_secret: inputs.inputSecret.toString(),

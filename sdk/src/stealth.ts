@@ -28,6 +28,16 @@
  * additional privacy layers like mixers or delayed reveals.
  */
 
+// ========== Constants (defined before imports to ensure availability) ==========
+
+/** StealthAnnouncement account size (131 bytes) */
+export const STEALTH_ANNOUNCEMENT_SIZE = 131;
+
+/** Discriminator for StealthAnnouncement */
+export const STEALTH_ANNOUNCEMENT_DISCRIMINATOR = 0x08;
+
+// ========== Imports ==========
+
 import { box } from "tweetnacl";
 import { bigintToBytes, bytesToBigint, BN254_FIELD_PRIME } from "./crypto";
 import {
@@ -41,8 +51,8 @@ import type { StealthMetaAddress, ZVaultKeys, WalletSignerAdapter } from "./keys
 import { deriveKeysFromWallet } from "./keys";
 import {
   deriveNotePubKey,
-  computeCommitmentV2 as poseidon2ComputeCommitment,
-  computeNullifierV2 as poseidon2ComputeNullifier,
+  computeCommitment as poseidon2ComputeCommitment,
+  computeNullifier as poseidon2ComputeNullifier,
 } from "./poseidon2";
 
 // ========== Type Guard ==========
@@ -144,10 +154,6 @@ export interface ClaimInputs {
  *
  * SAVINGS: 24 bytes (from 155) by removing encrypted_amount and encrypted_random
  */
-export const STEALTH_ANNOUNCEMENT_SIZE = 131;
-
-/** Discriminator for StealthAnnouncement */
-export const STEALTH_ANNOUNCEMENT_DISCRIMINATOR = 0x08;
 
 /**
  * Parsed stealth announcement from on-chain data (SIMPLIFIED)
@@ -196,11 +202,11 @@ export async function createStealthDeposit(
 
   // Compute note public key using Poseidon2
   // notePubKey = Poseidon2(spendShared.x, spendShared.y, DOMAIN_NPK)
-  const notePubKey = await deriveNotePubKey(spendShared.x, spendShared.y);
+  const notePubKey = deriveNotePubKey(spendShared.x, spendShared.y);
 
   // Compute commitment using Poseidon2 (SIMPLIFIED: no random)
   // commitment = Poseidon2(notePubKey, amount)
-  const commitmentBigint = await poseidon2ComputeCommitment(notePubKey, amountSats, 0n);
+  const commitmentBigint = poseidon2ComputeCommitment(notePubKey, amountSats, 0n);
   const commitment = bigintToBytes(commitmentBigint);
 
   return {
@@ -315,8 +321,8 @@ export async function prepareClaimInputs(
   const spendShared = grumpkinEcdh(keys.spendingPrivKey, note.ephemeralSpendPub);
 
   // Verify commitment matches (sanity check)
-  const notePubKey = await deriveNotePubKey(spendShared.x, spendShared.y);
-  const expectedCommitment = await poseidon2ComputeCommitment(notePubKey, note.amount, 0n);
+  const notePubKey = deriveNotePubKey(spendShared.x, spendShared.y);
+  const expectedCommitment = poseidon2ComputeCommitment(notePubKey, note.amount, 0n);
   const actualCommitment = bytesToBigint(note.commitment);
 
   if (expectedCommitment !== actualCommitment) {
@@ -328,7 +334,7 @@ export async function prepareClaimInputs(
   // CRITICAL: Nullifier from spending private key + leaf index
   // nullifier = Poseidon2(spendingPrivKey, leafIndex, DOMAIN_NULL)
   // Only recipient can compute this!
-  const nullifier = await poseidon2ComputeNullifier(keys.spendingPrivKey, BigInt(note.leafIndex));
+  const nullifier = poseidon2ComputeNullifier(keys.spendingPrivKey, BigInt(note.leafIndex));
 
   return {
     // Private inputs

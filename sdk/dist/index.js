@@ -46,7 +46,9 @@ export { GRUMPKIN_FIELD_PRIME, GRUMPKIN_ORDER, GRUMPKIN_GENERATOR, GRUMPKIN_INFI
 // RAILGUN-style key derivation (Solana wallet -> spending/viewing keys)
 export { deriveKeysFromWallet, deriveKeysFromSignature, deriveKeysFromSeed, SPENDING_KEY_DERIVATION_MESSAGE, createStealthMetaAddress, serializeStealthMetaAddress, deserializeStealthMetaAddress, parseStealthMetaAddress, encodeStealthMetaAddress, decodeStealthMetaAddress, createDelegatedViewKey, serializeDelegatedViewKey, deserializeDelegatedViewKey, isDelegatedKeyValid, hasPermission, ViewPermissions, constantTimeCompare, clearKey, clearZVaultKeys, clearDelegatedViewKey, extractViewOnlyBundle, } from "./keys";
 // Poseidon2 hash utilities (matches Noir circuits)
-export { poseidon2Hash, deriveNotePubKey, computeCommitmentV2, computeNullifierV2, hashNullifier, computeCommitmentV1, computeNullifierHashV1, BN254_SCALAR_FIELD, } from "./poseidon2";
+export { poseidon2Hash, deriveNotePubKey, computeCommitment, computeNullifier, hashNullifier, 
+// Legacy exports for backwards compatibility
+computeCommitmentLegacy, computeNullifierHashLegacy, BN254_SCALAR_FIELD, } from "./poseidon2";
 // ==========================================================================
 // Note (shielded commitment) utilities
 // ==========================================================================
@@ -55,7 +57,9 @@ export { generateNote, createNoteFromSecrets, updateNoteWithHashes, serializeNot
 deriveNote, deriveNotes, deriveMasterKey, deriveNoteFromMaster, estimateSeedStrength, 
 // Simple note creation
 createNote, initPoseidon, isPoseidonReady, prepareWithdrawal, 
-// V2 Note types (dual-key ECDH support)
+// Stealth note types (dual-key ECDH support)
+createStealthNote, updateStealthNoteWithHashes, serializeStealthNote, deserializeStealthNote, stealthNoteHasComputedHashes, 
+// Backwards compatibility aliases (deprecated)
 createNoteV2, updateNoteV2WithHashes, serializeNoteV2, deserializeNoteV2, noteV2HasComputedHashes, } from "./note";
 // ==========================================================================
 // Merkle tree utilities

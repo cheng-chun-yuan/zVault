@@ -115,11 +115,12 @@ export {
 export {
   poseidon2Hash,
   deriveNotePubKey,
-  computeCommitmentV2,
-  computeNullifierV2,
+  computeCommitment,
+  computeNullifier,
   hashNullifier,
-  computeCommitmentV1,
-  computeNullifierHashV1,
+  // Legacy exports for backwards compatibility
+  computeCommitmentLegacy,
+  computeNullifierHashLegacy,
   BN254_SCALAR_FIELD,
 } from "./poseidon2";
 
@@ -150,7 +151,15 @@ export {
   type Note,
   type SerializedNote,
   type NoteData,
-  // V2 Note types (dual-key ECDH support)
+  // Stealth note types (dual-key ECDH support)
+  createStealthNote,
+  updateStealthNoteWithHashes,
+  serializeStealthNote,
+  deserializeStealthNote,
+  stealthNoteHasComputedHashes,
+  type StealthNote,
+  type SerializedStealthNote,
+  // Backwards compatibility aliases (deprecated)
   createNoteV2,
   updateNoteV2WithHashes,
   serializeNoteV2,
