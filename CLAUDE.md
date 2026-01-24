@@ -32,10 +32,17 @@ anchor deploy        # Deploy to devnet
 npm run test         # TypeScript tests (ts-mocha, 120s timeout)
 ```
 
-### SDK - `/contracts/sdk`
+### SDK - `/sdk`
 ```bash
 bun run build        # Compile TypeScript
 bun test             # Run tests
+```
+
+### Mobile App (Expo) - `/mobile-app`
+```bash
+bun run start        # Start Expo dev server
+bun run ios          # Run on iOS simulator
+bun run android      # Run on Android emulator
 ```
 
 ### Noir Circuits - `/noir-circuits`
@@ -67,10 +74,11 @@ Redeem: Burn sbBTC → Backend signs BTC transaction → Return BTC to user
 |-----------|---------|----------|
 | `contracts/programs/zVault-pinocchio` | Main Solana program | Rust (Pinocchio) |
 | `contracts/programs/btc-light-client` | Bitcoin header tracking | Rust |
-| `contracts/sdk` | TypeScript SDK (@zvault/sdk) | TypeScript |
+| `sdk` | TypeScript SDK (@zvault/sdk) | TypeScript |
 | `backend` | API server + redemption service | Rust |
 | `backend/header-relayer` | Bitcoin header sync | Node.js |
 | `frontend` | Web interface | Next.js + React |
+| `mobile-app` | Mobile app | Expo + React Native |
 | `noir-circuits` | ZK circuits (claim, transfer, split, withdraw) | Noir |
 
 ### Program Instructions (Pinocchio)
@@ -96,7 +104,7 @@ Redeem: Burn sbBTC → Backend signs BTC transaction → Return BTC to user
 
 ## SDK Usage
 
-The SDK (`contracts/sdk`) provides:
+The SDK (`sdk`) provides:
 - `generateNote(amount)` - Create note with nullifier/secret
 - `deriveTaprootAddress(commitment)` - Get BTC deposit address
 - `createClaimLink(note)` - Shareable claim URL
