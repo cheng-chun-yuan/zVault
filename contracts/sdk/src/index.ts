@@ -87,6 +87,39 @@ export {
   type GrumpkinPoint,
 } from "./grumpkin";
 
+// RAILGUN-style key derivation (Solana wallet → spending/viewing keys)
+export {
+  // Key derivation
+  deriveKeysFromWallet,
+  deriveKeysFromSignature,
+  deriveKeysFromSeed,
+  SPENDING_KEY_DERIVATION_MESSAGE,
+  // Stealth meta-address
+  createStealthMetaAddress,
+  serializeStealthMetaAddress,
+  deserializeStealthMetaAddress,
+  parseStealthMetaAddress,
+  encodeStealthMetaAddress,
+  decodeStealthMetaAddress,
+  // Viewing key delegation
+  createDelegatedViewKey,
+  serializeDelegatedViewKey,
+  deserializeDelegatedViewKey,
+  isDelegatedKeyValid,
+  hasPermission,
+  ViewPermissions,
+  // Key security
+  constantTimeCompare,
+  clearKey,
+  extractViewOnlyBundle,
+  // Types
+  type ZVaultKeys,
+  type StealthMetaAddress,
+  type SerializedStealthMetaAddress,
+  type DelegatedViewKey,
+  type WalletSignerAdapter,
+} from "./keys";
+
 // Note (shielded commitment) utilities
 export {
   generateNote,
