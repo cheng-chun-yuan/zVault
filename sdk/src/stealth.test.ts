@@ -1,105 +1,21 @@
+/**
+ * Stealth Address Utilities Tests
+ *
+ * Tests stealth-specific utilities (parsing, type guards, conversions).
+ * Core stealth flow tests (create, scan, claim) are in keys.test.ts.
+ */
+
 import { expect, test, describe } from "bun:test";
 import {
-  createStealthDeposit,
-  scanAnnouncements,
-  prepareClaimInputs,
   parseStealthAnnouncement,
   announcementToScanFormat,
   isWalletAdapter,
   STEALTH_ANNOUNCEMENT_SIZE,
   STEALTH_ANNOUNCEMENT_DISCRIMINATOR,
 } from "./stealth";
-import {
-  deriveKeysFromSeed,
-  createStealthMetaAddress,
-} from "./keys";
+import { deriveKeysFromSeed } from "./keys";
 
-describe("Stealth Address (Unified API)", () => {
-  test("creates stealth deposit with dual-key ECDH", async () => {
-    // Generate recipient keys
-    const recipientSeed = new Uint8Array(32);
-    recipientSeed.fill(0x42);
-    const recipientKeys = deriveKeysFromSeed(recipientSeed);
-    const meta = createStealthMetaAddress(recipientKeys);
-
-    // Create stealth deposit
-    const amount = 100_000n; // 0.001 BTC
-    const deposit = await createStealthDeposit(meta, amount);
-
-    expect(deposit.ephemeralViewPub.length).toBe(32);
-    expect(deposit.ephemeralSpendPub.length).toBe(33);
-    expect(deposit.amountSats).toBe(amount);
-    expect(deposit.commitment.length).toBe(32);
-    expect(deposit.createdAt).toBeGreaterThan(0);
-  });
-
-  test("scans announcements with ZVaultKeys", async () => {
-    // Generate recipient keys
-    const recipientSeed = new Uint8Array(32);
-    recipientSeed.fill(0x56);
-    const recipientKeys = deriveKeysFromSeed(recipientSeed);
-    const meta = createStealthMetaAddress(recipientKeys);
-
-    // Create deposit
-    const amount = 50_000n;
-    const deposit = await createStealthDeposit(meta, amount);
-
-    // Simulate on-chain announcement
-    const announcements = [{
-      ephemeralViewPub: deposit.ephemeralViewPub,
-      ephemeralSpendPub: deposit.ephemeralSpendPub,
-      amountSats: deposit.amountSats,
-      commitment: deposit.commitment,
-      leafIndex: 0,
-    }];
-
-    // Scan with keys
-    const found = await scanAnnouncements(recipientKeys, announcements);
-
-    expect(found.length).toBe(1);
-    expect(found[0].amount).toBe(amount);
-    expect(found[0].leafIndex).toBe(0);
-  });
-
-  test("prepares claim inputs with ZVaultKeys", async () => {
-    // Generate recipient keys
-    const recipientSeed = new Uint8Array(32);
-    recipientSeed.fill(0x78);
-    const recipientKeys = deriveKeysFromSeed(recipientSeed);
-    const meta = createStealthMetaAddress(recipientKeys);
-
-    // Create deposit
-    const amount = 25_000n;
-    const deposit = await createStealthDeposit(meta, amount);
-
-    // Simulate on-chain announcement
-    const announcements = [{
-      ephemeralViewPub: deposit.ephemeralViewPub,
-      ephemeralSpendPub: deposit.ephemeralSpendPub,
-      amountSats: deposit.amountSats,
-      commitment: deposit.commitment,
-      leafIndex: 5,
-    }];
-
-    // Scan
-    const found = await scanAnnouncements(recipientKeys, announcements);
-    expect(found.length).toBe(1);
-
-    // Prepare claim inputs
-    const merkleProof = {
-      root: 12345n,
-      pathElements: Array(20).fill(0n),
-      pathIndices: Array(20).fill(0),
-    };
-
-    const claimInputs = await prepareClaimInputs(recipientKeys, found[0], merkleProof);
-
-    expect(claimInputs.spendingPrivKey).toBe(recipientKeys.spendingPrivKey);
-    expect(claimInputs.amount).toBe(amount);
-    expect(claimInputs.leafIndex).toBe(5);
-    expect(claimInputs.nullifier).toBeGreaterThan(0n);
-  });
-
+describe("Stealth Utilities", () => {
   test("isWalletAdapter type guard works correctly", () => {
     // Mock wallet adapter
     const mockWallet = {
@@ -115,41 +31,6 @@ describe("Stealth Address (Unified API)", () => {
     expect(isWalletAdapter(null)).toBe(false);
     expect(isWalletAdapter(undefined)).toBe(false);
     expect(isWalletAdapter({})).toBe(false);
-  });
-
-  test("different nullifiers for different leaf indices", async () => {
-    const recipientSeed = new Uint8Array(32);
-    recipientSeed.fill(0x9A);
-    const recipientKeys = deriveKeysFromSeed(recipientSeed);
-    const meta = createStealthMetaAddress(recipientKeys);
-
-    const amount = 10_000n;
-    const deposit = await createStealthDeposit(meta, amount);
-
-    // Same deposit at different leaf indices
-    const ann1 = {
-      ephemeralViewPub: deposit.ephemeralViewPub,
-      ephemeralSpendPub: deposit.ephemeralSpendPub,
-      amountSats: deposit.amountSats,
-      commitment: deposit.commitment,
-      leafIndex: 0,
-    };
-    const ann2 = { ...ann1, leafIndex: 1 };
-
-    const found1 = await scanAnnouncements(recipientKeys, [ann1]);
-    const found2 = await scanAnnouncements(recipientKeys, [ann2]);
-
-    const merkleProof = {
-      root: 12345n,
-      pathElements: Array(20).fill(0n),
-      pathIndices: Array(20).fill(0),
-    };
-
-    const claim1 = await prepareClaimInputs(recipientKeys, found1[0], merkleProof);
-    const claim2 = await prepareClaimInputs(recipientKeys, found2[0], merkleProof);
-
-    // Different leaf indices → different nullifiers!
-    expect(claim1.nullifier).not.toBe(claim2.nullifier);
   });
 
   test("parseStealthAnnouncement parses on-chain data", () => {
