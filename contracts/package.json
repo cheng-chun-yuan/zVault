@@ -5,7 +5,10 @@
   "scripts": {
     "build": "cargo build-sbf",
     "deploy": "solana program deploy target/deploy/zvault_pinocchio.so",
+    "deploy:localnet": "solana program deploy target/deploy/zvault_pinocchio.so --url localhost",
     "test": "bun run tests/zvault.ts",
+    "test:demo": "bun run scripts/test-demo-flow.ts",
+    "test:name": "bun run scripts/test-name-registry.ts",
     "setup:devnet": "bun run scripts/devnet-setup.ts",
     "init": "bun run scripts/deploy-and-seed.ts"
   },
