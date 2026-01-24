@@ -47,6 +47,12 @@ pub const ID: Pubkey = [
 /// - SPLIT_COMMITMENT (4): Split commitment 1→2 (private_split)
 /// - REQUEST_REDEMPTION (5): Withdraw - burn sbBTC, request BTC
 /// - ANNOUNCE_STEALTH (12): Send via stealth address (sendStealth)
+///
+/// V2 RAILGUN-style instructions:
+/// - REGISTER_VIEWING_KEY (13): Create viewing key registry
+/// - DELEGATE_VIEWING_KEY (14): Add delegated viewing key
+/// - REVOKE_DELEGATION (15): Remove delegated viewing key
+/// - ANNOUNCE_STEALTH_V2 (16): Dual-key ECDH announcement
 pub mod instruction {
     pub const INITIALIZE: u8 = 0;
     // Discriminators 1-3 removed (record_deposit, claim_direct, mint_to_commitment)
@@ -59,6 +65,11 @@ pub mod instruction {
     pub const INIT_COMMITMENT_TREE: u8 = 10;
     pub const ADD_DEMO_COMMITMENT: u8 = 11;
     pub const ANNOUNCE_STEALTH: u8 = 12;
+    // V2 RAILGUN-style instructions
+    pub const REGISTER_VIEWING_KEY: u8 = 13;
+    pub const DELEGATE_VIEWING_KEY: u8 = 14;
+    pub const REVOKE_DELEGATION: u8 = 15;
+    pub const ANNOUNCE_STEALTH_V2: u8 = 16;
 }
 
 entrypoint!(process_instruction);
@@ -104,6 +115,19 @@ pub fn process_instruction(
         }
         instruction::ANNOUNCE_STEALTH => {
             instructions::process_announce_stealth(program_id, accounts, data)
+        }
+        // V2 RAILGUN-style instructions
+        instruction::REGISTER_VIEWING_KEY => {
+            instructions::process_register_viewing_key(program_id, accounts, data)
+        }
+        instruction::DELEGATE_VIEWING_KEY => {
+            instructions::process_delegate_viewing_key(program_id, accounts, data)
+        }
+        instruction::REVOKE_DELEGATION => {
+            instructions::process_revoke_delegation(program_id, accounts, data)
+        }
+        instruction::ANNOUNCE_STEALTH_V2 => {
+            instructions::process_announce_stealth_v2(program_id, accounts, data)
         }
         _ => Err(ProgramError::InvalidInstructionData),
     }
@@ -183,6 +207,11 @@ mod tests {
             instruction::INIT_COMMITMENT_TREE,
             instruction::ADD_DEMO_COMMITMENT,
             instruction::ANNOUNCE_STEALTH,
+            // V2 RAILGUN-style
+            instruction::REGISTER_VIEWING_KEY,
+            instruction::DELEGATE_VIEWING_KEY,
+            instruction::REVOKE_DELEGATION,
+            instruction::ANNOUNCE_STEALTH_V2,
         ];
 
         for (i, &d1) in discriminators.iter().enumerate() {

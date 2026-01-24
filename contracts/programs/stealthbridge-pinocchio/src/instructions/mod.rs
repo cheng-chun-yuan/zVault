@@ -1,12 +1,17 @@
 //! Instruction handlers
 //!
-//! Simplified to 6 main operations:
+//! Main operations:
 //! - verify_deposit: Verify BTC deposit via SPV and add commitment to tree
 //! - claim: Claim sbBTC tokens with ZK proof
 //! - split_commitment: Split 1 commitment into 2 outputs
 //! - request_redemption: Request BTC withdrawal (burn sbBTC)
 //! - complete_redemption: Relayer completes BTC withdrawal
 //! - announce_stealth: Create stealth address announcement (ECDH)
+//!
+//! V2 RAILGUN-style operations:
+//! - announce_stealth_v2: Dual-key ECDH announcement (X25519 + Grumpkin)
+//! - register_viewing_key: Create viewing key registry for delegation
+//! - delegate_viewing_key: Add/revoke delegated viewing keys
 
 pub mod initialize;
 pub mod claim;
@@ -16,6 +21,9 @@ pub mod complete_redemption;
 pub mod verify_deposit;
 pub mod add_demo_commitment;
 pub mod announce_stealth;
+pub mod announce_stealth_v2;
+pub mod register_viewing_key;
+pub mod delegate_viewing_key;
 
 pub use initialize::*;
 pub use claim::*;
@@ -25,3 +33,6 @@ pub use complete_redemption::*;
 pub use verify_deposit::*;
 pub use add_demo_commitment::*;
 pub use announce_stealth::*;
+pub use announce_stealth_v2::*;
+pub use register_viewing_key::*;
+pub use delegate_viewing_key::*;
