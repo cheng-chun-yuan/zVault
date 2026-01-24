@@ -1,5 +1,8 @@
 use dep::poseidon::poseidon2::Poseidon2;
 
+// Grumpkin ECDH module for V2 circuits
+pub mod grumpkin;
+
 pub fn verify_merkle_proof(
     leaf: Field,
     root: Field,
