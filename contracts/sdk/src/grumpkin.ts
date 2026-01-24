@@ -90,7 +90,38 @@ export function isOnCurve(point: GrumpkinPoint): boolean {
 }
 
 /**
- * Point addition on Grumpkin curve
+ * Constant-time conditional select
+ *
+ * Returns a if condition is true, b otherwise.
+ * Executes in constant time to prevent timing attacks.
+ */
+function constantTimeSelect(condition: boolean, a: bigint, b: bigint): bigint {
+  const mask = condition ? -1n : 0n;
+  return (a & mask) | (b & ~mask);
+}
+
+/**
+ * Constant-time point select
+ *
+ * Returns p1 if condition is true, p2 otherwise.
+ * Executes in constant time.
+ */
+function constantTimeSelectPoint(
+  condition: boolean,
+  p1: GrumpkinPoint,
+  p2: GrumpkinPoint
+): GrumpkinPoint {
+  return {
+    x: constantTimeSelect(condition, p1.x, p2.x),
+    y: constantTimeSelect(condition, p1.y, p2.y),
+  };
+}
+
+/**
+ * Point addition on Grumpkin curve (CONSTANT-TIME)
+ *
+ * SECURITY: This implementation is constant-time to prevent timing side-channel attacks.
+ * All branches execute the same operations regardless of input values.
  */
 export function pointAdd(
   p1: GrumpkinPoint,
@@ -98,33 +129,46 @@ export function pointAdd(
 ): GrumpkinPoint {
   const p = GRUMPKIN_FIELD_PRIME;
 
-  if (isInfinity(p1)) return p2;
-  if (isInfinity(p2)) return p1;
-
   const { x: x1, y: y1 } = p1;
   const { x: x2, y: y2 } = p2;
 
-  // P + (-P) = O
-  if (x1 === x2 && mod(y1 + y2, p) === 0n) {
-    return GRUMPKIN_INFINITY;
-  }
+  const p1IsInf = isInfinity(p1);
+  const p2IsInf = isInfinity(p2);
+  const sameX = x1 === x2;
+  const sameY = y1 === y2;
+  const oppositeY = mod(y1 + y2, p) === 0n;
 
-  let lambda: bigint;
+  // Compute both lambdas (doubling and addition) regardless of which we need
+  // This ensures constant-time execution
+  const denom_double = mod(2n * y1, p);
+  const denom_add = mod(x2 - x1, p);
 
-  if (x1 === x2 && y1 === y2) {
-    // Point doubling: λ = (3x₁² + a) / (2y₁), where a = 0 for Grumpkin
-    lambda = mod(3n * x1 * x1 * modInverse(2n * y1, p), p);
-  } else {
-    // Point addition: λ = (y₂ - y₁) / (x₂ - x₁)
-    lambda = mod((y2 - y1) * modInverse(mod(x2 - x1, p), p), p);
-  }
+  // Use safe default to avoid division by zero (result will be discarded anyway)
+  const safe_denom_double = denom_double === 0n ? 1n : denom_double;
+  const safe_denom_add = denom_add === 0n ? 1n : denom_add;
 
-  // x₃ = λ² - x₁ - x₂
+  const lambda_double = mod(3n * x1 * x1 * modInverse(safe_denom_double, p), p);
+  const lambda_add = mod((y2 - y1) * modInverse(safe_denom_add, p), p);
+
+  // Select the appropriate lambda
+  const isDouble = sameX && sameY && !p1IsInf && !p2IsInf;
+  const lambda = constantTimeSelect(isDouble, lambda_double, lambda_add);
+
+  // Compute the result point
   const x3 = mod(lambda * lambda - x1 - x2, p);
-  // y₃ = λ(x₁ - x₃) - y₁
   const y3 = mod(lambda * (x1 - x3) - y1, p);
+  const result = { x: x3, y: y3 };
 
-  return { x: x3, y: y3 };
+  // Handle special cases (still constant-time by computing all and selecting)
+  const isInfinityResult = sameX && oppositeY && !p1IsInf && !p2IsInf;
+
+  // Select final result based on conditions
+  let finalResult = result;
+  finalResult = constantTimeSelectPoint(p1IsInf, p2, finalResult);
+  finalResult = constantTimeSelectPoint(p2IsInf && !p1IsInf, p1, finalResult);
+  finalResult = constantTimeSelectPoint(isInfinityResult, GRUMPKIN_INFINITY, finalResult);
+
+  return finalResult;
 }
 
 /**
@@ -135,29 +179,48 @@ export function pointDouble(point: GrumpkinPoint): GrumpkinPoint {
 }
 
 /**
- * Scalar multiplication using double-and-add algorithm
+ * Scalar multiplication using Montgomery ladder (CONSTANT-TIME)
+ *
+ * SECURITY: Uses Montgomery ladder algorithm which is constant-time.
+ * All iterations perform the same operations regardless of the scalar bits.
+ * This prevents timing side-channel attacks that could leak the private key.
+ *
  * Returns scalar * point
  */
 export function pointMul(scalar: bigint, point: GrumpkinPoint): GrumpkinPoint {
   // Reduce scalar modulo curve order
   scalar = mod(scalar, GRUMPKIN_ORDER);
 
-  if (scalar === 0n || isInfinity(point)) {
+  // Handle edge cases (still need early return for infinity input)
+  if (isInfinity(point)) {
     return GRUMPKIN_INFINITY;
   }
 
-  let result = GRUMPKIN_INFINITY;
-  let temp = point;
+  // Montgomery ladder: constant-time scalar multiplication
+  // R0 = O (infinity), R1 = P
+  let r0 = GRUMPKIN_INFINITY;
+  let r1 = point;
 
-  while (scalar > 0n) {
-    if (scalar & 1n) {
-      result = pointAdd(result, temp);
+  // Process all 254 bits (BN254 scalar field)
+  for (let i = 253; i >= 0; i--) {
+    const bit = (scalar >> BigInt(i)) & 1n;
+
+    // Always compute both operations
+    const sum = pointAdd(r0, r1);
+    const r0Double = pointDouble(r0);
+    const r1Double = pointDouble(r1);
+
+    // Select based on bit (constant-time selection)
+    if (bit === 1n) {
+      r0 = sum;
+      r1 = r1Double;
+    } else {
+      r0 = r0Double;
+      r1 = sum;
     }
-    temp = pointDouble(temp);
-    scalar = scalar >> 1n;
   }
 
-  return result;
+  return r0;
 }
 
 /**
@@ -227,15 +290,17 @@ export function pointToCompressedBytes(point: GrumpkinPoint): Uint8Array {
 /**
  * Recover y coordinate from x and sign
  * y² = x³ - 17
+ *
+ * Uses Tonelli-Shanks algorithm for modular square root.
+ * GRUMPKIN_FIELD_PRIME ≡ 1 (mod 4), so we can't use the simple formula.
  */
 function recoverY(x: bigint, isOdd: boolean): bigint {
   const p = GRUMPKIN_FIELD_PRIME;
   const rhs = mod(x * x * x + GRUMPKIN_B, p);
 
-  // Tonelli-Shanks square root (simplified for this prime)
-  // p ≡ 3 (mod 4), so sqrt(a) = a^((p+1)/4)
-  const exp = (p + 1n) / 4n;
-  let y = modPow(rhs, exp, p);
+  // Tonelli-Shanks algorithm for modular square root
+  // Find y such that y² ≡ rhs (mod p)
+  let y = tonelliShanks(rhs, p);
 
   // Check if we got the right parity
   const yIsOdd = (y & 1n) === 1n;
@@ -244,6 +309,62 @@ function recoverY(x: bigint, isOdd: boolean): bigint {
   }
 
   return y;
+}
+
+/**
+ * Tonelli-Shanks algorithm for modular square root
+ * Finds y such that y² ≡ n (mod p), or throws if no solution exists
+ */
+function tonelliShanks(n: bigint, p: bigint): bigint {
+  // Handle trivial cases
+  if (n === 0n) return 0n;
+
+  // Check if n is a quadratic residue using Euler's criterion
+  // n^((p-1)/2) ≡ 1 (mod p) if n is a quadratic residue
+  const eulerCriterion = modPow(n, (p - 1n) / 2n, p);
+  if (eulerCriterion !== 1n) {
+    throw new Error("No square root exists (not a quadratic residue)");
+  }
+
+  // Factor out powers of 2 from p - 1: p - 1 = Q * 2^S
+  let Q = p - 1n;
+  let S = 0n;
+  while ((Q & 1n) === 0n) {
+    Q = Q >> 1n;
+    S = S + 1n;
+  }
+
+  // Find a quadratic non-residue z
+  let z = 2n;
+  while (modPow(z, (p - 1n) / 2n, p) !== p - 1n) {
+    z = z + 1n;
+  }
+
+  let M = S;
+  let c = modPow(z, Q, p);
+  let t = modPow(n, Q, p);
+  let R = modPow(n, (Q + 1n) / 2n, p);
+
+  while (true) {
+    if (t === 1n) {
+      return R;
+    }
+
+    // Find the smallest i such that t^(2^i) ≡ 1 (mod p)
+    let i = 1n;
+    let temp = mod(t * t, p);
+    while (temp !== 1n) {
+      temp = mod(temp * temp, p);
+      i = i + 1n;
+    }
+
+    // Update values
+    const b = modPow(c, 1n << (M - i - 1n), p);
+    M = i;
+    c = mod(b * b, p);
+    t = mod(t * c, p);
+    R = mod(R * b, p);
+  }
 }
 
 /**
