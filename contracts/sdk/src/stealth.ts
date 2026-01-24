@@ -1,21 +1,42 @@
 /**
  * Stealth address utilities for ZVault
  *
- * Implements stealth address functionality using X25519 ECDH.
- * Minimal 40-byte announcement format for maximum privacy:
- * - ephemeral_pubkey (32 bytes) - required for ECDH
- * - encrypted_amount (8 bytes) - required to compute commitment
- * - NO recipient_hint - prevents linking deposits to same recipient
+ * V1 (Legacy): Single X25519 ECDH for both viewing and spending
+ * V2 (New): Dual-key ECDH with X25519 (viewing) + Grumpkin (spending)
+ *
+ * V2 Format (148 bytes on-chain):
+ * - ephemeral_view_pub (32 bytes) - X25519 for off-chain scanning
+ * - ephemeral_spend_pub (33 bytes) - Grumpkin for in-circuit ECDH
+ * - encrypted_amount (8 bytes) - XOR encrypted with view shared secret
+ * - encrypted_random (32 bytes) - for commitment reconstruction
+ * - commitment (32 bytes) - Poseidon2 hash for Merkle tree
+ *
+ * Key Separation Properties:
+ * - Viewing key can scan and decrypt but CANNOT derive nullifier
+ * - Spending key required for nullifier derivation and proof generation
+ * - Sender cannot spend (wrong ECDH → wrong commitment → not in tree)
  *
  * IMPORTANT: Noir circuits use Poseidon2 hashing which is not directly
- * available in this SDK. The stealth key derivation uses SHA256-based
- * KDF, and the derived secrets (nullifier, secret) are used as inputs
- * to Noir circuits which compute the actual Poseidon2 hashes.
+ * available in this SDK. Hash values that must match circuits should be
+ * computed via Noir circuit execution.
  */
 
 import { scalarMult, box } from "tweetnacl";
 import { convertSecretKey, convertPublicKey } from "ed2curve";
+import { sha256 } from "@noble/hashes/sha256";
 import { sha256Hash, bytesToBigint, bigintToBytes, BN254_FIELD_PRIME } from "./crypto";
+import {
+  generateKeyPair as generateGrumpkinKeyPair,
+  ecdh as grumpkinEcdh,
+  pointMul,
+  scalarFromBytes,
+  scalarToBytes,
+  pointToCompressedBytes,
+  pointFromCompressedBytes,
+  GRUMPKIN_GENERATOR,
+  type GrumpkinPoint,
+} from "./grumpkin";
+import type { StealthMetaAddress, ZVaultKeys } from "./keys";
 
 // ========== Types ==========
 
@@ -263,3 +284,373 @@ function bytes8ToBigint(bytes: Uint8Array): bigint {
 }
 
 // arraysEqual removed - no longer needed without recipient hint filtering
+
+// ========================================================================
+// V2: Dual-Key ECDH (X25519 Viewing + Grumpkin Spending)
+// ========================================================================
+
+// ========== V2 Types ==========
+
+/**
+ * V2 Stealth Deposit with dual-key ECDH
+ * Uses X25519 for fast off-chain scanning and Grumpkin for in-circuit spending proofs
+ */
+export interface StealthDepositV2 {
+  /** X25519 ephemeral public key (32 bytes) - for viewing/scanning */
+  ephemeralViewPub: Uint8Array;
+
+  /** Grumpkin ephemeral public key (33 bytes compressed) - for spending proofs */
+  ephemeralSpendPub: Uint8Array;
+
+  /** XOR-encrypted amount (8 bytes) - decrypted with view shared secret */
+  encryptedAmount: Uint8Array;
+
+  /** XOR-encrypted random value (32 bytes) - for commitment reconstruction */
+  encryptedRandom: Uint8Array;
+
+  /** Commitment for Merkle tree (32 bytes) - Poseidon2(notePubKey, amount, random) */
+  commitment: Uint8Array;
+
+  /** Unix timestamp when created */
+  createdAt: number;
+}
+
+/**
+ * Scanned note from V2 announcement (viewing key can decrypt)
+ */
+export interface ScannedNoteV2 {
+  /** Decrypted amount in satoshis */
+  amount: bigint;
+
+  /** Decrypted random value for commitment */
+  random: bigint;
+
+  /** Grumpkin ephemeral public key (needed for spending) */
+  ephemeralSpendPub: GrumpkinPoint;
+
+  /** Leaf index in Merkle tree */
+  leafIndex: number;
+
+  /** Original announcement commitment */
+  commitment: Uint8Array;
+}
+
+/**
+ * Prepared claim inputs for ZK proof (requires spending key)
+ */
+export interface ClaimInputsV2 {
+  // Private inputs for ZK proof
+  spendingPrivKey: bigint;
+  ephemeralSpendPub: GrumpkinPoint;
+  amount: bigint;
+  random: bigint;
+  leafIndex: number;
+  merklePath: bigint[];
+  merkleIndices: number[];
+
+  // Public inputs
+  merkleRoot: bigint;
+  nullifierHash: bigint;
+  amountPub: bigint;
+}
+
+// ========== V2 Domain Separators ==========
+
+/** Domain separator for note public key derivation */
+const DOMAIN_NPK = 0x6e706bn; // "npk" as field element
+
+/** Domain separator for random value encryption */
+const DOMAIN_RANDOM = "random";
+
+// ========== V2 Sender Functions ==========
+
+/**
+ * Create a V2 stealth deposit with dual-key ECDH
+ *
+ * Generates two ephemeral keypairs:
+ * - X25519: For viewing/scanning (fast off-chain ECDH)
+ * - Grumpkin: For spending proofs (efficient in-circuit ECDH)
+ *
+ * @param recipientMeta - Recipient's stealth meta-address
+ * @param amount - Amount in satoshis
+ * @returns Stealth deposit data for on-chain announcement
+ */
+export function createStealthDepositV2(
+  recipientMeta: StealthMetaAddress,
+  amount: bigint
+): StealthDepositV2 {
+  // Parse recipient's public keys
+  const recipientViewPub = recipientMeta.viewingPubKey;
+  const recipientSpendPub = pointFromCompressedBytes(recipientMeta.spendingPubKey);
+
+  // Generate ephemeral X25519 keypair for viewing
+  const ephemeralView = box.keyPair();
+  const viewShared = scalarMult(ephemeralView.secretKey, recipientViewPub);
+
+  // Generate ephemeral Grumpkin keypair for spending
+  const ephemeralSpend = generateGrumpkinKeyPair();
+  const spendShared = grumpkinEcdh(ephemeralSpend.privKey, recipientSpendPub);
+
+  // Generate random value for commitment
+  const random = randomFieldElement();
+  const randomBytes = bigintToBytes(random);
+
+  // Derive encryption key from view shared secret
+  const encKey = sha256(viewShared);
+
+  // Encrypt amount (first 8 bytes of encKey)
+  const encryptedAmount = xorBytes(
+    bigintToBytes8(amount),
+    encKey.slice(0, 8)
+  );
+
+  // Encrypt random (next 32 bytes via additional hash)
+  const randomEncKey = sha256(concatBytes(encKey, textToBytes(DOMAIN_RANDOM)));
+  const encryptedRandom = xorBytes(randomBytes, randomEncKey);
+
+  // Compute note public key from spend shared secret
+  // notePubKey = H(spendShared.x, spendShared.y, DOMAIN_NPK)
+  // NOTE: This should be Poseidon2 for circuit compatibility
+  // For now, we use a placeholder - actual commitment computed by Noir
+  const notePubKeyInput = concatBytes(
+    bigintToBytes(spendShared.x),
+    bigintToBytes(spendShared.y),
+    bigintToBytes(BigInt(DOMAIN_NPK))
+  );
+  const notePubKeyPlaceholder = sha256(notePubKeyInput);
+
+  // Compute commitment placeholder
+  // commitment = H(notePubKey, amount, random)
+  // NOTE: Actual Poseidon2 commitment computed by recipient via Noir
+  const commitmentInput = concatBytes(
+    notePubKeyPlaceholder,
+    bigintToBytes(amount),
+    randomBytes
+  );
+  const commitment = sha256(commitmentInput);
+
+  return {
+    ephemeralViewPub: ephemeralView.publicKey,
+    ephemeralSpendPub: pointToCompressedBytes(ephemeralSpend.pubKey),
+    encryptedAmount,
+    encryptedRandom,
+    commitment,
+    createdAt: Date.now(),
+  };
+}
+
+/**
+ * Create V2 stealth deposit from ZVaultKeys
+ */
+export function createStealthDepositV2FromKeys(
+  recipientKeys: ZVaultKeys,
+  amount: bigint
+): StealthDepositV2 {
+  const meta: StealthMetaAddress = {
+    spendingPubKey: pointToCompressedBytes(recipientKeys.spendingPubKey),
+    viewingPubKey: recipientKeys.viewingPubKey,
+  };
+  return createStealthDepositV2(meta, amount);
+}
+
+// ========== V2 Recipient Scanning (Viewing Key Only) ==========
+
+/**
+ * Scan V2 announcements using viewing key only
+ *
+ * This function can decrypt amounts and random values but CANNOT:
+ * - Derive the nullifier (requires spending key)
+ * - Generate spending proofs
+ *
+ * @param viewingPrivKey - X25519 viewing private key
+ * @param announcements - Array of on-chain announcements
+ * @returns Array of found notes (ready for claim preparation)
+ */
+export function scanAnnouncementsV2(
+  viewingPrivKey: Uint8Array,
+  announcements: {
+    ephemeralViewPub: Uint8Array;
+    ephemeralSpendPub: Uint8Array;
+    encryptedAmount: Uint8Array;
+    encryptedRandom: Uint8Array;
+    commitment: Uint8Array;
+    leafIndex: number;
+  }[]
+): ScannedNoteV2[] {
+  const found: ScannedNoteV2[] = [];
+  const MAX_SATS = 21_000_000n * 100_000_000n; // 21M BTC in sats
+
+  for (const ann of announcements) {
+    try {
+      // X25519 ECDH with viewing key
+      const viewShared = scalarMult(viewingPrivKey, ann.ephemeralViewPub);
+
+      // Derive encryption key
+      const encKey = sha256(viewShared);
+
+      // Decrypt amount
+      const decryptedAmountBytes = xorBytes(
+        ann.encryptedAmount,
+        encKey.slice(0, 8)
+      );
+      const amount = bytes8ToBigint(decryptedAmountBytes);
+
+      // Basic sanity check
+      if (amount <= 0n || amount > MAX_SATS) {
+        continue; // Probably not ours (garbage decryption)
+      }
+
+      // Decrypt random
+      const randomEncKey = sha256(concatBytes(encKey, textToBytes(DOMAIN_RANDOM)));
+      const decryptedRandomBytes = xorBytes(ann.encryptedRandom, randomEncKey);
+      const random = bytesToBigint(decryptedRandomBytes) % BN254_FIELD_PRIME;
+
+      // Parse ephemeral spend pubkey
+      const ephemeralSpendPub = pointFromCompressedBytes(ann.ephemeralSpendPub);
+
+      found.push({
+        amount,
+        random,
+        ephemeralSpendPub,
+        leafIndex: ann.leafIndex,
+        commitment: ann.commitment,
+      });
+    } catch {
+      // ECDH or parsing failed - not our note
+      continue;
+    }
+  }
+
+  return found;
+}
+
+/**
+ * Scan V2 announcements using ZVaultKeys
+ */
+export function scanAnnouncementsV2WithKeys(
+  keys: ZVaultKeys,
+  announcements: {
+    ephemeralViewPub: Uint8Array;
+    ephemeralSpendPub: Uint8Array;
+    encryptedAmount: Uint8Array;
+    encryptedRandom: Uint8Array;
+    commitment: Uint8Array;
+    leafIndex: number;
+  }[]
+): ScannedNoteV2[] {
+  return scanAnnouncementsV2(keys.viewingPrivKey, announcements);
+}
+
+// ========== V2 Claim Preparation (Spending Key Required) ==========
+
+/**
+ * Prepare claim inputs for ZK proof generation
+ *
+ * CRITICAL: This function requires the spending private key.
+ * The nullifier is derived from (spendingPrivKey, leafIndex).
+ * Only the legitimate recipient can compute a valid nullifier.
+ *
+ * Why sender cannot claim:
+ * - Sender knows ephemeral_priv and shared_secret
+ * - Sender does NOT know recipient's spendingPrivKey
+ * - Wrong spendingPrivKey → wrong ECDH → wrong commitment → not in tree
+ *
+ * @param spendingPrivKey - Grumpkin spending private key
+ * @param note - Scanned note from scanning phase
+ * @param merkleProof - Merkle proof for the commitment
+ * @returns Inputs ready for Noir claim_v2 circuit
+ */
+export function prepareClaimInputsV2(
+  spendingPrivKey: bigint,
+  note: ScannedNoteV2,
+  merkleProof: {
+    root: bigint;
+    pathElements: bigint[];
+    pathIndices: number[];
+  }
+): ClaimInputsV2 {
+  // Grumpkin ECDH with spending key
+  const spendShared = grumpkinEcdh(spendingPrivKey, note.ephemeralSpendPub);
+
+  // Derive note public key (same as sender computed)
+  // notePubKey = Poseidon2(spendShared.x, spendShared.y, DOMAIN_NPK)
+  // This will be verified inside the circuit
+
+  // CRITICAL: Nullifier from spending private key + leaf index
+  // nullifier = Poseidon2(spendingPrivKey, leafIndex)
+  // Only recipient can compute this!
+  const nullifierInput = concatBytes(
+    scalarToBytes(spendingPrivKey),
+    bigintToBytes(BigInt(note.leafIndex))
+  );
+  // NOTE: Actual Poseidon2 computed in Noir circuit
+  // This is a placeholder for the hash
+  const nullifierPlaceholder = sha256(nullifierInput);
+  const nullifier = bytesToBigint(nullifierPlaceholder) % BN254_FIELD_PRIME;
+
+  // Nullifier hash (double hash for public input)
+  const nullifierHashPlaceholder = sha256(nullifierPlaceholder);
+  const nullifierHash = bytesToBigint(nullifierHashPlaceholder) % BN254_FIELD_PRIME;
+
+  return {
+    // Private inputs
+    spendingPrivKey,
+    ephemeralSpendPub: note.ephemeralSpendPub,
+    amount: note.amount,
+    random: note.random,
+    leafIndex: note.leafIndex,
+    merklePath: merkleProof.pathElements,
+    merkleIndices: merkleProof.pathIndices,
+
+    // Public inputs
+    merkleRoot: merkleProof.root,
+    nullifierHash,
+    amountPub: note.amount,
+  };
+}
+
+/**
+ * Prepare claim inputs using ZVaultKeys
+ */
+export function prepareClaimInputsV2WithKeys(
+  keys: ZVaultKeys,
+  note: ScannedNoteV2,
+  merkleProof: {
+    root: bigint;
+    pathElements: bigint[];
+    pathIndices: number[];
+  }
+): ClaimInputsV2 {
+  return prepareClaimInputsV2(keys.spendingPrivKey, note, merkleProof);
+}
+
+// ========== V2 Utilities ==========
+
+function randomFieldElement(): bigint {
+  const bytes = new Uint8Array(32);
+  crypto.getRandomValues(bytes);
+  return bytesToBigint(bytes) % BN254_FIELD_PRIME;
+}
+
+function xorBytes(a: Uint8Array, b: Uint8Array): Uint8Array {
+  const result = new Uint8Array(a.length);
+  for (let i = 0; i < a.length; i++) {
+    result[i] = a[i] ^ b[i];
+  }
+  return result;
+}
+
+function concatBytes(...arrays: Uint8Array[]): Uint8Array {
+  const totalLength = arrays.reduce((sum, arr) => sum + arr.length, 0);
+  const result = new Uint8Array(totalLength);
+  let offset = 0;
+  for (const arr of arrays) {
+    result.set(arr, offset);
+    offset += arr.length;
+  }
+  return result;
+}
+
+function textToBytes(text: string): Uint8Array {
+  return new TextEncoder().encode(text);
+}

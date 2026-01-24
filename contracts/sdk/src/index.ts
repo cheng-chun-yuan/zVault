@@ -237,8 +237,9 @@ export {
 // Import directly from '@zvault/sdk/dist/zvault.js' if needed in Node.js
 export type { DepositCredentials, ClaimResult, SplitResult } from "./zvault";
 
-// Stealth address utilities
+// Stealth address utilities (V1 legacy + V2 dual-key ECDH)
 export {
+  // V1 Legacy (X25519 only)
   solanaKeyToX25519,
   solanaPubKeyToX25519,
   generateStealthKeys,
@@ -249,6 +250,16 @@ export {
   scanAnnouncementsWithSolana,
   type StealthKeys,
   type StealthDeposit,
+  // V2 Dual-Key ECDH (X25519 viewing + Grumpkin spending)
+  createStealthDepositV2,
+  createStealthDepositV2FromKeys,
+  scanAnnouncementsV2,
+  scanAnnouncementsV2WithKeys,
+  prepareClaimInputsV2,
+  prepareClaimInputsV2WithKeys,
+  type StealthDepositV2,
+  type ScannedNoteV2,
+  type ClaimInputsV2,
 } from "./stealth";
 
 // History / Audit utilities
