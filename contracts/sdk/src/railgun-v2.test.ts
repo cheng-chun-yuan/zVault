@@ -1,10 +1,10 @@
 /**
- * RAILGUN-Style V2 Privacy Enhancement Tests
+ * RAILGUN-Style Privacy Enhancement Tests
  *
  * Tests the dual-key ECDH system:
  * - Grumpkin curve operations
  * - Solana-derived key hierarchy
- * - V2 stealth deposit/scan/claim flow
+ * - Stealth deposit/scan/claim flow
  * - Key separation guarantees
  */
 
@@ -13,8 +13,8 @@ import {
   // Grumpkin curve
   generateKeyPair as generateGrumpkinKeyPair,
   deriveKeyPairFromSeed as deriveGrumpkinKeyPairFromSeed,
-  grumpkinEcdh,
-  grumpkinEcdhSharedSecret,
+  ecdh as grumpkinEcdh,
+  ecdhSharedSecret as grumpkinEcdhSharedSecret,
   pointMul,
   pointAdd,
   isOnCurve,
@@ -39,10 +39,10 @@ import {
   hasPermission,
 } from "./keys";
 import {
-  // V2 Stealth
-  createStealthDepositV2,
-  scanAnnouncementsV2,
-  prepareClaimInputsV2,
+  // Stealth (unified API)
+  createStealthDeposit,
+  scanAnnouncements,
+  prepareClaimInputs,
 } from "./stealth";
 import {
   // Note V2
@@ -220,53 +220,51 @@ describe("Viewing Key Delegation", () => {
   });
 });
 
-describe("V2 Stealth Deposit Flow", () => {
-  test("creates V2 stealth deposit", () => {
+describe("Stealth Deposit Flow", () => {
+  test("creates stealth deposit", async () => {
     const recipientSeed = new Uint8Array(32);
     recipientSeed.fill(0x56);
     const recipientKeys = deriveKeysFromSeed(recipientSeed);
     const meta = createStealthMetaAddress(recipientKeys);
 
     const amount = 100_000n;
-    const deposit = createStealthDepositV2(meta, amount);
+    const deposit = await createStealthDeposit(meta, amount);
 
     expect(deposit.ephemeralViewPub.length).toBe(32);
     expect(deposit.ephemeralSpendPub.length).toBe(33);
-    expect(deposit.encryptedAmount.length).toBe(8);
-    expect(deposit.encryptedRandom.length).toBe(32);
+    expect(deposit.amountSats).toBe(amount);
     expect(deposit.commitment.length).toBe(32);
   });
 
-  test("recipient scans V2 announcements", () => {
+  test("recipient scans announcements", async () => {
     const recipientSeed = new Uint8Array(32);
     recipientSeed.fill(0x78);
     const recipientKeys = deriveKeysFromSeed(recipientSeed);
     const meta = createStealthMetaAddress(recipientKeys);
 
     const amount = 50_000n;
-    const deposit = createStealthDepositV2(meta, amount);
+    const deposit = await createStealthDeposit(meta, amount);
 
     // Simulate on-chain announcement
     const announcements = [
       {
         ephemeralViewPub: deposit.ephemeralViewPub,
         ephemeralSpendPub: deposit.ephemeralSpendPub,
-        encryptedAmount: deposit.encryptedAmount,
-        encryptedRandom: deposit.encryptedRandom,
+        amountSats: deposit.amountSats,
         commitment: deposit.commitment,
         leafIndex: 0,
       },
     ];
 
-    // Scan with viewing key only
-    const found = scanAnnouncementsV2(recipientKeys.viewingPrivKey, announcements);
+    // Scan with ZVaultKeys
+    const found = await scanAnnouncements(recipientKeys, announcements);
 
     expect(found.length).toBe(1);
     expect(found[0].amount).toBe(amount);
     expect(found[0].leafIndex).toBe(0);
   });
 
-  test("wrong recipient cannot scan", () => {
+  test("wrong recipient cannot claim (commitment mismatch)", async () => {
     const recipientSeed = new Uint8Array(32);
     recipientSeed.fill(0x9A);
     const recipientKeys = deriveKeysFromSeed(recipientSeed);
@@ -277,49 +275,56 @@ describe("V2 Stealth Deposit Flow", () => {
     const wrongKeys = deriveKeysFromSeed(wrongSeed);
 
     const amount = 75_000n;
-    const deposit = createStealthDepositV2(meta, amount);
+    const deposit = await createStealthDeposit(meta, amount);
 
     const announcements = [
       {
         ephemeralViewPub: deposit.ephemeralViewPub,
         ephemeralSpendPub: deposit.ephemeralSpendPub,
-        encryptedAmount: deposit.encryptedAmount,
-        encryptedRandom: deposit.encryptedRandom,
+        amountSats: deposit.amountSats,
         commitment: deposit.commitment,
         leafIndex: 0,
       },
     ];
 
-    // Wrong recipient tries to scan
-    const found = scanAnnouncementsV2(wrongKeys.viewingPrivKey, announcements);
+    // Scan still works (amount is public)
+    const found = await scanAnnouncements(wrongKeys, announcements);
+    expect(found.length).toBe(1);
 
-    // Should not find anything (garbage decryption fails sanity check)
-    expect(found.length).toBe(0);
+    // But claim preparation fails (commitment mismatch)
+    const merkleProof = {
+      root: 12345n,
+      pathElements: Array(20).fill(0n),
+      pathIndices: Array(20).fill(0),
+    };
+
+    await expect(
+      prepareClaimInputs(wrongKeys, found[0], merkleProof)
+    ).rejects.toThrow("Commitment mismatch");
   });
 });
 
-describe("V2 Claim Preparation", () => {
-  test("prepares claim inputs with spending key", () => {
+describe("Claim Preparation", () => {
+  test("prepares claim inputs with ZVaultKeys", async () => {
     const recipientSeed = new Uint8Array(32);
     recipientSeed.fill(0xDE);
     const recipientKeys = deriveKeysFromSeed(recipientSeed);
     const meta = createStealthMetaAddress(recipientKeys);
 
     const amount = 25_000n;
-    const deposit = createStealthDepositV2(meta, amount);
+    const deposit = await createStealthDeposit(meta, amount);
 
     const announcements = [
       {
         ephemeralViewPub: deposit.ephemeralViewPub,
         ephemeralSpendPub: deposit.ephemeralSpendPub,
-        encryptedAmount: deposit.encryptedAmount,
-        encryptedRandom: deposit.encryptedRandom,
+        amountSats: deposit.amountSats,
         commitment: deposit.commitment,
         leafIndex: 5,
       },
     ];
 
-    const found = scanAnnouncementsV2(recipientKeys.viewingPrivKey, announcements);
+    const found = await scanAnnouncements(recipientKeys, announcements);
     expect(found.length).toBe(1);
 
     // Prepare claim with spending key
@@ -329,16 +334,12 @@ describe("V2 Claim Preparation", () => {
       pathIndices: Array(20).fill(0),
     };
 
-    const claimInputs = prepareClaimInputsV2(
-      recipientKeys.spendingPrivKey,
-      found[0],
-      merkleProof
-    );
+    const claimInputs = await prepareClaimInputs(recipientKeys, found[0], merkleProof);
 
     expect(claimInputs.spendingPrivKey).toBe(recipientKeys.spendingPrivKey);
     expect(claimInputs.amount).toBe(amount);
     expect(claimInputs.leafIndex).toBe(5);
-    expect(claimInputs.nullifierHash).toBeGreaterThan(0n);
+    expect(claimInputs.nullifier).toBeGreaterThan(0n);
   });
 });
 
@@ -384,20 +385,19 @@ describe("Key Separation Security", () => {
     );
   });
 
-  test("different nullifiers for different leaf indices", () => {
+  test("different nullifiers for different leaf indices", async () => {
     const recipientSeed = new Uint8Array(32);
     recipientSeed.fill(0x11);
     const recipientKeys = deriveKeysFromSeed(recipientSeed);
     const meta = createStealthMetaAddress(recipientKeys);
 
     const amount = 10_000n;
-    const deposit = createStealthDepositV2(meta, amount);
+    const deposit = await createStealthDeposit(meta, amount);
 
     const baseAnn = {
       ephemeralViewPub: deposit.ephemeralViewPub,
       ephemeralSpendPub: deposit.ephemeralSpendPub,
-      encryptedAmount: deposit.encryptedAmount,
-      encryptedRandom: deposit.encryptedRandom,
+      amountSats: deposit.amountSats,
       commitment: deposit.commitment,
     };
 
@@ -405,8 +405,8 @@ describe("Key Separation Security", () => {
     const ann1 = { ...baseAnn, leafIndex: 0 };
     const ann2 = { ...baseAnn, leafIndex: 1 };
 
-    const found1 = scanAnnouncementsV2(recipientKeys.viewingPrivKey, [ann1]);
-    const found2 = scanAnnouncementsV2(recipientKeys.viewingPrivKey, [ann2]);
+    const found1 = await scanAnnouncements(recipientKeys, [ann1]);
+    const found2 = await scanAnnouncements(recipientKeys, [ann2]);
 
     const merkleProof = {
       root: 12345n,
@@ -414,18 +414,10 @@ describe("Key Separation Security", () => {
       pathIndices: Array(20).fill(0),
     };
 
-    const claim1 = prepareClaimInputsV2(
-      recipientKeys.spendingPrivKey,
-      found1[0],
-      merkleProof
-    );
-    const claim2 = prepareClaimInputsV2(
-      recipientKeys.spendingPrivKey,
-      found2[0],
-      merkleProof
-    );
+    const claim1 = await prepareClaimInputs(recipientKeys, found1[0], merkleProof);
+    const claim2 = await prepareClaimInputs(recipientKeys, found2[0], merkleProof);
 
     // Different leaf indices → different nullifiers!
-    expect(claim1.nullifierHash).not.toBe(claim2.nullifierHash);
+    expect(claim1.nullifier).not.toBe(claim2.nullifier);
   });
 });

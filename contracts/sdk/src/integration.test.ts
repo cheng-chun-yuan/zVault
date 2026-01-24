@@ -23,13 +23,6 @@ import {
   decodeClaimLink
 } from "./claim-link";
 import {
-  createStealthDeposit,
-  generateStealthKeys,
-  scanAnnouncements,
-  solanaKeyToX25519,
-  solanaPubKeyToX25519
-} from "./stealth";
-import {
   deposit,
   DEFAULT_PROGRAM_ID
 } from "./api";
@@ -42,7 +35,6 @@ import {
   ZERO_VALUE,
 } from "./merkle";
 import { deriveTaprootAddress } from "./taproot";
-import { Keypair } from "@solana/web3.js";
 
 describe("SDK Integration Tests", () => {
 
@@ -101,101 +93,6 @@ describe("SDK Integration Tests", () => {
     });
   });
 
-  describe("2. Stealth Address Flow", () => {
-
-    test("Generate stealth keys", () => {
-      const keys = generateStealthKeys();
-
-      expect(keys.viewPrivKey.length).toBe(32);
-      expect(keys.viewPubKey.length).toBe(32);
-
-      // Keys should be random
-      const keys2 = generateStealthKeys();
-      expect(keys.viewPrivKey).not.toEqual(keys2.viewPrivKey);
-    });
-
-    test("Create stealth deposit", () => {
-      const receiver = generateStealthKeys();
-      const amount = 100_000n;
-
-      const deposit = createStealthDeposit(receiver.viewPubKey, amount);
-
-      expect(deposit.ephemeralPubKey.length).toBe(32);
-      expect(deposit.encryptedAmount.length).toBe(8);
-      expect(deposit.recipientHint.length).toBe(4);
-      expect(deposit.amount).toBe(amount);
-      expect(deposit.nullifier).toBeGreaterThan(0n);
-      expect(deposit.secret).toBeGreaterThan(0n);
-    });
-
-    test("Scan and recover stealth deposit", () => {
-      const receiver = generateStealthKeys();
-      const amount = 75_000n;
-
-      const deposit = createStealthDeposit(receiver.viewPubKey, amount);
-
-      // Create announcement
-      const announcements = [{
-        ephemeralPubKey: deposit.ephemeralPubKey,
-        encryptedAmount: deposit.encryptedAmount,
-      }];
-
-      // Receiver scans
-      const found = scanAnnouncements(
-        receiver.viewPrivKey,
-        receiver.viewPubKey,
-        announcements
-      );
-
-      expect(found.length).toBe(1);
-      expect(found[0].amount).toBe(amount);
-      expect(found[0].secret).toBe(deposit.secret);
-      expect(found[0].nullifier).toBe(deposit.nullifier);
-    });
-
-    test("Multiple deposits with different amounts", () => {
-      const receiver = generateStealthKeys();
-      const amounts = [10_000n, 25_000n, 50_000n, 100_000n, 200_000n];
-
-      const deposits = amounts.map(amount =>
-        createStealthDeposit(receiver.viewPubKey, amount)
-      );
-
-      const announcements = deposits.map(d => ({
-        ephemeralPubKey: d.ephemeralPubKey,
-        encryptedAmount: d.encryptedAmount,
-      }));
-
-      const found = scanAnnouncements(
-        receiver.viewPrivKey,
-        receiver.viewPubKey,
-        announcements
-      );
-
-      expect(found.length).toBe(5);
-
-      // Verify all amounts recovered correctly
-      for (let i = 0; i < amounts.length; i++) {
-        const original = deposits[i];
-        const recovered = found.find(f => f.secret === original.secret);
-        expect(recovered).toBeDefined();
-        expect(recovered?.amount).toBe(amounts[i]);
-      }
-    });
-
-    test("Solana key to X25519 conversion", () => {
-      const solanaKeypair = Keypair.generate();
-
-      // Convert private key
-      const stealthKeys = solanaKeyToX25519(solanaKeypair.secretKey);
-      expect(stealthKeys.viewPrivKey.length).toBe(32);
-      expect(stealthKeys.viewPubKey.length).toBe(32);
-
-      // Convert public key
-      const x25519Pub = solanaPubKeyToX25519(solanaKeypair.publicKey.toBytes());
-      expect(x25519Pub.length).toBe(32);
-    });
-  });
 
   describe("3. Taproot Address Derivation", () => {
 
@@ -311,86 +208,14 @@ describe("SDK Integration Tests", () => {
     });
   });
 
-  describe("6. End-to-End Integration", () => {
-
-    test("Complete stealth deposit flow", async () => {
-      // 1. Receiver generates keys
-      const receiverSolana = Keypair.generate();
-      const receiverStealth = solanaKeyToX25519(receiverSolana.secretKey);
-
-      console.log("\n=== E2E Stealth Deposit Flow ===");
-      console.log("Receiver Solana:", receiverSolana.publicKey.toString());
-
-      // 2. Sender creates deposit
-      const amount = 50_000n;
-      const stealthDeposit = createStealthDeposit(receiverStealth.viewPubKey, amount);
-
-      console.log("Stealth deposit created:");
-      console.log("  Amount:", amount.toString(), "sats");
-      console.log("  Ephemeral:", Buffer.from(stealthDeposit.ephemeralPubKey).toString("hex").slice(0, 16) + "...");
-
-      // 3. Generate taproot address for BTC deposit
-      const placeholderCommitment = new Uint8Array(32);
-      const nullifierBytes = Buffer.from(stealthDeposit.nullifier.toString(16).padStart(64, "0"), "hex");
-      placeholderCommitment.set(nullifierBytes.slice(0, 32));
-
-      const { address: btcAddress } = await deriveTaprootAddress(placeholderCommitment, "testnet");
-      console.log("  BTC Address:", btcAddress);
-
-      // 4. Receiver scans and finds deposit
-      const announcements = [{
-        ephemeralPubKey: stealthDeposit.ephemeralPubKey,
-        encryptedAmount: stealthDeposit.encryptedAmount,
-      }];
-
-      const found = scanAnnouncements(
-        receiverStealth.viewPrivKey,
-        receiverStealth.viewPubKey,
-        announcements
-      );
-
-      expect(found.length).toBe(1);
-      console.log("Receiver found deposit!");
-      console.log("  Recovered amount:", found[0].amount.toString(), "sats");
-
-      // 5. Convert to Note format for claim
-      const note: Note = {
-        amount: found[0].amount,
-        nullifier: found[0].nullifier,
-        secret: found[0].secret,
-        nullifierBytes: Buffer.from(found[0].nullifier.toString(16).padStart(64, "0"), "hex"),
-        secretBytes: Buffer.from(found[0].secret.toString(16).padStart(64, "0"), "hex"),
-        commitmentBytes: new Uint8Array(32), // Would be computed by Noir
-        nullifierHashBytes: new Uint8Array(32), // Would be computed by Noir
-        commitment: 0n,
-        nullifierHash: 0n,
-      };
-
-      // 6. Create claim link for backup
-      const claimLink = createClaimLink(note);
-      console.log("  Claim link:", claimLink.slice(0, 50) + "...");
-
-      // 7. Parse back to verify
-      const parsed = parseClaimLink(claimLink);
-      expect(parsed?.amount).toBe(amount);
-      expect(parsed?.nullifier).toBe(found[0].nullifier);
-
-      console.log("=== E2E Complete ===\n");
-    });
-
-    test("Note split simulation", () => {
+  describe("6. Note Split Simulation", () => {
+    test("Split and create claim links", () => {
       // Create input note
       const inputNote = generateNote(100_000n);
-
-      console.log("\n=== Note Split Simulation ===");
-      console.log("Input amount:", inputNote.amount.toString(), "sats");
 
       // Split into 60k and 40k
       const output1 = generateNote(60_000n);
       const output2 = generateNote(40_000n);
-
-      console.log("Output 1:", output1.amount.toString(), "sats");
-      console.log("Output 2:", output2.amount.toString(), "sats");
 
       // Verify conservation
       expect(output1.amount + output2.amount).toBe(inputNote.amount);
@@ -399,14 +224,9 @@ describe("SDK Integration Tests", () => {
       const link1 = createClaimLink(output1);
       const link2 = createClaimLink(output2);
 
-      console.log("Claim link 1:", link1.slice(0, 40) + "...");
-      console.log("Claim link 2:", link2.slice(0, 40) + "...");
-
       // Verify links are parseable
       expect(parseClaimLink(link1)?.amount).toBe(60_000n);
       expect(parseClaimLink(link2)?.amount).toBe(40_000n);
-
-      console.log("=== Split Complete ===\n");
     });
   });
 });

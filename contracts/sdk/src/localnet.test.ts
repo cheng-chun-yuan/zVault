@@ -22,17 +22,17 @@ import {
   getOrCreateAssociatedTokenAccount,
   getAccount,
 } from "@solana/spl-token";
-import {
-  generateNote,
-  createClaimLink,
-  parseClaimLink,
-} from "./index";
+import { generateNote } from "./note";
+import { createClaimLink, parseClaimLink } from "./claim-link";
 import {
   createStealthDeposit,
-  generateStealthKeys,
   scanAnnouncements,
-  solanaKeyToX25519,
+  prepareClaimInputs,
 } from "./stealth";
+import {
+  deriveKeysFromSeed,
+  createStealthMetaAddress,
+} from "./keys";
 import { bigintToBytes } from "./crypto";
 
 // Program IDs (from Anchor.toml)
@@ -159,20 +159,21 @@ function buildAddDemoCommitmentInstruction(
 function buildAnnounceStealthInstruction(
   stealthAnnouncement: PublicKey,
   payer: PublicKey,
-  ephemeralPubKey: Uint8Array,
+  ephemeralViewPub: Uint8Array,
+  ephemeralSpendPub: Uint8Array,
+  amountSats: bigint,
   commitment: Uint8Array,
-  recipientHint: Uint8Array,
-  encryptedAmount: Uint8Array,
   leafIndex: bigint
 ): TransactionInstruction {
   // Instruction discriminator for announce_stealth = 12
-  const data = Buffer.alloc(1 + 32 + 32 + 4 + 8 + 8);
+  // New V2 format: ephemeral_view_pub (32) + ephemeral_spend_pub (33) + amount_sats (8) + commitment (32) + leaf_index (8)
+  const data = Buffer.alloc(1 + 32 + 33 + 8 + 32 + 8);
   let offset = 0;
   data.writeUInt8(12, offset); offset += 1;
-  Buffer.from(ephemeralPubKey).copy(data, offset); offset += 32;
+  Buffer.from(ephemeralViewPub).copy(data, offset); offset += 32;
+  Buffer.from(ephemeralSpendPub).copy(data, offset); offset += 33;
+  data.writeBigUInt64LE(amountSats, offset); offset += 8;
   Buffer.from(commitment).copy(data, offset); offset += 32;
-  Buffer.from(recipientHint).copy(data, offset); offset += 4;
-  Buffer.from(encryptedAmount).copy(data, offset); offset += 8;
   data.writeBigUInt64LE(leafIndex, offset);
 
   return new TransactionInstruction({
@@ -253,21 +254,29 @@ describe("Localnet Integration Tests", () => {
     console.log("Note generated:", note.amount.toString(), "sats");
   });
 
-  test("2. SDK Stealth Address (off-chain)", () => {
-    const receiver = generateStealthKeys();
+  test("2. SDK Stealth Address (off-chain)", async () => {
+    const seed = new Uint8Array(32);
+    seed.fill(0x42);
+    const receiverKeys = deriveKeysFromSeed(seed);
+    const meta = createStealthMetaAddress(receiverKeys);
     const amount = 50_000n;
 
-    const deposit = createStealthDeposit(receiver.viewPubKey, amount);
+    const deposit = await createStealthDeposit(meta, amount);
 
-    expect(deposit.amount).toBe(amount);
-    expect(deposit.ephemeralPubKey.length).toBe(32);
+    expect(deposit.amountSats).toBe(amount);
+    expect(deposit.ephemeralViewPub.length).toBe(32);
+    expect(deposit.ephemeralSpendPub.length).toBe(33);
 
     // Scan and recover
-    const found = scanAnnouncements(
-      receiver.viewPrivKey,
-      receiver.viewPubKey,
-      [{ ephemeralPubKey: deposit.ephemeralPubKey, encryptedAmount: deposit.encryptedAmount }]
-    );
+    const announcements = [{
+      ephemeralViewPub: deposit.ephemeralViewPub,
+      ephemeralSpendPub: deposit.ephemeralSpendPub,
+      amountSats: deposit.amountSats,
+      commitment: deposit.commitment,
+      leafIndex: 0,
+    }];
+
+    const found = await scanAnnouncements(receiverKeys, announcements);
 
     expect(found.length).toBe(1);
     expect(found[0].amount).toBe(amount);
@@ -295,62 +304,72 @@ describe("Localnet Integration Tests", () => {
     expect(poolStatePda).toBeDefined();
   });
 
-  test("5. Stealth Flow with Solana Keypair", () => {
-    // Receiver has a Solana keypair
-    const receiverSolana = Keypair.generate();
-
-    // Convert to X25519 for stealth
-    const receiverStealth = solanaKeyToX25519(receiverSolana.secretKey);
+  test("5. Stealth Flow with ZVaultKeys", async () => {
+    // Receiver generates keys from seed
+    const seed = new Uint8Array(32);
+    seed.fill(0x56);
+    const receiverKeys = deriveKeysFromSeed(seed);
+    const meta = createStealthMetaAddress(receiverKeys);
 
     // Sender creates deposit
     const amount = 75_000n;
-    const deposit = createStealthDeposit(receiverStealth.viewPubKey, amount);
+    const deposit = await createStealthDeposit(meta, amount);
 
     // Simulate on-chain announcement data
-    const announcementData = {
-      ephemeralPubKey: deposit.ephemeralPubKey,
-      encryptedAmount: deposit.encryptedAmount,
-      recipientHint: deposit.recipientHint,
-    };
+    const announcements = [{
+      ephemeralViewPub: deposit.ephemeralViewPub,
+      ephemeralSpendPub: deposit.ephemeralSpendPub,
+      amountSats: deposit.amountSats,
+      commitment: deposit.commitment,
+      leafIndex: 0,
+    }];
 
     // Receiver scans
-    const found = scanAnnouncements(
-      receiverStealth.viewPrivKey,
-      receiverStealth.viewPubKey,
-      [announcementData]
-    );
+    const found = await scanAnnouncements(receiverKeys, announcements);
 
     expect(found.length).toBe(1);
     expect(found[0].amount).toBe(amount);
-    expect(found[0].secret).toBe(deposit.secret);
 
-    console.log("Solana keypair stealth flow works!");
-    console.log("  Receiver:", receiverSolana.publicKey.toString().slice(0, 16) + "...");
+    // Prepare claim
+    const merkleProof = {
+      root: 12345n,
+      pathElements: Array(20).fill(0n),
+      pathIndices: Array(20).fill(0),
+    };
+
+    const claimInputs = await prepareClaimInputs(receiverKeys, found[0], merkleProof);
+    expect(claimInputs.amount).toBe(amount);
+    expect(claimInputs.nullifier).toBeGreaterThan(0n);
+
+    console.log("ZVaultKeys stealth flow works!");
+    console.log("  ViewPubKey:", Buffer.from(meta.viewingPubKey).toString("hex").slice(0, 16) + "...");
     console.log("  Amount:", amount.toString(), "sats");
   });
 
-  test("6. Multiple Stealth Deposits Scan", () => {
-    const receiver = generateStealthKeys();
+  test("6. Multiple Stealth Deposits Scan", async () => {
+    const seed = new Uint8Array(32);
+    seed.fill(0x78);
+    const receiverKeys = deriveKeysFromSeed(seed);
+    const meta = createStealthMetaAddress(receiverKeys);
     const amounts = [10_000n, 20_000n, 30_000n, 40_000n, 50_000n];
 
-    const deposits = amounts.map(amount =>
-      createStealthDeposit(receiver.viewPubKey, amount)
+    const deposits = await Promise.all(
+      amounts.map(amount => createStealthDeposit(meta, amount))
     );
 
-    const announcements = deposits.map(d => ({
-      ephemeralPubKey: d.ephemeralPubKey,
-      encryptedAmount: d.encryptedAmount,
+    const announcements = deposits.map((d, i) => ({
+      ephemeralViewPub: d.ephemeralViewPub,
+      ephemeralSpendPub: d.ephemeralSpendPub,
+      amountSats: d.amountSats,
+      commitment: d.commitment,
+      leafIndex: i,
     }));
 
-    const found = scanAnnouncements(
-      receiver.viewPrivKey,
-      receiver.viewPubKey,
-      announcements
-    );
+    const found = await scanAnnouncements(receiverKeys, announcements);
 
     expect(found.length).toBe(5);
 
-    // Verify all amounts recovered
+    // Verify all amounts recovered (match by leafIndex)
     const foundAmounts = found.map(f => f.amount).sort((a, b) => Number(a - b));
     expect(foundAmounts).toEqual(amounts);
 
