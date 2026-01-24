@@ -13,6 +13,7 @@
  */
 import { Connection, Keypair, PublicKey } from "@solana/web3.js";
 import { type Note } from "./note";
+import { type StealthMetaAddress } from "./keys";
 import { type MerkleProof } from "./merkle";
 /**
  * Result from deposit() - credentials needed to receive BTC
@@ -223,46 +224,39 @@ export declare function privateSplit(config: ApiClientConfig, inputNote: Note, a
  */
 export declare function sendLink(note: Note, baseUrl?: string): string;
 /**
- * Send to specific recipient via stealth address (ECDH)
+ * Send to specific recipient via stealth address (dual-key ECDH)
  *
  * Creates an on-chain stealth announcement that only the recipient
  * can discover by scanning with their view key.
  *
  * **Flow:**
- * 1. ECDH key exchange: ephemeral keypair + recipient pubkey
- * 2. Derive note secrets from shared secret
+ * 1. Dual ECDH key exchange: X25519 (viewing) + Grumpkin (spending)
+ * 2. Compute commitment using Poseidon2
  * 3. Create on-chain StealthAnnouncement
  * 4. Recipient scans announcements with view key
- * 5. Recipient claims with recovered note
+ * 5. Recipient prepares claim inputs with spending key
  *
  * @param config - Client configuration
- * @param note - Note to send (commitment should already be in tree)
- * @param recipientPubKey - Recipient's X25519 public key (32 bytes)
+ * @param recipientMeta - Recipient's stealth meta-address (spending + viewing public keys)
+ * @param amountSats - Amount in satoshis
  * @param leafIndex - Leaf index in commitment tree
  * @returns Stealth result
  *
  * @example
  * ```typescript
  * // Send to Alice's stealth address
- * const result = await sendStealth(config, myNote, aliceX25519PubKey);
+ * const result = await sendStealth(config, aliceMetaAddress, 100_000n);
  *
  * // Alice scans and claims
- * const found = scanAnnouncements(aliceViewKey, alicePubKey, announcements);
- * const recovered = createNoteFromSecrets(found[0].nullifier, found[0].secret, found[0].amount);
- * await privateClaim(config, recovered);
+ * const found = await scanAnnouncements(aliceKeys, announcements);
+ * const claimInputs = await prepareClaimInputs(aliceKeys, found[0], merkleProof);
  * ```
  */
-export declare function sendStealth(config: ApiClientConfig, note: Note, recipientPubKey: Uint8Array, leafIndex?: number): Promise<StealthResult>;
-/**
- * Send to Solana recipient via stealth address
- *
- * Convenience function that converts a Solana Ed25519 public key
- * to X25519 before creating the stealth announcement.
- */
-export declare function sendStealthToSolana(config: ApiClientConfig, note: Note, recipientSolanaPubKey: Uint8Array, leafIndex?: number): Promise<StealthResult>;
+export declare function sendStealth(config: ApiClientConfig, recipientMeta: StealthMetaAddress, amountSats: bigint, leafIndex?: number): Promise<StealthResult>;
 export { generateNote, createNoteFromSecrets, deriveNote, deriveNotes, estimateSeedStrength } from "./note";
 export { parseClaimLink } from "./claim-link";
-export { scanAnnouncements, scanAnnouncementsWithSolana, generateStealthKeys, solanaKeyToX25519, solanaPubKeyToX25519, } from "./stealth";
+export { scanAnnouncements, prepareClaimInputs, isWalletAdapter, } from "./stealth";
 export type { Note } from "./note";
 export type { MerkleProof } from "./merkle";
-export type { StealthKeys, StealthDeposit } from "./stealth";
+export type { StealthDeposit, ScannedNote, ClaimInputs } from "./stealth";
+export type { StealthMetaAddress, ZVaultKeys } from "./keys";

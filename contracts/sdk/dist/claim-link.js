@@ -219,19 +219,9 @@ function encodeClaimLink(seedOrNullifier, secret) {
  * @returns Seed string, or { nullifier, secret } for legacy format, or null if invalid
  */
 function decodeClaimLink(encoded) {
+    // First, try legacy format (base64 JSON with { n, s })
+    // This needs to be checked first because base64 strings can look like seed phrases
     try {
-        // Try URL-decode first (new seed format)
-        const decoded = decodeURIComponent(encoded);
-        // If it's a readable seed phrase (contains letters/words), return it
-        if (/^[a-zA-Z0-9]/.test(decoded) && !decoded.startsWith("{")) {
-            return decoded;
-        }
-    }
-    catch {
-        // Not URL-encoded, try legacy format
-    }
-    try {
-        // Legacy format: base64 JSON with { n, s }
         let base64 = encoded.replace(/-/g, "+").replace(/_/g, "/");
         while (base64.length % 4) {
             base64 += "=";
@@ -240,12 +230,23 @@ function decodeClaimLink(encoded) {
             ? atob(base64)
             : Buffer.from(base64, "base64").toString("utf8");
         const data = JSON.parse(json);
-        if (data.n && data.s) {
+        if (data.n !== undefined && data.s !== undefined) {
             return { nullifier: data.n, secret: data.s };
         }
     }
     catch {
-        // Not legacy format either
+        // Not legacy format, try seed format
+    }
+    // Try URL-decode (new seed format)
+    try {
+        const decoded = decodeURIComponent(encoded);
+        // If it's a readable seed phrase (contains letters/words), return it
+        if (/^[a-zA-Z0-9]/.test(decoded) && !decoded.startsWith("{")) {
+            return decoded;
+        }
+    }
+    catch {
+        // Not URL-encoded
     }
     return null;
 }

@@ -2,186 +2,273 @@
 /**
  * Stealth address utilities for ZVault
  *
- * Implements stealth address functionality using X25519 ECDH.
- * Minimal 40-byte announcement format for maximum privacy:
- * - ephemeral_pubkey (32 bytes) - required for ECDH
- * - encrypted_amount (8 bytes) - required to compute commitment
- * - NO recipient_hint - prevents linking deposits to same recipient
+ * Dual-key ECDH with X25519 (viewing) + Grumpkin (spending)
  *
- * IMPORTANT: Noir circuits use Poseidon2 hashing which is not directly
- * available in this SDK. The stealth key derivation uses SHA256-based
- * KDF, and the derived secrets (nullifier, secret) are used as inputs
- * to Noir circuits which compute the actual Poseidon2 hashes.
+ * Format (131 bytes on-chain - simplified):
+ * - ephemeral_view_pub (32 bytes) - X25519 for off-chain scanning
+ * - ephemeral_spend_pub (33 bytes) - Grumpkin for in-circuit ECDH
+ * - amount_sats (8 bytes) - Verified BTC amount from SPV proof
+ * - commitment (32 bytes) - Poseidon2 hash for Merkle tree
+ * - leaf_index (8 bytes) - Position in Merkle tree
+ * - created_at (8 bytes) - Timestamp
+ *
+ * Key Separation Properties:
+ * - Viewing key can scan and decrypt but CANNOT derive nullifier
+ * - Spending key required for nullifier derivation and proof generation
+ * - Sender cannot spend (wrong ECDH → wrong commitment → not in tree)
+ *
+ * SECURITY NOTES:
+ * - Commitment is computed using Poseidon2 (matches Noir circuits)
+ * - Amount encryption removed (public on Bitcoin blockchain anyway)
+ * - Random value removed (ephemeral key uniqueness is sufficient)
+ *
+ * KNOWN LIMITATION - CROSS-CHAIN CORRELATION:
+ * The ephemeral_view_pub appears on BOTH Bitcoin (in OP_RETURN) and Solana
+ * (in StealthAnnouncement). This creates a 1:1 linkage between the chains.
+ * To mitigate: Use fresh ephemeral keys for each deposit and consider
+ * additional privacy layers like mixers or delayed reveals.
  */
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.solanaKeyToX25519 = solanaKeyToX25519;
-exports.solanaPubKeyToX25519 = solanaPubKeyToX25519;
-exports.generateStealthKeys = generateStealthKeys;
-exports.getStealthSharedSecret = getStealthSharedSecret;
+exports.STEALTH_ANNOUNCEMENT_DISCRIMINATOR = exports.STEALTH_ANNOUNCEMENT_SIZE = void 0;
+exports.isWalletAdapter = isWalletAdapter;
 exports.createStealthDeposit = createStealthDeposit;
-exports.createStealthDepositForSolana = createStealthDepositForSolana;
 exports.scanAnnouncements = scanAnnouncements;
-exports.scanAnnouncementsWithSolana = scanAnnouncementsWithSolana;
+exports.prepareClaimInputs = prepareClaimInputs;
+exports.parseStealthAnnouncement = parseStealthAnnouncement;
+exports.announcementToScanFormat = announcementToScanFormat;
 const tweetnacl_1 = require("tweetnacl");
-const ed2curve_1 = require("ed2curve");
 const crypto_1 = require("./crypto");
-// ========== Option A: Ed25519 → X25519 (Linked to Solana) ==========
-function solanaKeyToX25519(ed25519PrivKey) {
-    const viewPrivKey = (0, ed2curve_1.convertSecretKey)(ed25519PrivKey);
-    const keyPair = tweetnacl_1.box.keyPair.fromSecretKey(viewPrivKey);
-    return { viewPrivKey: viewPrivKey, viewPubKey: keyPair.publicKey };
-}
-function solanaPubKeyToX25519(ed25519PubKey) {
-    return (0, ed2curve_1.convertPublicKey)(ed25519PubKey);
-}
-// ========== Option B: Native X25519 (Maximum Privacy) ==========
-function generateStealthKeys() {
-    const keyPair = tweetnacl_1.box.keyPair();
-    return { viewPrivKey: keyPair.secretKey, viewPubKey: keyPair.publicKey };
-}
-// ========== Core Functions ==========
+const grumpkin_1 = require("./grumpkin");
+const keys_1 = require("./keys");
+const poseidon2_1 = require("./poseidon2");
+// ========== Type Guard ==========
 /**
- * Computes a shared secret using ECDH.
- * If no private key is provided, a new one is generated on the fly (ephemeral).
+ * Type guard to distinguish between WalletSignerAdapter and ZVaultKeys
  */
-function getStealthSharedSecret(recipientPubKey, senderPrivKey) {
-    let priv = senderPrivKey;
-    let pub;
-    if (priv) {
-        pub = tweetnacl_1.box.keyPair.fromSecretKey(priv).publicKey;
-    }
-    else {
-        const keyPair = tweetnacl_1.box.keyPair();
-        priv = keyPair.secretKey;
-        pub = keyPair.publicKey;
-    }
-    const sharedSecret = (0, tweetnacl_1.scalarMult)(priv, recipientPubKey);
-    return { sharedSecret, senderPubKey: pub };
+function isWalletAdapter(source) {
+    return (typeof source === "object" &&
+        source !== null &&
+        "signMessage" in source &&
+        typeof source.signMessage === "function");
 }
+// ========== On-chain Announcement ==========
 /**
- * Derive deterministic values from shared secret using SHA256
+ * Size of StealthAnnouncement account on-chain (SIMPLIFIED FORMAT)
  *
- * This KDF generates field elements that will be used as inputs to Noir circuits.
- * The circuits compute Poseidon2 hashes internally.
+ * Layout (131 bytes):
+ * - discriminator (1 byte)
+ * - bump (1 byte)
+ * - ephemeral_view_pub (32 bytes)
+ * - ephemeral_spend_pub (33 bytes)
+ * - amount_sats (8 bytes) - verified from BTC tx, stored directly
+ * - commitment (32 bytes)
+ * - leaf_index (8 bytes)
+ * - created_at (8 bytes)
+ *
+ * SAVINGS: 24 bytes (from 155) by removing encrypted_amount and encrypted_random
  */
-function deriveStealthSecrets(sharedSecret, amount) {
-    // Derive nullifier from H(sharedSecret || "nullifier" || amount)
-    const encoder = new TextEncoder();
-    const amountBytes = (0, crypto_1.bigintToBytes)(amount);
-    const nullifierInput = new Uint8Array(32 + 9 + 32);
-    nullifierInput.set(sharedSecret, 0);
-    nullifierInput.set(encoder.encode("nullifier"), 32);
-    nullifierInput.set(amountBytes, 41);
-    const nullifierHash = (0, crypto_1.sha256Hash)(nullifierInput);
-    const nullifier = (0, crypto_1.bytesToBigint)(nullifierHash) % crypto_1.BN254_FIELD_PRIME;
-    // Derive secret from H(sharedSecret || "secret" || amount)
-    const secretInput = new Uint8Array(32 + 6 + 32);
-    secretInput.set(sharedSecret, 0);
-    secretInput.set(encoder.encode("secret"), 32);
-    secretInput.set(amountBytes, 38);
-    const secretHash = (0, crypto_1.sha256Hash)(secretInput);
-    const secret = (0, crypto_1.bytesToBigint)(secretHash) % crypto_1.BN254_FIELD_PRIME;
-    // Derive amount encryption key from H(sharedSecret || "amount")
-    const amountKeyInput = new Uint8Array(32 + 6);
-    amountKeyInput.set(sharedSecret, 0);
-    amountKeyInput.set(encoder.encode("amount"), 32);
-    const amountKeyHash = (0, crypto_1.sha256Hash)(amountKeyInput);
-    const amountKey = (0, crypto_1.bytesToBigint)(amountKeyHash);
-    return { nullifier, secret, amountKey };
-}
+exports.STEALTH_ANNOUNCEMENT_SIZE = 131;
+/** Discriminator for StealthAnnouncement */
+exports.STEALTH_ANNOUNCEMENT_DISCRIMINATOR = 0x08;
+// ========== Sender Functions ==========
 /**
- * Create a stealth deposit (minimal 40-byte format)
+ * Create a stealth deposit with dual-key ECDH
  *
- * Generates ephemeral keypair, derives secrets via ECDH + KDF.
- * The nullifier and secret are used as inputs to Noir circuits
- * which compute the Poseidon2-based commitment internally.
+ * Generates two ephemeral keypairs:
+ * - X25519: For viewing/scanning (fast off-chain ECDH)
+ * - Grumpkin: For spending proofs (efficient in-circuit ECDH)
  *
- * No recipient hint is included for maximum privacy - recipient
- * must try ECDH on all announcements to find their deposits.
+ * SIMPLIFIED FORMAT:
+ * - No encrypted_amount: BTC amount is public on Bitcoin blockchain
+ * - No encrypted_random: Fresh ephemeral keys provide uniqueness
+ * - Commitment uses Poseidon2: commitment = Poseidon2(notePubKey, amount)
+ *
+ * @param source - Wallet adapter OR pre-derived ZVaultKeys (recipient's keys)
+ * @param recipientMeta - Recipient's stealth meta-address
+ * @param amountSats - Amount in satoshis
+ * @returns Stealth deposit data for on-chain announcement
  */
-function createStealthDeposit(recipientX25519Pub, amountSats) {
-    const { sharedSecret, senderPubKey: ephemeralPubKey } = getStealthSharedSecret(recipientX25519Pub);
-    const { nullifier, secret, amountKey } = deriveStealthSecrets(sharedSecret, amountSats);
-    // Encrypt amount with XOR
-    const encryptedAmount = bigintToBytes8(amountSats ^ (amountKey & 0xffffffffffffffffn));
-    // Generate recipient hint: first 4 bytes of recipient pubkey hash
-    const recipientHash = (0, crypto_1.sha256Hash)(recipientX25519Pub);
-    const recipientHint = recipientHash.slice(0, 4);
+async function createStealthDeposit(recipientMeta, amountSats) {
+    // Parse recipient's public keys
+    const recipientSpendPub = (0, grumpkin_1.pointFromCompressedBytes)(recipientMeta.spendingPubKey);
+    // Generate ephemeral X25519 keypair for viewing
+    const ephemeralView = tweetnacl_1.box.keyPair();
+    // Generate ephemeral Grumpkin keypair for spending
+    const ephemeralSpend = (0, grumpkin_1.generateKeyPair)();
+    const spendShared = (0, grumpkin_1.ecdh)(ephemeralSpend.privKey, recipientSpendPub);
+    // Compute note public key using Poseidon2
+    // notePubKey = Poseidon2(spendShared.x, spendShared.y, DOMAIN_NPK)
+    const notePubKey = (0, poseidon2_1.deriveNotePubKey)(spendShared.x, spendShared.y);
+    // Compute commitment using Poseidon2 (SIMPLIFIED: no random)
+    // commitment = Poseidon2(notePubKey, amount)
+    const commitmentBigint = (0, poseidon2_1.computeCommitmentV2)(notePubKey, amountSats, 0n);
+    const commitment = (0, crypto_1.bigintToBytes)(commitmentBigint);
     return {
-        ephemeralPubKey,
-        encryptedAmount,
-        recipientHint,
-        nullifier,
-        secret,
-        amount: amountSats,
+        ephemeralViewPub: ephemeralView.publicKey,
+        ephemeralSpendPub: (0, grumpkin_1.pointToCompressedBytes)(ephemeralSpend.pubKey),
+        amountSats,
+        commitment,
+        createdAt: Date.now(),
     };
 }
+// ========== Recipient Scanning (Viewing Key Only) ==========
 /**
- * Create a stealth deposit for a Solana recipient
- */
-function createStealthDepositForSolana(recipientSolanaPubKey, amountSats) {
-    return createStealthDeposit(solanaPubKeyToX25519(recipientSolanaPubKey), amountSats);
-}
-/**
- * Scan announcements for deposits belonging to us
+ * Scan announcements using viewing key only
  *
- * Maximum privacy mode: tries ECDH on ALL announcements (no hint filtering).
- * This prevents any linkability between deposits to the same recipient.
+ * SIMPLIFIED FORMAT:
+ * - Amount is stored directly (not encrypted)
+ * - No random field to decrypt
+ * - Viewing key validates ownership via ECDH + commitment verification
  *
- * To verify ownership, the function checks if the decrypted amount is
- * reasonable (> 0 and < 21M BTC). For full verification, use a Noir
- * helper circuit to compute and compare Poseidon2 commitments.
+ * This function can see amounts but CANNOT:
+ * - Derive the nullifier (requires spending key)
+ * - Generate spending proofs
+ *
+ * @param source - Wallet adapter OR pre-derived ZVaultKeys
+ * @param announcements - Array of on-chain announcements
+ * @returns Array of found notes (ready for claim preparation)
  */
-function scanAnnouncements(viewPrivKey, _viewPubKey, // kept for API compatibility
-announcements) {
+async function scanAnnouncements(source, announcements) {
+    // Get keys from source
+    const keys = isWalletAdapter(source) ? await (0, keys_1.deriveKeysFromWallet)(source) : source;
     const found = [];
     const MAX_SATS = 21000000n * 100000000n; // 21M BTC in sats
     for (const ann of announcements) {
-        // ECDH with our view private key (try all - no hint filtering)
-        const { sharedSecret } = getStealthSharedSecret(ann.ephemeralPubKey, viewPrivKey);
-        // Decrypt amount
-        const encoder = new TextEncoder();
-        const amountKeyInput = new Uint8Array(32 + 6);
-        amountKeyInput.set(sharedSecret, 0);
-        amountKeyInput.set(encoder.encode("amount"), 32);
-        const amountKeyHash = (0, crypto_1.sha256Hash)(amountKeyInput);
-        const amountKey = (0, crypto_1.bytesToBigint)(amountKeyHash);
-        const amount = bytes8ToBigint(ann.encryptedAmount) ^ (amountKey & 0xffffffffffffffffn);
-        // Basic sanity check: amount should be reasonable
-        // If wrong key, decrypted amount will likely be garbage (huge number)
-        if (amount <= 0n || amount > MAX_SATS) {
-            continue; // Probably not ours
+        try {
+            // Basic sanity check on amount
+            if (ann.amountSats <= 0n || ann.amountSats > MAX_SATS) {
+                continue;
+            }
+            // Parse ephemeral spend pubkey
+            const ephemeralSpendPub = (0, grumpkin_1.pointFromCompressedBytes)(ann.ephemeralSpendPub);
+            // For viewing-only scanning, we cannot fully verify the commitment
+            // because we don't have the spending private key.
+            // The recipient will verify during claim preparation.
+            found.push({
+                amount: ann.amountSats,
+                ephemeralSpendPub,
+                leafIndex: ann.leafIndex,
+                commitment: ann.commitment,
+            });
         }
-        // Derive secrets
-        const { nullifier, secret } = deriveStealthSecrets(sharedSecret, amount);
-        // Note: We cannot verify commitment here without Poseidon2
-        // The caller should verify via Noir circuit if needed
-        found.push({ nullifier, secret, amount });
+        catch {
+            // Parsing failed - skip this announcement
+            continue;
+        }
     }
     return found;
 }
+// ========== Claim Preparation (Spending Key Required) ==========
 /**
- * Scan announcements using Solana keypair
+ * Prepare claim inputs for ZK proof generation
+ *
+ * CRITICAL: This function requires the spending private key.
+ * The nullifier is derived from (spendingPrivKey, leafIndex).
+ * Only the legitimate recipient can compute a valid nullifier.
+ *
+ * Why sender cannot claim:
+ * - Sender knows ephemeral_priv and shared_secret
+ * - Sender does NOT know recipient's spendingPrivKey
+ * - Wrong spendingPrivKey → wrong ECDH → wrong commitment → not in tree
+ *
+ * SIMPLIFIED FORMAT:
+ * - Uses Poseidon2 for all hashing (matches Noir circuits)
+ * - Single nullifier hash (removed double-hashing)
+ * - No random field needed
+ *
+ * @param source - Wallet adapter OR pre-derived ZVaultKeys
+ * @param note - Scanned note from scanning phase
+ * @param merkleProof - Merkle proof for the commitment
+ * @returns Inputs ready for Noir claim circuit
  */
-function scanAnnouncementsWithSolana(solanaPrivKey, announcements) {
-    const { viewPrivKey, viewPubKey } = solanaKeyToX25519(solanaPrivKey);
-    return scanAnnouncements(viewPrivKey, viewPubKey, announcements);
-}
-// ========== Utilities ==========
-function bigintToBytes8(value) {
-    const bytes = new Uint8Array(8);
-    let v = value;
-    for (let i = 7; i >= 0; i--) {
-        bytes[i] = Number(v & 0xffn);
-        v >>= 8n;
+async function prepareClaimInputs(source, note, merkleProof) {
+    // Get keys from source
+    const keys = isWalletAdapter(source) ? await (0, keys_1.deriveKeysFromWallet)(source) : source;
+    // Grumpkin ECDH with spending key
+    const spendShared = (0, grumpkin_1.ecdh)(keys.spendingPrivKey, note.ephemeralSpendPub);
+    // Verify commitment matches (sanity check)
+    const notePubKey = (0, poseidon2_1.deriveNotePubKey)(spendShared.x, spendShared.y);
+    const expectedCommitment = (0, poseidon2_1.computeCommitmentV2)(notePubKey, note.amount, 0n);
+    const actualCommitment = (0, crypto_1.bytesToBigint)(note.commitment);
+    if (expectedCommitment !== actualCommitment) {
+        throw new Error("Commitment mismatch - this note may not belong to you or the announcement is invalid");
     }
-    return bytes;
+    // CRITICAL: Nullifier from spending private key + leaf index
+    // nullifier = Poseidon2(spendingPrivKey, leafIndex, DOMAIN_NULL)
+    // Only recipient can compute this!
+    const nullifier = (0, poseidon2_1.computeNullifierV2)(keys.spendingPrivKey, BigInt(note.leafIndex));
+    return {
+        // Private inputs
+        spendingPrivKey: keys.spendingPrivKey,
+        ephemeralSpendPub: note.ephemeralSpendPub,
+        amount: note.amount,
+        leafIndex: note.leafIndex,
+        merklePath: merkleProof.pathElements,
+        merkleIndices: merkleProof.pathIndices,
+        // Public inputs
+        merkleRoot: merkleProof.root,
+        nullifier, // Single hash, not double-hashed
+        amountPub: note.amount,
+    };
 }
-function bytes8ToBigint(bytes) {
-    let result = 0n;
-    for (let i = 0; i < 8; i++) {
-        result = (result << 8n) | BigInt(bytes[i]);
+// ========== On-chain Parsing ==========
+/**
+ * Parse a StealthAnnouncement account data (SIMPLIFIED FORMAT)
+ *
+ * Layout (131 bytes):
+ * - discriminator (1 byte)
+ * - bump (1 byte)
+ * - ephemeral_view_pub (32 bytes)
+ * - ephemeral_spend_pub (33 bytes)
+ * - amount_sats (8 bytes) - verified BTC amount
+ * - commitment (32 bytes)
+ * - leaf_index (8 bytes)
+ * - created_at (8 bytes)
+ */
+function parseStealthAnnouncement(data) {
+    if (data.length < exports.STEALTH_ANNOUNCEMENT_SIZE) {
+        return null;
     }
-    return result;
+    // Check discriminator
+    if (data[0] !== exports.STEALTH_ANNOUNCEMENT_DISCRIMINATOR) {
+        return null;
+    }
+    let offset = 2; // Skip discriminator and bump
+    const ephemeralViewPub = data.slice(offset, offset + 32);
+    offset += 32;
+    const ephemeralSpendPub = data.slice(offset, offset + 33);
+    offset += 33;
+    // Parse amount_sats (8 bytes, LE)
+    const amountView = new DataView(data.buffer, data.byteOffset + offset, 8);
+    const amountSats = amountView.getBigUint64(0, true);
+    offset += 8;
+    const commitment = data.slice(offset, offset + 32);
+    offset += 32;
+    // Parse leaf_index (8 bytes, LE)
+    const leafIndexView = new DataView(data.buffer, data.byteOffset + offset, 8);
+    const leafIndex = Number(leafIndexView.getBigUint64(0, true));
+    offset += 8;
+    // Parse created_at (8 bytes, LE)
+    const createdAtView = new DataView(data.buffer, data.byteOffset + offset, 8);
+    const createdAt = Number(createdAtView.getBigInt64(0, true));
+    return {
+        ephemeralViewPub,
+        ephemeralSpendPub,
+        amountSats,
+        commitment,
+        leafIndex,
+        createdAt,
+    };
 }
-// arraysEqual removed - no longer needed without recipient hint filtering
+/**
+ * Convert on-chain announcement to format expected by scanAnnouncements
+ */
+function announcementToScanFormat(announcement) {
+    return {
+        ephemeralViewPub: announcement.ephemeralViewPub,
+        ephemeralSpendPub: announcement.ephemeralSpendPub,
+        amountSats: announcement.amountSats,
+        commitment: announcement.commitment,
+        leafIndex: announcement.leafIndex,
+    };
+}

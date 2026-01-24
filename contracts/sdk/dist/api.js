@@ -13,14 +13,13 @@
  * @module api
  */
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.solanaPubKeyToX25519 = exports.solanaKeyToX25519 = exports.generateStealthKeys = exports.scanAnnouncementsWithSolana = exports.scanAnnouncements = exports.parseClaimLink = exports.estimateSeedStrength = exports.deriveNotes = exports.deriveNote = exports.createNoteFromSecrets = exports.generateNote = exports.DEFAULT_PROGRAM_ID = void 0;
+exports.isWalletAdapter = exports.prepareClaimInputs = exports.scanAnnouncements = exports.parseClaimLink = exports.estimateSeedStrength = exports.deriveNotes = exports.deriveNote = exports.createNoteFromSecrets = exports.generateNote = exports.DEFAULT_PROGRAM_ID = void 0;
 exports.deposit = deposit;
 exports.withdraw = withdraw;
 exports.privateClaim = privateClaim;
 exports.privateSplit = privateSplit;
 exports.sendLink = sendLink;
 exports.sendStealth = sendStealth;
-exports.sendStealthToSolana = sendStealthToSolana;
 const web3_js_1 = require("@solana/web3.js");
 const note_1 = require("./note");
 const taproot_1 = require("./taproot");
@@ -374,53 +373,58 @@ function sendLink(note, baseUrl) {
 // 6. SEND_STEALTH (ECDH Mode)
 // ============================================================================
 /**
- * Send to specific recipient via stealth address (ECDH)
+ * Send to specific recipient via stealth address (dual-key ECDH)
  *
  * Creates an on-chain stealth announcement that only the recipient
  * can discover by scanning with their view key.
  *
  * **Flow:**
- * 1. ECDH key exchange: ephemeral keypair + recipient pubkey
- * 2. Derive note secrets from shared secret
+ * 1. Dual ECDH key exchange: X25519 (viewing) + Grumpkin (spending)
+ * 2. Compute commitment using Poseidon2
  * 3. Create on-chain StealthAnnouncement
  * 4. Recipient scans announcements with view key
- * 5. Recipient claims with recovered note
+ * 5. Recipient prepares claim inputs with spending key
  *
  * @param config - Client configuration
- * @param note - Note to send (commitment should already be in tree)
- * @param recipientPubKey - Recipient's X25519 public key (32 bytes)
+ * @param recipientMeta - Recipient's stealth meta-address (spending + viewing public keys)
+ * @param amountSats - Amount in satoshis
  * @param leafIndex - Leaf index in commitment tree
  * @returns Stealth result
  *
  * @example
  * ```typescript
  * // Send to Alice's stealth address
- * const result = await sendStealth(config, myNote, aliceX25519PubKey);
+ * const result = await sendStealth(config, aliceMetaAddress, 100_000n);
  *
  * // Alice scans and claims
- * const found = scanAnnouncements(aliceViewKey, alicePubKey, announcements);
- * const recovered = createNoteFromSecrets(found[0].nullifier, found[0].secret, found[0].amount);
- * await privateClaim(config, recovered);
+ * const found = await scanAnnouncements(aliceKeys, announcements);
+ * const claimInputs = await prepareClaimInputs(aliceKeys, found[0], merkleProof);
  * ```
  */
-async function sendStealth(config, note, recipientPubKey, leafIndex = 0) {
+async function sendStealth(config, recipientMeta, amountSats, leafIndex = 0) {
     if (!config.payer) {
         throw new Error("Payer keypair required for stealth send");
     }
-    // Create stealth deposit data
-    const stealthDeposit = (0, stealth_1.createStealthDeposit)(recipientPubKey, note.amount);
-    // Build instruction data (84 bytes)
-    // ephemeral_pubkey (32) + commitment (32) + recipient_hint (4) + encrypted_amount (8) + leaf_index (8)
-    const data = new Uint8Array(1 + 84);
+    // Create stealth deposit data using dual-key ECDH
+    const stealthDeposit = await (0, stealth_1.createStealthDeposit)(recipientMeta, amountSats);
+    // Build instruction data (113 bytes)
+    // ephemeral_view_pub (32) + ephemeral_spend_pub (33) + amount_sats (8) + commitment (32) + leaf_index (8)
+    const data = new Uint8Array(1 + 113);
     data[0] = INSTRUCTION.ANNOUNCE_STEALTH;
-    data.set(stealthDeposit.ephemeralPubKey, 1);
-    data.set(note.commitmentBytes, 33);
-    data.set(stealthDeposit.recipientHint, 65);
-    data.set(stealthDeposit.encryptedAmount, 69);
-    const leafIndexView = new DataView(data.buffer, 77, 8);
+    let offset = 1;
+    data.set(stealthDeposit.ephemeralViewPub, offset);
+    offset += 32;
+    data.set(stealthDeposit.ephemeralSpendPub, offset);
+    offset += 33;
+    const amountView = new DataView(data.buffer, offset, 8);
+    amountView.setBigUint64(0, amountSats, true);
+    offset += 8;
+    data.set(stealthDeposit.commitment, offset);
+    offset += 32;
+    const leafIndexView = new DataView(data.buffer, offset, 8);
     leafIndexView.setBigUint64(0, BigInt(leafIndex), true);
     // Derive stealth announcement PDA
-    const [stealthAnnouncement] = deriveStealthAnnouncementPDA(config.programId, note.commitmentBytes);
+    const [stealthAnnouncement] = deriveStealthAnnouncementPDA(config.programId, stealthDeposit.commitment);
     // Build transaction
     const ix = new web3_js_1.TransactionInstruction({
         programId: config.programId,
@@ -436,47 +440,7 @@ async function sendStealth(config, note, recipientPubKey, leafIndex = 0) {
     await config.connection.confirmTransaction(signature);
     return {
         signature,
-        ephemeralPubKey: stealthDeposit.ephemeralPubKey,
-        leafIndex,
-    };
-}
-/**
- * Send to Solana recipient via stealth address
- *
- * Convenience function that converts a Solana Ed25519 public key
- * to X25519 before creating the stealth announcement.
- */
-async function sendStealthToSolana(config, note, recipientSolanaPubKey, leafIndex = 0) {
-    const stealthDeposit = (0, stealth_1.createStealthDepositForSolana)(recipientSolanaPubKey, note.amount);
-    // Re-use sendStealth logic with converted key
-    // The stealth deposit already uses the converted key internally
-    if (!config.payer) {
-        throw new Error("Payer keypair required for stealth send");
-    }
-    const data = new Uint8Array(1 + 84);
-    data[0] = INSTRUCTION.ANNOUNCE_STEALTH;
-    data.set(stealthDeposit.ephemeralPubKey, 1);
-    data.set(note.commitmentBytes, 33);
-    data.set(stealthDeposit.recipientHint, 65);
-    data.set(stealthDeposit.encryptedAmount, 69);
-    const leafIndexView = new DataView(data.buffer, 77, 8);
-    leafIndexView.setBigUint64(0, BigInt(leafIndex), true);
-    const [stealthAnnouncement] = deriveStealthAnnouncementPDA(config.programId, note.commitmentBytes);
-    const ix = new web3_js_1.TransactionInstruction({
-        programId: config.programId,
-        keys: [
-            { pubkey: stealthAnnouncement, isSigner: false, isWritable: true },
-            { pubkey: config.payer.publicKey, isSigner: true, isWritable: true },
-            { pubkey: web3_js_1.SystemProgram.programId, isSigner: false, isWritable: false },
-        ],
-        data: Buffer.from(data),
-    });
-    const tx = new web3_js_1.Transaction().add(ix);
-    const signature = await config.connection.sendTransaction(tx, [config.payer]);
-    await config.connection.confirmTransaction(signature);
-    return {
-        signature,
-        ephemeralPubKey: stealthDeposit.ephemeralPubKey,
+        ephemeralPubKey: stealthDeposit.ephemeralViewPub,
         leafIndex,
     };
 }
@@ -564,7 +528,5 @@ var claim_link_2 = require("./claim-link");
 Object.defineProperty(exports, "parseClaimLink", { enumerable: true, get: function () { return claim_link_2.parseClaimLink; } });
 var stealth_2 = require("./stealth");
 Object.defineProperty(exports, "scanAnnouncements", { enumerable: true, get: function () { return stealth_2.scanAnnouncements; } });
-Object.defineProperty(exports, "scanAnnouncementsWithSolana", { enumerable: true, get: function () { return stealth_2.scanAnnouncementsWithSolana; } });
-Object.defineProperty(exports, "generateStealthKeys", { enumerable: true, get: function () { return stealth_2.generateStealthKeys; } });
-Object.defineProperty(exports, "solanaKeyToX25519", { enumerable: true, get: function () { return stealth_2.solanaKeyToX25519; } });
-Object.defineProperty(exports, "solanaPubKeyToX25519", { enumerable: true, get: function () { return stealth_2.solanaPubKeyToX25519; } });
+Object.defineProperty(exports, "prepareClaimInputs", { enumerable: true, get: function () { return stealth_2.prepareClaimInputs; } });
+Object.defineProperty(exports, "isWalletAdapter", { enumerable: true, get: function () { return stealth_2.isWalletAdapter; } });

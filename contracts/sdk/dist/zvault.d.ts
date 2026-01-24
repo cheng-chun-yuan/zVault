@@ -18,7 +18,7 @@ import { type Note } from "./note";
 import { type MerkleProof } from "./merkle";
 import { type NoirProof } from "./proof";
 import { HistoryManager } from "./history";
-import { type DepositResult, type WithdrawResult, type ClaimResult as ApiClaimResultType, type SplitResult as ApiSplitResultType, type StealthResult } from "./api";
+import { type DepositResult, type WithdrawResult, type ClaimResult as ApiClaimResultType, type SplitResult as ApiSplitResultType, type StealthResult, type StealthMetaAddress } from "./api";
 export declare const ZVAULT_PROGRAM_ID: PublicKey;
 /**
  * Deposit credentials returned after generating a deposit
@@ -134,19 +134,15 @@ export declare class ZVaultClient {
      */
     sendLink(note: Note, baseUrl?: string): string;
     /**
-     * 6. SEND_STEALTH - Send to specific recipient via ECDH
+     * 6. SEND_STEALTH - Send to specific recipient via dual-key ECDH
      *
      * Creates on-chain stealth announcement. Only recipient can claim.
      *
-     * @param note - Note to send
-     * @param recipientPubKey - Recipient's X25519 public key
+     * @param recipientMeta - Recipient's stealth meta-address (spending + viewing public keys)
+     * @param amountSats - Amount in satoshis
      * @param leafIndex - Leaf index in tree
      */
-    sendStealth(note: Note, recipientPubKey: Uint8Array, leafIndex?: number): Promise<StealthResult>;
-    /**
-     * Send to Solana recipient via stealth address
-     */
-    sendStealthToSolana(note: Note, recipientSolanaPubKey: Uint8Array, leafIndex?: number): Promise<StealthResult>;
+    sendStealth(recipientMeta: StealthMetaAddress, amountSats: bigint, leafIndex?: number): Promise<StealthResult>;
     /**
      * Generate merkle proof for a note (helper)
      */

@@ -162,23 +162,17 @@ class ZVaultClient {
         return (0, api_1.sendLink)(note, baseUrl);
     }
     /**
-     * 6. SEND_STEALTH - Send to specific recipient via ECDH
+     * 6. SEND_STEALTH - Send to specific recipient via dual-key ECDH
      *
      * Creates on-chain stealth announcement. Only recipient can claim.
      *
-     * @param note - Note to send
-     * @param recipientPubKey - Recipient's X25519 public key
+     * @param recipientMeta - Recipient's stealth meta-address (spending + viewing public keys)
+     * @param amountSats - Amount in satoshis
      * @param leafIndex - Leaf index in tree
      */
-    async sendStealth(note, recipientPubKey, leafIndex = 0) {
-        const result = await (0, api_1.sendStealth)(this.getApiConfig(), note, recipientPubKey, leafIndex);
+    async sendStealth(recipientMeta, amountSats, leafIndex = 0) {
+        const result = await (0, api_1.sendStealth)(this.getApiConfig(), recipientMeta, amountSats, leafIndex);
         return result;
-    }
-    /**
-     * Send to Solana recipient via stealth address
-     */
-    async sendStealthToSolana(note, recipientSolanaPubKey, leafIndex = 0) {
-        return (0, api_1.sendStealthToSolana)(this.getApiConfig(), note, recipientSolanaPubKey, leafIndex);
     }
     /**
      * Generate merkle proof for a note (helper)

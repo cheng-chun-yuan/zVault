@@ -238,3 +238,70 @@ export declare function prepareWithdrawal(inputNote: NoteData, withdrawAmount: b
     changeNote: NoteData;
     changeAmount: bigint;
 };
+/**
+ * V2 Note structure for dual-key ECDH system
+ *
+ * Key differences from V1:
+ * - Uses random value instead of nullifier/secret for commitment
+ * - Stores ephemeral spending pubkey for proof generation
+ * - Nullifier derived from (spendingPrivKey, leafIndex) in circuit
+ */
+export interface NoteV2 {
+    /** Amount in satoshis */
+    amount: bigint;
+    /** Random value for commitment (replaces nullifier/secret) */
+    random: bigint;
+    /** Ephemeral Grumpkin spending public key (from sender) */
+    ephemeralSpendPubX: bigint;
+    ephemeralSpendPubY: bigint;
+    /** Leaf index in Merkle tree (set when commitment added on-chain) */
+    leafIndex: number;
+    /** Note public key = Poseidon2(ECDHShared.x, ECDHShared.y, DOMAIN_NPK) */
+    notePubKey: bigint;
+    /** Commitment = Poseidon2(notePubKey, amount, random) */
+    commitment: bigint;
+    /** Byte representations */
+    randomBytes: Uint8Array;
+    commitmentBytes: Uint8Array;
+}
+/**
+ * Serializable V2 note data
+ */
+export interface SerializedNoteV2 {
+    amount: string;
+    random: string;
+    ephemeralSpendPubX: string;
+    ephemeralSpendPubY: string;
+    leafIndex: number;
+    notePubKey?: string;
+    commitment?: string;
+}
+/**
+ * Create a V2 note from scanned announcement data
+ *
+ * @param amount - Decrypted amount
+ * @param random - Decrypted random value
+ * @param ephemeralSpendPub - Sender's ephemeral Grumpkin pubkey
+ * @param leafIndex - Merkle tree leaf index
+ * @returns NoteV2 structure
+ */
+export declare function createNoteV2(amount: bigint, random: bigint, ephemeralSpendPub: {
+    x: bigint;
+    y: bigint;
+}, leafIndex: number): NoteV2;
+/**
+ * Update V2 note with computed values from circuit
+ */
+export declare function updateNoteV2WithHashes(note: NoteV2, notePubKey: bigint, commitment: bigint): NoteV2;
+/**
+ * Serialize V2 note for storage
+ */
+export declare function serializeNoteV2(note: NoteV2): SerializedNoteV2;
+/**
+ * Deserialize V2 note from storage
+ */
+export declare function deserializeNoteV2(data: SerializedNoteV2): NoteV2;
+/**
+ * Check if V2 note has computed hashes
+ */
+export declare function noteV2HasComputedHashes(note: NoteV2): boolean;

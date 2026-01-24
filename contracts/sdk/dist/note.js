@@ -31,6 +31,11 @@ exports.createNote = createNote;
 exports.initPoseidon = initPoseidon;
 exports.isPoseidonReady = isPoseidonReady;
 exports.prepareWithdrawal = prepareWithdrawal;
+exports.createNoteV2 = createNoteV2;
+exports.updateNoteV2WithHashes = updateNoteV2WithHashes;
+exports.serializeNoteV2 = serializeNoteV2;
+exports.deserializeNoteV2 = deserializeNoteV2;
+exports.noteV2HasComputedHashes = noteV2HasComputedHashes;
 const crypto_1 = require("./crypto");
 /**
  * Generate a new note with random nullifier and secret
@@ -379,4 +384,75 @@ function prepareWithdrawal(inputNote, withdrawAmount) {
     const changeAmount = inputNote.amount - withdrawAmount;
     const changeNote = createNote(changeAmount);
     return { changeNote, changeAmount };
+}
+/**
+ * Create a V2 note from scanned announcement data
+ *
+ * @param amount - Decrypted amount
+ * @param random - Decrypted random value
+ * @param ephemeralSpendPub - Sender's ephemeral Grumpkin pubkey
+ * @param leafIndex - Merkle tree leaf index
+ * @returns NoteV2 structure
+ */
+function createNoteV2(amount, random, ephemeralSpendPub, leafIndex) {
+    return {
+        amount,
+        random,
+        ephemeralSpendPubX: ephemeralSpendPub.x,
+        ephemeralSpendPubY: ephemeralSpendPub.y,
+        leafIndex,
+        notePubKey: 0n, // Computed in circuit
+        commitment: 0n, // Computed in circuit
+        randomBytes: (0, crypto_1.bigintToBytes)(random),
+        commitmentBytes: new Uint8Array(32),
+    };
+}
+/**
+ * Update V2 note with computed values from circuit
+ */
+function updateNoteV2WithHashes(note, notePubKey, commitment) {
+    return {
+        ...note,
+        notePubKey,
+        commitment,
+        commitmentBytes: (0, crypto_1.bigintToBytes)(commitment),
+    };
+}
+/**
+ * Serialize V2 note for storage
+ */
+function serializeNoteV2(note) {
+    const serialized = {
+        amount: note.amount.toString(),
+        random: note.random.toString(),
+        ephemeralSpendPubX: note.ephemeralSpendPubX.toString(),
+        ephemeralSpendPubY: note.ephemeralSpendPubY.toString(),
+        leafIndex: note.leafIndex,
+    };
+    if (note.notePubKey !== 0n) {
+        serialized.notePubKey = note.notePubKey.toString();
+    }
+    if (note.commitment !== 0n) {
+        serialized.commitment = note.commitment.toString();
+    }
+    return serialized;
+}
+/**
+ * Deserialize V2 note from storage
+ */
+function deserializeNoteV2(data) {
+    const note = createNoteV2(BigInt(data.amount), BigInt(data.random), {
+        x: BigInt(data.ephemeralSpendPubX),
+        y: BigInt(data.ephemeralSpendPubY),
+    }, data.leafIndex);
+    if (data.notePubKey && data.commitment) {
+        return updateNoteV2WithHashes(note, BigInt(data.notePubKey), BigInt(data.commitment));
+    }
+    return note;
+}
+/**
+ * Check if V2 note has computed hashes
+ */
+function noteV2HasComputedHashes(note) {
+    return note.notePubKey !== 0n && note.commitment !== 0n;
 }
