@@ -2,16 +2,18 @@
 
 import { useState, useCallback, useEffect } from "react";
 import { useConnection, useWallet } from "@solana/wallet-adapter-react";
-import { PublicKey, Transaction, TransactionInstruction } from "@solana/web3.js";
+import { PublicKey, TransactionInstruction, Transaction } from "@solana/web3.js";
 import {
-  hashName,
+  // From SDK
   isValidName,
   normalizeName,
   formatZkeyName,
   getNameValidationError,
-  parseNameEntry,
+  hashName,
+  parseNameRegistry,
+  buildRegisterNameData,
   NAME_REGISTRY_SEED,
-  type NameEntry,
+  type NameRegistryEntry,
 } from "@zvault/sdk";
 import { useZVaultKeys } from "./use-zvault-keys";
 
@@ -19,9 +21,6 @@ import { useZVaultKeys } from "./use-zvault-keys";
 const PROGRAM_ID = new PublicKey(
   process.env.NEXT_PUBLIC_PROGRAM_ID || "CBzbSQPcUXMYdmSvnA24HPZrDQPuEpq4qq2mcmErrWPR"
 );
-
-// Instruction discriminators (must match contract lib.rs)
-const REGISTER_NAME_DISCRIMINATOR = 17;
 
 interface UseZkeyNameReturn {
   // State
@@ -33,15 +32,17 @@ interface UseZkeyNameReturn {
   // Actions
   lookupMyName: () => Promise<void>;
   registerName: (name: string) => Promise<boolean>;
-  lookupName: (name: string) => Promise<NameEntry | null>;
+  lookupName: (name: string) => Promise<NameRegistryEntry | null>;
 
-  // Validation
+  // Validation (from SDK)
   validateName: (name: string) => string | null;
   formatName: (name: string) => string;
 }
 
 /**
  * Hook for managing .zkey name registration
+ *
+ * Uses @zvault/sdk for name validation, hashing, and parsing.
  */
 export function useZkeyName(): UseZkeyNameReturn {
   const { connection } = useConnection();
@@ -71,7 +72,7 @@ export function useZkeyName(): UseZkeyNameReturn {
    * Look up a name on-chain
    */
   const lookupName = useCallback(
-    async (name: string): Promise<NameEntry | null> => {
+    async (name: string): Promise<NameRegistryEntry | null> => {
       try {
         const normalized = normalizeName(name);
         if (!isValidName(normalized)) {
@@ -85,7 +86,8 @@ export function useZkeyName(): UseZkeyNameReturn {
           return null;
         }
 
-        return parseNameEntry(new Uint8Array(accountInfo.data));
+        const entry = parseNameRegistry(new Uint8Array(accountInfo.data), normalized);
+        return entry;
       } catch (err) {
         console.error("Failed to lookup name:", err);
         return null;
@@ -96,7 +98,6 @@ export function useZkeyName(): UseZkeyNameReturn {
 
   /**
    * Look up if current wallet has a registered name
-   * This searches by checking common patterns - in production you'd use an indexer
    */
   const lookupMyName = useCallback(async () => {
     if (!wallet.publicKey || !stealthAddress) {
@@ -107,7 +108,7 @@ export function useZkeyName(): UseZkeyNameReturn {
     setError(null);
 
     try {
-      // For demo: Check localStorage for previously registered name
+      // Check localStorage for previously registered name
       const storedName = localStorage.getItem(
         `zkey-name-${wallet.publicKey.toBase58()}`
       );
@@ -139,14 +140,11 @@ export function useZkeyName(): UseZkeyNameReturn {
   }, [wallet.publicKey, stealthAddress, lookupName]);
 
   /**
-   * Register a new .zkey name
-   *
-   * NOTE: Currently in DEMO MODE - stores name locally.
-   * On-chain registration requires contract redeployment with REGISTER_NAME instruction.
+   * Register a new .zkey name on-chain
    */
   const registerName = useCallback(
     async (name: string): Promise<boolean> => {
-      if (!wallet.publicKey || !stealthAddress) {
+      if (!wallet.publicKey || !wallet.signTransaction || !stealthAddress) {
         setError("Wallet not connected or keys not derived");
         return false;
       }
@@ -162,38 +160,53 @@ export function useZkeyName(): UseZkeyNameReturn {
       setError(null);
 
       try {
-        // Check if name is already taken (in localStorage for demo)
-        const allKeys = Object.keys(localStorage);
-        for (const key of allKeys) {
-          if (key.startsWith("zkey-name-")) {
-            const storedName = localStorage.getItem(key);
-            if (storedName === normalized) {
-              setError(`Name "${formatZkeyName(normalized)}" is already taken`);
-              return false;
-            }
-          }
+        // Check if name is already taken on-chain
+        const existing = await lookupName(normalized);
+        if (existing) {
+          setError(`Name "${formatZkeyName(normalized)}" is already registered`);
+          return false;
         }
 
-        // DEMO MODE: Just store locally
-        // TODO: Enable on-chain registration after contract redeployment
-        console.log("[zkey] Demo mode: Storing name locally");
+        // Build instruction data using SDK
+        const instructionData = buildRegisterNameData(
+          normalized,
+          stealthAddress.spendingPubKey,
+          stealthAddress.viewingPubKey
+        );
 
-        // Simulate network delay for UX
-        await new Promise(resolve => setTimeout(resolve, 1000));
+        // Derive PDA
+        const [namePDA] = deriveNamePDA(normalized);
 
-        // Store in localStorage
+        // Create instruction
+        const instruction = new TransactionInstruction({
+          keys: [
+            { pubkey: namePDA, isSigner: false, isWritable: true },
+            { pubkey: wallet.publicKey, isSigner: true, isWritable: true },
+            { pubkey: new PublicKey("11111111111111111111111111111111"), isSigner: false, isWritable: false },
+          ],
+          programId: PROGRAM_ID,
+          data: Buffer.from(instructionData),
+        });
+
+        // Build and send transaction
+        const transaction = new Transaction().add(instruction);
+        transaction.feePayer = wallet.publicKey;
+        transaction.recentBlockhash = (await connection.getLatestBlockhash()).blockhash;
+
+        const signed = await wallet.signTransaction(transaction);
+        const txid = await connection.sendRawTransaction(signed.serialize());
+
+        // Wait for confirmation
+        await connection.confirmTransaction(txid, "confirmed");
+
+        // Store in localStorage for quick lookup
         localStorage.setItem(
           `zkey-name-${wallet.publicKey.toBase58()}`,
           normalized
         );
 
-        // Also store reverse mapping (name -> stealth address) for lookups
-        const stealthHex = Buffer.from(stealthAddress.spendingPubKey).toString("hex") +
-                          Buffer.from(stealthAddress.viewingPubKey).toString("hex");
-        localStorage.setItem(`zkey-lookup-${normalized}`, stealthHex);
-
         setRegisteredName(normalized);
-        console.log(`[zkey] Registered: ${formatZkeyName(normalized)}`);
+        console.log(`[zkey] Registered on-chain: ${formatZkeyName(normalized)} (tx: ${txid})`);
         return true;
       } catch (err) {
         console.error("Failed to register name:", err);
@@ -205,7 +218,7 @@ export function useZkeyName(): UseZkeyNameReturn {
         setIsRegistering(false);
       }
     },
-    [wallet, stealthAddress]
+    [wallet, stealthAddress, connection, deriveNamePDA, lookupName]
   );
 
   // Check for existing name when wallet/keys change

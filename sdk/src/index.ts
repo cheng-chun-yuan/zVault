@@ -355,3 +355,33 @@ export {
   type UseDepositWatcherReturn,
   type UseDepositWatcherOptions,
 } from "./react";
+
+// ==========================================================================
+// Name Registry (.zkey names)
+// ==========================================================================
+
+export {
+  // Lookup functions
+  lookupZkeyName,
+  lookupZkeyNameWithPDA,
+  parseNameRegistry,
+  // Validation
+  isValidName,
+  normalizeName,
+  formatZkeyName,
+  getNameValidationError,
+  hashName,
+  // Instruction builders
+  buildRegisterNameData,
+  buildUpdateNameData,
+  buildTransferNameData,
+  // Constants
+  MAX_NAME_LENGTH,
+  NAME_REGISTRY_SEED,
+  NAME_REGISTRY_DISCRIMINATOR,
+  NAME_REGISTRY_SIZE,
+  ZVAULT_PROGRAM_ID,
+  // Types
+  type NameRegistryEntry,
+  type ZkeyStealthAddress,
+} from "./name-registry";
