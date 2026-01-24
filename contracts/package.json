@@ -9,6 +9,7 @@
     "test": "bun run tests/zvault.ts",
     "test:demo": "bun run scripts/test-demo-flow.ts",
     "test:name": "bun run scripts/test-name-registry.ts",
+    "test:all": "bun run scripts/test-all.ts",
     "setup:devnet": "bun run scripts/devnet-setup.ts",
     "init": "bun run scripts/deploy-and-seed.ts"
   },
