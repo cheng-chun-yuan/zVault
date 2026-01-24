@@ -1,0 +1,295 @@
+/**
+ * Deposit Tracker API Client
+ *
+ * Provides interface to the backend deposit tracker service:
+ * - POST /api/deposits - Register deposit to track
+ * - GET /api/deposits/:id - Get deposit status
+ * - WebSocket /ws/deposits/:id - Subscribe to real-time updates
+ */
+
+import { ApiError } from "./errors";
+
+// API base URL for deposit tracker
+const getTrackerApiUrl = () =>
+  process.env.NEXT_PUBLIC_TRACKER_API_URL ||
+  process.env.NEXT_PUBLIC_sbBTC_API_URL ||
+  "http://localhost:3001";
+
+// =============================================================================
+// Types
+// =============================================================================
+
+export type DepositStatus =
+  | "pending"
+  | "detected"
+  | "confirming"
+  | "confirmed"
+  | "sweeping"
+  | "sweep_confirming"
+  | "verifying"
+  | "ready"
+  | "claimed"
+  | "failed";
+
+export interface RegisterDepositRequest {
+  taproot_address: string;
+  commitment: string;
+  amount_sats: number;
+  claim_link?: string;
+}
+
+export interface RegisterDepositResponse {
+  success: boolean;
+  deposit_id?: string;
+  message?: string;
+}
+
+export interface DepositStatusResponse {
+  id: string;
+  status: DepositStatus;
+  confirmations: number;
+  can_claim: boolean;
+  btc_txid?: string;
+  sweep_txid?: string;
+  sweep_confirmations: number;
+  solana_tx?: string;
+  leaf_index?: number;
+  error?: string;
+  created_at: number;
+  updated_at: number;
+}
+
+export interface DepositStatusUpdate {
+  deposit_id: string;
+  status: DepositStatus;
+  confirmations: number;
+  sweep_confirmations: number;
+  can_claim: boolean;
+  error?: string;
+}
+
+// =============================================================================
+// API Functions
+// =============================================================================
+
+/**
+ * Register a deposit for tracking
+ *
+ * @param taprootAddress - The Bitcoin taproot address
+ * @param commitment - The SHA256(nullifier || secret) commitment (64 hex chars)
+ * @param amountSats - Expected amount in satoshis
+ * @param claimLink - Optional claim link for reference
+ */
+export async function registerDeposit(
+  taprootAddress: string,
+  commitment: string,
+  amountSats: number,
+  claimLink?: string
+): Promise<RegisterDepositResponse> {
+  const body: RegisterDepositRequest = {
+    taproot_address: taprootAddress,
+    commitment,
+    amount_sats: amountSats,
+    claim_link: claimLink,
+  };
+
+  const response = await fetch(`${getTrackerApiUrl()}/api/deposits`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify(body),
+  });
+
+  if (!response.ok) {
+    const error = await response.json().catch(() => ({
+      error: `HTTP ${response.status}: ${response.statusText}`,
+    }));
+    throw ApiError.fromResponse(error, response.status);
+  }
+
+  return response.json();
+}
+
+/**
+ * Get deposit status by ID
+ *
+ * @param depositId - The deposit ID returned from registerDeposit
+ */
+export async function getDepositStatus(
+  depositId: string
+): Promise<DepositStatusResponse> {
+  const response = await fetch(
+    `${getTrackerApiUrl()}/api/deposits/${depositId}`,
+    {
+      method: "GET",
+      headers: {
+        "Content-Type": "application/json",
+      },
+    }
+  );
+
+  if (!response.ok) {
+    const error = await response.json().catch(() => ({
+      error: `HTTP ${response.status}: ${response.statusText}`,
+    }));
+    throw ApiError.fromResponse(error, response.status);
+  }
+
+  return response.json();
+}
+
+// =============================================================================
+// WebSocket Connection
+// =============================================================================
+
+export interface DepositWebSocketOptions {
+  onStatusUpdate: (update: DepositStatusUpdate) => void;
+  onError?: (error: Event) => void;
+  onClose?: (event: CloseEvent) => void;
+  onOpen?: () => void;
+}
+
+/**
+ * Create a WebSocket connection for deposit status updates
+ *
+ * @param depositId - The deposit ID to subscribe to
+ * @param options - Callback handlers
+ * @returns WebSocket instance and cleanup function
+ */
+export function subscribeToDepositStatus(
+  depositId: string,
+  options: DepositWebSocketOptions
+): { ws: WebSocket; unsubscribe: () => void } {
+  const wsUrl = getTrackerApiUrl()
+    .replace("http://", "ws://")
+    .replace("https://", "wss://");
+
+  const ws = new WebSocket(`${wsUrl}/ws/deposits/${depositId}`);
+
+  ws.onmessage = (event) => {
+    try {
+      const update: DepositStatusUpdate = JSON.parse(event.data);
+      options.onStatusUpdate(update);
+    } catch (e) {
+      console.error("Failed to parse WebSocket message:", e);
+    }
+  };
+
+  ws.onerror = (error) => {
+    options.onError?.(error);
+  };
+
+  ws.onclose = (event) => {
+    options.onClose?.(event);
+  };
+
+  ws.onopen = () => {
+    options.onOpen?.();
+  };
+
+  return {
+    ws,
+    unsubscribe: () => {
+      ws.close();
+    },
+  };
+}
+
+// =============================================================================
+// Helpers
+// =============================================================================
+
+/**
+ * Check if a deposit status indicates it's still pending
+ */
+export function isDepositPending(status: DepositStatus): boolean {
+  return ["pending", "detected", "confirming"].includes(status);
+}
+
+/**
+ * Check if a deposit status indicates it's being processed
+ */
+export function isDepositProcessing(status: DepositStatus): boolean {
+  return ["confirmed", "sweeping", "sweep_confirming", "verifying"].includes(
+    status
+  );
+}
+
+/**
+ * Check if a deposit can be claimed
+ */
+export function isDepositClaimable(status: DepositStatus): boolean {
+  return status === "ready";
+}
+
+/**
+ * Check if a deposit is in a terminal state
+ */
+export function isDepositTerminal(status: DepositStatus): boolean {
+  return ["claimed", "failed"].includes(status);
+}
+
+/**
+ * Get human-readable status message
+ */
+export function getStatusMessage(status: DepositStatus): string {
+  const messages: Record<DepositStatus, string> = {
+    pending: "Waiting for BTC deposit",
+    detected: "Deposit detected in mempool",
+    confirming: "Waiting for confirmations",
+    confirmed: "Deposit confirmed, preparing sweep",
+    sweeping: "Sweeping to pool wallet",
+    sweep_confirming: "Sweep transaction confirming",
+    verifying: "Verifying on Solana",
+    ready: "Ready to claim sbBTC",
+    claimed: "sbBTC claimed successfully",
+    failed: "Deposit failed",
+  };
+
+  return messages[status] || status;
+}
+
+/**
+ * Get progress percentage for a deposit
+ * Returns 0-100
+ */
+export function getDepositProgress(
+  status: DepositStatus,
+  confirmations: number,
+  sweepConfirmations: number
+): number {
+  // Progress steps:
+  // 0-10: pending
+  // 10-50: confirming (1 confirmation for demo)
+  // 50-70: sweeping + sweep_confirming (2 confirmations)
+  // 70-90: verifying
+  // 90-100: ready/claimed
+
+  switch (status) {
+    case "pending":
+      return 5;
+    case "detected":
+      return 10;
+    case "confirming":
+      // 10 + (confirmations/1) * 40 = 10-50%
+      return Math.min(50, 10 + Math.floor((confirmations / 1) * 40));
+    case "confirmed":
+      return 50;
+    case "sweeping":
+      return 55;
+    case "sweep_confirming":
+      // 55 + (sweepConfirmations/2) * 15 = 55-70%
+      return Math.min(70, 55 + Math.floor((sweepConfirmations / 2) * 15));
+    case "verifying":
+      return 80;
+    case "ready":
+      return 95;
+    case "claimed":
+      return 100;
+    case "failed":
+      return 0;
+    default:
+      return 0;
+  }
+}
