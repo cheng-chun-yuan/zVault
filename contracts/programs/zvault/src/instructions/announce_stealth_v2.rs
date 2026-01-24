@@ -19,25 +19,23 @@ use pinocchio::{
 
 use crate::state::{StealthAnnouncementV2, STEALTH_ANNOUNCEMENT_V2_DISCRIMINATOR};
 
-/// Announce stealth V2 instruction data
+/// Announce stealth V2 instruction data (SIMPLIFIED)
 /// Layout:
 /// - ephemeral_view_pub: [u8; 32] (X25519 for scanning)
 /// - ephemeral_spend_pub: [u8; 33] (Grumpkin compressed for spending)
-/// - encrypted_amount: [u8; 8]
-/// - encrypted_random: [u8; 32]
+/// - amount_sats: u64 (8 bytes, public amount from BTC tx)
 /// - commitment: [u8; 32]
-/// Total: 137 bytes
+/// Total: 105 bytes
 pub struct AnnounceStealthV2Data {
     pub ephemeral_view_pub: [u8; 32],
     pub ephemeral_spend_pub: [u8; 33],
-    pub encrypted_amount: [u8; 8],
-    pub encrypted_random: [u8; 32],
+    pub amount_sats: u64,
     pub commitment: [u8; 32],
 }
 
 impl AnnounceStealthV2Data {
     pub fn from_bytes(data: &[u8]) -> Result<Self, ProgramError> {
-        if data.len() < 137 {
+        if data.len() < 105 {
             return Err(ProgramError::InvalidInstructionData);
         }
 
@@ -47,20 +45,15 @@ impl AnnounceStealthV2Data {
         let mut ephemeral_spend_pub = [0u8; 33];
         ephemeral_spend_pub.copy_from_slice(&data[32..65]);
 
-        let mut encrypted_amount = [0u8; 8];
-        encrypted_amount.copy_from_slice(&data[65..73]);
-
-        let mut encrypted_random = [0u8; 32];
-        encrypted_random.copy_from_slice(&data[73..105]);
+        let amount_sats = u64::from_le_bytes(data[65..73].try_into().unwrap());
 
         let mut commitment = [0u8; 32];
-        commitment.copy_from_slice(&data[105..137]);
+        commitment.copy_from_slice(&data[73..105]);
 
         Ok(Self {
             ephemeral_view_pub,
             ephemeral_spend_pub,
-            encrypted_amount,
-            encrypted_random,
+            amount_sats,
             commitment,
         })
     }
@@ -166,8 +159,7 @@ pub fn process_announce_stealth_v2(
         announcement.bump = bump;
         announcement.ephemeral_view_pub = ix_data.ephemeral_view_pub;
         announcement.ephemeral_spend_pub = ix_data.ephemeral_spend_pub;
-        announcement.encrypted_amount = ix_data.encrypted_amount;
-        announcement.encrypted_random = ix_data.encrypted_random;
+        announcement.set_amount_sats(ix_data.amount_sats);
         announcement.commitment = ix_data.commitment;
         announcement.set_created_at(clock.unix_timestamp);
     }

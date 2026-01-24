@@ -96,6 +96,9 @@ pub enum ZVaultError {
 
     #[error("Stealth data not found in transaction")]
     StealthDataNotFound = 6029,
+
+    #[error("Insufficient funds in shielded pool")]
+    InsufficientFunds = 6030,
 }
 
 impl From<ZVaultError> for ProgramError {

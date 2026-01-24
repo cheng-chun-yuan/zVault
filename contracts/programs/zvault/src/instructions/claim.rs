@@ -1,5 +1,15 @@
 //! Claim instruction - claims sbBTC with ZK proof commitment
 //!
+//! ⚠️  DEPRECATED: This instruction is deprecated in the shielded-only architecture.
+//!
+//! In the new architecture:
+//! - sbBTC is minted to pool vault at deposit time (not to user)
+//! - Users hold shielded commitments, never public tokens
+//! - Use request_redemption to withdraw and reveal amount
+//!
+//! This instruction is kept for backward compatibility but should not be used
+//! for new implementations. Amount is revealed publicly which breaks privacy.
+//!
 //! Since ZK proofs (~16KB) exceed Solana tx limits (~1232 bytes),
 //! we accept a proof hash instead of the full proof.
 //! Full cryptographic verification is done off-chain by relayers.

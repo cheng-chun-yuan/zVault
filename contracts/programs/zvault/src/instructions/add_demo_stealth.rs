@@ -1,0 +1,221 @@
+//! Add Demo Stealth instruction (Admin only)
+//!
+//! Creates a stealth deposit for demo purposes without requiring real BTC.
+//! Adds a user-owned commitment to the Merkle tree and publishes ephemeral
+//! public key so user can find their balance with viewing key and spend
+//! with spending key.
+//!
+//! Demo flow:
+//! 1. SDK generates ephemeral keypair and computes ECDH shared secret
+//! 2. SDK derives note public key and commitment
+//! 3. This instruction adds commitment to Merkle tree
+//! 4. This instruction creates stealth announcement with ephemeral pubkey
+//! 5. User scans announcements with viewing key to find deposits
+//! 6. User generates ZK proof with spending key to claim
+
+use pinocchio::{
+    account_info::AccountInfo,
+    instruction::{Seed, Signer},
+    program_error::ProgramError,
+    pubkey::{find_program_address, Pubkey},
+    sysvars::{clock::Clock, rent::Rent, Sysvar},
+    ProgramResult,
+};
+
+use crate::error::ZVaultError;
+use crate::state::{CommitmentTree, PoolState, StealthAnnouncementV2, STEALTH_ANNOUNCEMENT_V2_DISCRIMINATOR};
+use crate::utils::validate_program_owner;
+
+/// Add demo stealth instruction data
+/// Layout:
+/// - ephemeral_view_pub: [u8; 32] (X25519 for scanning)
+/// - ephemeral_spend_pub: [u8; 33] (Grumpkin for spending proofs)
+/// - commitment: [u8; 32] (pre-computed by SDK)
+/// - amount: u64 (8 bytes)
+/// Total: 105 bytes
+pub struct AddDemoStealthData {
+    pub ephemeral_view_pub: [u8; 32],
+    pub ephemeral_spend_pub: [u8; 33],
+    pub commitment: [u8; 32],
+    pub amount: u64,
+}
+
+impl AddDemoStealthData {
+    pub fn from_bytes(data: &[u8]) -> Result<Self, ProgramError> {
+        if data.len() < 105 {
+            return Err(ProgramError::InvalidInstructionData);
+        }
+
+        let mut ephemeral_view_pub = [0u8; 32];
+        ephemeral_view_pub.copy_from_slice(&data[0..32]);
+
+        let mut ephemeral_spend_pub = [0u8; 33];
+        ephemeral_spend_pub.copy_from_slice(&data[32..65]);
+
+        let mut commitment = [0u8; 32];
+        commitment.copy_from_slice(&data[65..97]);
+
+        let amount = u64::from_le_bytes(data[97..105].try_into().unwrap());
+
+        Ok(Self {
+            ephemeral_view_pub,
+            ephemeral_spend_pub,
+            commitment,
+            amount,
+        })
+    }
+}
+
+/// Create PDA account
+fn create_pda_account<'a>(
+    payer: &'a AccountInfo,
+    pda_account: &'a AccountInfo,
+    _system_program: &'a AccountInfo,
+    program_id: &Pubkey,
+    lamports: u64,
+    space: u64,
+    signer_seeds: &[&[u8]],
+) -> ProgramResult {
+    let create_account = pinocchio_system::instructions::CreateAccount {
+        from: payer,
+        to: pda_account,
+        lamports,
+        space,
+        owner: program_id,
+    };
+
+    let seeds: Vec<Seed> = signer_seeds.iter().map(|s| Seed::from(*s)).collect();
+    let signer = Signer::from(&seeds[..]);
+
+    create_account.invoke_signed(&[signer])
+}
+
+/// Add a demo stealth deposit (admin only)
+///
+/// Creates a private deposit that user can find with viewing key
+/// and spend with spending key. No real BTC required.
+///
+/// Accounts:
+/// 0. pool_state - Pool state PDA
+/// 1. commitment_tree - Commitment tree PDA
+/// 2. stealth_announcement - Stealth announcement PDA (to create)
+/// 3. authority - Pool authority (signer, pays for announcement)
+/// 4. system_program - System program
+pub fn process_add_demo_stealth(
+    program_id: &Pubkey,
+    accounts: &[AccountInfo],
+    data: &[u8],
+) -> ProgramResult {
+    if accounts.len() < 5 {
+        return Err(ProgramError::NotEnoughAccountKeys);
+    }
+
+    let pool_state = &accounts[0];
+    let commitment_tree = &accounts[1];
+    let stealth_announcement = &accounts[2];
+    let authority = &accounts[3];
+    let system_program = &accounts[4];
+
+    let ix_data = AddDemoStealthData::from_bytes(data)?;
+
+    // Validate authority is signer
+    if !authority.is_signer() {
+        return Err(ProgramError::MissingRequiredSignature);
+    }
+
+    // Validate amount
+    if ix_data.amount == 0 {
+        return Err(ZVaultError::ZeroAmount.into());
+    }
+
+    // Validate account owners
+    validate_program_owner(pool_state, program_id)?;
+    validate_program_owner(commitment_tree, program_id)?;
+
+    // Validate authority matches pool
+    {
+        let pool_data = pool_state.try_borrow_data()?;
+        let pool = PoolState::from_bytes(&pool_data)?;
+
+        if authority.key().as_ref() != pool.authority {
+            return Err(ZVaultError::Unauthorized.into());
+        }
+    }
+
+    // Verify stealth announcement PDA
+    let seeds: &[&[u8]] = &[StealthAnnouncementV2::SEED, &ix_data.ephemeral_view_pub];
+    let (expected_pda, bump) = find_program_address(seeds, program_id);
+    if stealth_announcement.key() != &expected_pda {
+        return Err(ProgramError::InvalidSeeds);
+    }
+
+    let clock = Clock::get()?;
+
+    // Insert commitment into Merkle tree
+    let leaf_index = {
+        let mut tree_data = commitment_tree.try_borrow_mut_data()?;
+        let tree = CommitmentTree::from_bytes_mut(&mut tree_data)?;
+
+        if !tree.has_capacity() {
+            return Err(ZVaultError::TreeFull.into());
+        }
+
+        tree.insert_leaf(&ix_data.commitment)?
+    };
+
+    // Create stealth announcement PDA if it doesn't exist
+    let account_data_len = stealth_announcement.data_len();
+    if account_data_len > 0 {
+        let ann_data = stealth_announcement.try_borrow_data()?;
+        if ann_data[0] == STEALTH_ANNOUNCEMENT_V2_DISCRIMINATOR {
+            return Err(ProgramError::AccountAlreadyInitialized);
+        }
+    } else {
+        let rent = Rent::get()?;
+        let lamports = rent.minimum_balance(StealthAnnouncementV2::SIZE);
+
+        let bump_bytes = [bump];
+        let signer_seeds: &[&[u8]] = &[
+            StealthAnnouncementV2::SEED,
+            &ix_data.ephemeral_view_pub,
+            &bump_bytes,
+        ];
+
+        create_pda_account(
+            authority,
+            stealth_announcement,
+            system_program,
+            program_id,
+            lamports,
+            StealthAnnouncementV2::SIZE as u64,
+            signer_seeds,
+        )?;
+    }
+
+    // Initialize stealth announcement
+    {
+        let mut ann_data = stealth_announcement.try_borrow_mut_data()?;
+        let announcement = StealthAnnouncementV2::init(&mut ann_data)?;
+
+        announcement.bump = bump;
+        announcement.ephemeral_view_pub = ix_data.ephemeral_view_pub;
+        announcement.ephemeral_spend_pub = ix_data.ephemeral_spend_pub;
+        announcement.set_amount_sats(ix_data.amount);
+        announcement.commitment = ix_data.commitment;
+        announcement.set_leaf_index(leaf_index);
+        announcement.set_created_at(clock.unix_timestamp);
+    }
+
+    // Update pool statistics
+    {
+        let mut pool_data = pool_state.try_borrow_mut_data()?;
+        let pool = PoolState::from_bytes_mut(&mut pool_data)?;
+
+        pool.increment_deposit_count()?;
+        pool.set_last_update(clock.unix_timestamp);
+    }
+
+    pinocchio::msg!("Demo stealth deposit added");
+
+    Ok(())
+}

@@ -3,6 +3,11 @@
 //! PERMISSIONLESS: Anyone can verify deposits via SPV proof.
 //! Duplicate prevention via PDA seeds (txid-based).
 //!
+//! SHIELDED-ONLY ARCHITECTURE:
+//! - sbBTC is minted to pool vault (not user wallet)
+//! - Users hold shielded commitments, never public tokens
+//! - Amount is only revealed at withdrawal time
+//!
 //! Flow:
 //! 1. Raw tx data uploaded to ChadBuffer (off-chain)
 //! 2. Call verify_deposit with buffer account
@@ -10,6 +15,7 @@
 //! 4. Contract verifies: SPV merkle proof
 //! 5. Contract parses: OP_RETURN → extracts commitment
 //! 6. Contract stores: commitment in deposit record
+//! 7. Contract mints: sbBTC to pool vault (shielded)
 
 use pinocchio::{
     account_info::AccountInfo,
@@ -28,9 +34,12 @@ use crate::state::{
 };
 use crate::utils::bitcoin::{compute_tx_hash, ParsedTransaction};
 use crate::utils::chadbuffer::read_transaction_from_buffer;
-use crate::utils::validate_program_owner;
+use crate::utils::{validate_program_owner, validate_token_2022_owner, validate_token_program_key};
 
 /// Verify a Bitcoin deposit via SPV proof (PERMISSIONLESS)
+///
+/// SHIELDED-ONLY: sbBTC is minted to pool vault, not user wallet.
+/// Users hold commitments (private), not public tokens.
 ///
 /// # Accounts
 /// 0. `[writable]` Pool state
@@ -41,6 +50,9 @@ use crate::utils::validate_program_owner;
 /// 5. `[]` Transaction buffer (ChadBuffer)
 /// 6. `[signer]` Submitter (pays for storage)
 /// 7. `[]` System program
+/// 8. `[writable]` sbBTC mint
+/// 9. `[writable]` Pool vault (token account owned by pool PDA)
+/// 10. `[]` Token-2022 program
 ///
 /// # Instruction data
 /// - txid: [u8; 32]
@@ -53,7 +65,7 @@ pub fn process_verify_deposit(
     accounts: &[AccountInfo],
     data: &[u8],
 ) -> ProgramResult {
-    if accounts.len() < 8 {
+    if accounts.len() < 11 {
         return Err(ProgramError::NotEnoughAccountKeys);
     }
 
@@ -65,12 +77,18 @@ pub fn process_verify_deposit(
     let tx_buffer_info = &accounts[5];
     let submitter = &accounts[6];
     let _system_program = &accounts[7];
+    let sbbtc_mint = &accounts[8];
+    let pool_vault = &accounts[9];
+    let token_program = &accounts[10];
 
     // Validate accounts
     validate_program_owner(pool_state_info, program_id)?;
     validate_program_owner(light_client_info, program_id)?;
     validate_program_owner(block_header_info, program_id)?;
     validate_program_owner(commitment_tree_info, program_id)?;
+    validate_token_2022_owner(sbbtc_mint)?;
+    validate_token_2022_owner(pool_vault)?;
+    validate_token_program_key(token_program)?;
 
     if !submitter.is_signer() {
         return Err(ProgramError::MissingRequiredSignature);
@@ -91,7 +109,7 @@ pub fn process_verify_deposit(
     let merkle_proof = TxMerkleProof::parse(&data[52..])?;
 
     // Check pool is not paused and get bounds
-    let (min_deposit, max_deposit) = {
+    let (pool_bump, min_deposit, max_deposit) = {
         let pool_data = pool_state_info.try_borrow_data()?;
         let pool = PoolState::from_bytes(&pool_data)?;
 
@@ -99,7 +117,7 @@ pub fn process_verify_deposit(
             return Err(ZVaultError::PoolPaused.into());
         }
 
-        (pool.min_deposit(), pool.max_deposit())
+        (pool.bump, pool.min_deposit(), pool.max_deposit())
     };
 
     // Verify block height matches the stored header
@@ -215,6 +233,8 @@ pub fn process_verify_deposit(
     };
 
     // Record the deposit
+    // Note: Amount is stored because btc_txid already links to public BTC tx
+    // Privacy comes from unlinking deposits→withdrawals via nullifiers
     let clock = Clock::get()?;
     {
         let mut deposit_data = deposit_record_info.try_borrow_mut_data()?;
@@ -227,8 +247,22 @@ pub fn process_verify_deposit(
         deposit.set_leaf_index(leaf_index);
         deposit.depositor.copy_from_slice(submitter.key());
         deposit.set_timestamp(clock.unix_timestamp);
-        deposit.set_minted(false);
+        deposit.set_minted(true); // Minted to pool at deposit time
     }
+
+    // Mint sbBTC to pool vault (SHIELDED-ONLY architecture)
+    // Users never hold public sbBTC - they hold commitments in the Merkle tree
+    let bump_bytes = [pool_bump];
+    let pool_signer_seeds: &[&[u8]] = &[PoolState::SEED, &bump_bytes];
+
+    crate::utils::mint_sbbtc(
+        token_program,
+        sbbtc_mint,
+        pool_vault,
+        pool_state_info,
+        deposit_output.value,
+        pool_signer_seeds,
+    )?;
 
     // Update pool statistics
     {
@@ -236,6 +270,8 @@ pub fn process_verify_deposit(
         let pool = PoolState::from_bytes_mut(&mut pool_data)?;
 
         pool.increment_deposit_count()?;
+        pool.add_shielded(deposit_output.value)?;
+        pool.add_minted(deposit_output.value)?;
         pool.set_last_update(clock.unix_timestamp);
     }
 

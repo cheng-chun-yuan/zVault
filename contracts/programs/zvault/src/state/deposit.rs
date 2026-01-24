@@ -1,4 +1,10 @@
 //! Deposit record account (zero-copy)
+//!
+//! PRIVACY MODEL:
+//! - Deposit amount IS stored (btc_txid links to public BTC tx anyway)
+//! - Privacy comes from UNLINKING deposits to withdrawals:
+//!   - Different commitment hash vs nullifier hash
+//!   - Without knowing 'secret', can't link deposit → withdrawal
 
 use pinocchio::program_error::ProgramError;
 
@@ -11,16 +17,16 @@ pub struct DepositRecord {
     /// Account discriminator
     pub discriminator: u8,
 
-    /// Has this deposit been minted?
+    /// Has this deposit been minted to pool?
     pub minted: u8,
 
     /// Padding for alignment
     _padding: [u8; 6],
 
-    /// The commitment hash: Poseidon(nullifier, secret)
+    /// The commitment hash: Poseidon(notePubKey, amount)
     pub commitment: [u8; 32],
 
-    /// Amount in satoshis
+    /// Amount in satoshis (stored for convenience, also visible via btc_txid)
     amount_sats: [u8; 8],
 
     /// Bitcoin transaction ID

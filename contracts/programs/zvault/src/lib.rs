@@ -1,20 +1,28 @@
-//! ZVault - Privacy-Preserving BTC to Solana Bridge (Pinocchio)
+//! zVault - Privacy-Preserving BTC to Solana Bridge (Pinocchio)
 //!
-//! A high-performance implementation using Pinocchio for ~84% CU savings
-//! compared to Anchor on non-ZK operations.
-//!
-//! ## 6 Main Operations
-//! 1. DEPOSIT: User sends BTC to taproot address, verify via SPV
-//! 2. WITHDRAW: User burns sbBTC, requests BTC withdrawal
-//! 3. PRIVATE_CLAIM: User claims sbBTC with ZK proof
-//! 4. PRIVATE_SPLIT: Split 1 commitment into 2 outputs
-//! 5. SEND_LINK: Share claim link (off-chain, no instruction)
-//! 6. SEND_STEALTH: Create on-chain stealth announcement (ECDH)
+//! SHIELDED-ONLY ARCHITECTURE:
+//! - sbBTC exists only as commitments in Merkle tree
+//! - Users never hold public sbBTC tokens
+//! - Amount revealed ONLY at BTC withdrawal
 //!
 //! ## Privacy Guarantee
-//! - commitment ≠ nullifier_hash (different hash functions)
-//! - Without knowing 'secret', you can't link deposit → claim
-//! - Stealth addresses use X25519 ECDH for recipient privacy
+//!
+//! | Operation     | Amount Visible? |
+//! |---------------|-----------------|
+//! | Deposit       | No (in commitment) |
+//! | Split         | No |
+//! | Stealth Send  | No |
+//! | Withdraw      | Yes (unavoidable) |
+//!
+//! ## Core Flow
+//!
+//! ```text
+//! BTC Deposit → Verify SPV → Mint to Pool → Commitment in Tree
+//!                                                    ↓
+//!                            Split/Transfer (private, ZK proof)
+//!                                                    ↓
+//!                    Withdraw → ZK Proof → Burn from Pool → BTC
+//! ```
 
 use pinocchio::{
     account_info::AccountInfo,
@@ -30,8 +38,7 @@ pub mod instructions;
 pub mod state;
 pub mod utils;
 
-/// Program ID - update this after deployment
-/// This is a placeholder - update with actual deployed program ID
+/// Program ID (update after deployment)
 pub const ID: Pubkey = [
     0x0a, 0x6a, 0x3c, 0x1e, 0x87, 0x32, 0x1a, 0x5c,
     0x7f, 0x4b, 0x2d, 0x9e, 0x8a, 0x6c, 0x3f, 0x1b,
@@ -39,69 +46,41 @@ pub const ID: Pubkey = [
     0x9c, 0x5e, 0x2b, 0x8f, 0x4a, 0x7d, 0x3c, 0x1e,
 ];
 
-/// Instruction discriminators (single byte for gas efficiency)
-///
-/// Main user-facing instructions:
-/// - VERIFY_DEPOSIT (8): Deposit BTC via SPV verification
-/// - CLAIM (9): Claim sbBTC with ZK proof (private_claim)
-/// - SPLIT_COMMITMENT (4): Split commitment 1→2 (private_split)
-/// - REQUEST_REDEMPTION (5): Withdraw - burn sbBTC, request BTC
-/// - ANNOUNCE_STEALTH (12): Send via stealth address (sendStealth)
-///
-/// V2 RAILGUN-style instructions:
-/// - REGISTER_VIEWING_KEY (13): Create viewing key registry
-/// - DELEGATE_VIEWING_KEY (14): Add delegated viewing key
-/// - REVOKE_DELEGATION (15): Remove delegated viewing key
-/// - ANNOUNCE_STEALTH_V2 (16): Dual-key ECDH announcement
-///
-/// Optional .zkey name registry:
-/// - REGISTER_NAME (17): Register "alice.zkey"
-/// - UPDATE_NAME (18): Update keys for a name
-/// - TRANSFER_NAME (19): Transfer name ownership
-///
-/// Direct stealth deposit:
-/// - VERIFY_STEALTH_DEPOSIT (20): Combine deposit verification + stealth announcement
+/// Instruction discriminators
 pub mod instruction {
+    // Core operations
     pub const INITIALIZE: u8 = 0;
-    // Discriminators 1-3 removed (record_deposit, claim_direct, mint_to_commitment)
     pub const SPLIT_COMMITMENT: u8 = 4;
     pub const REQUEST_REDEMPTION: u8 = 5;
     pub const COMPLETE_REDEMPTION: u8 = 6;
     pub const SET_PAUSED: u8 = 7;
     pub const VERIFY_DEPOSIT: u8 = 8;
-    pub const CLAIM: u8 = 9;
-    pub const INIT_COMMITMENT_TREE: u8 = 10;
-    pub const ADD_DEMO_COMMITMENT: u8 = 11;
-    pub const ANNOUNCE_STEALTH: u8 = 12;
-    // V2 RAILGUN-style instructions
-    pub const REGISTER_VIEWING_KEY: u8 = 13;
-    pub const DELEGATE_VIEWING_KEY: u8 = 14;
-    pub const REVOKE_DELEGATION: u8 = 15;
     pub const ANNOUNCE_STEALTH_V2: u8 = 16;
-    // Optional .zkey name registry
-    pub const REGISTER_NAME: u8 = 17;
-    pub const UPDATE_NAME: u8 = 18;
-    pub const TRANSFER_NAME: u8 = 19;
-    // Direct stealth deposit (combined verify + announce)
-    pub const VERIFY_STEALTH_DEPOSIT: u8 = 20;
+
+    // Demo/testing (admin only)
+    pub const ADD_DEMO_NOTE: u8 = 21;
+    pub const ADD_DEMO_STEALTH: u8 = 22;
 }
 
 entrypoint!(process_instruction);
 
-/// Main program entrypoint
+/// Main entrypoint - routes to instruction handlers
 pub fn process_instruction(
     program_id: &Pubkey,
     accounts: &[AccountInfo],
     instruction_data: &[u8],
 ) -> ProgramResult {
-    // Route based on first byte discriminator
     let (discriminator, data) = instruction_data
         .split_first()
         .ok_or(ProgramError::InvalidInstructionData)?;
 
     match *discriminator {
+        // Core operations
         instruction::INITIALIZE => {
             instructions::process_initialize(program_id, accounts, data)
+        }
+        instruction::VERIFY_DEPOSIT => {
+            instructions::process_verify_deposit(program_id, accounts, data)
         }
         instruction::SPLIT_COMMITMENT => {
             instructions::process_split_commitment(program_id, accounts, data)
@@ -115,47 +94,15 @@ pub fn process_instruction(
         instruction::SET_PAUSED => {
             process_set_paused(program_id, accounts, data)
         }
-        instruction::VERIFY_DEPOSIT => {
-            instructions::process_verify_deposit(program_id, accounts, data)
-        }
-        instruction::CLAIM => {
-            instructions::process_claim(program_id, accounts, data)
-        }
-        instruction::INIT_COMMITMENT_TREE => {
-            instructions::process_init_commitment_tree(program_id, accounts, data)
-        }
-        instruction::ADD_DEMO_COMMITMENT => {
-            instructions::process_add_demo_commitment(program_id, accounts, data)
-        }
-        instruction::ANNOUNCE_STEALTH => {
-            instructions::process_announce_stealth(program_id, accounts, data)
-        }
-        // V2 RAILGUN-style instructions
-        instruction::REGISTER_VIEWING_KEY => {
-            instructions::process_register_viewing_key(program_id, accounts, data)
-        }
-        instruction::DELEGATE_VIEWING_KEY => {
-            instructions::process_delegate_viewing_key(program_id, accounts, data)
-        }
-        instruction::REVOKE_DELEGATION => {
-            instructions::process_revoke_delegation(program_id, accounts, data)
-        }
         instruction::ANNOUNCE_STEALTH_V2 => {
             instructions::process_announce_stealth_v2(program_id, accounts, data)
         }
-        // Optional .zkey name registry
-        instruction::REGISTER_NAME => {
-            instructions::process_register_name(program_id, accounts, data)
+        // Demo/testing
+        instruction::ADD_DEMO_NOTE => {
+            instructions::process_add_demo_note(program_id, accounts, data)
         }
-        instruction::UPDATE_NAME => {
-            instructions::process_update_name(program_id, accounts, data)
-        }
-        instruction::TRANSFER_NAME => {
-            instructions::process_transfer_name(program_id, accounts, data)
-        }
-        // Direct stealth deposit
-        instruction::VERIFY_STEALTH_DEPOSIT => {
-            instructions::process_verify_stealth_deposit(program_id, accounts, data)
+        instruction::ADD_DEMO_STEALTH => {
+            instructions::process_add_demo_stealth(program_id, accounts, data)
         }
         _ => Err(ProgramError::InvalidInstructionData),
     }
@@ -179,21 +126,18 @@ fn process_set_paused(
     let pool_state = &accounts[0];
     let authority = &accounts[1];
 
-    // SECURITY: Validate account owners BEFORE deserializing any data
     validate_program_owner(pool_state, program_id)?;
 
-    // Validate authority is signer
     if !authority.is_signer() {
         return Err(ProgramError::MissingRequiredSignature);
     }
 
-    // Validate data
     if data.is_empty() {
         return Err(ProgramError::InvalidInstructionData);
     }
     let paused = data[0] != 0;
 
-    // Load pool and validate authority
+    // Validate authority
     {
         let pool_data = pool_state.try_borrow_data()?;
         let pool = PoolState::from_bytes(&pool_data)?;
@@ -203,15 +147,13 @@ fn process_set_paused(
         }
     }
 
-    // Update paused state
+    // Update state
     {
         let mut pool_data = pool_state.try_borrow_mut_data()?;
         let pool = PoolState::from_bytes_mut(&mut pool_data)?;
 
         pool.set_paused(paused);
-
-        let clock = Clock::get()?;
-        pool.set_last_update(clock.unix_timestamp);
+        pool.set_last_update(Clock::get()?.unix_timestamp);
     }
 
     Ok(())
@@ -222,8 +164,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_instruction_discriminators() {
-        // Ensure discriminators are unique
+    fn test_discriminators_unique() {
         let discriminators = [
             instruction::INITIALIZE,
             instruction::SPLIT_COMMITMENT,
@@ -231,27 +172,15 @@ mod tests {
             instruction::COMPLETE_REDEMPTION,
             instruction::SET_PAUSED,
             instruction::VERIFY_DEPOSIT,
-            instruction::CLAIM,
-            instruction::INIT_COMMITMENT_TREE,
-            instruction::ADD_DEMO_COMMITMENT,
-            instruction::ANNOUNCE_STEALTH,
-            // V2 RAILGUN-style
-            instruction::REGISTER_VIEWING_KEY,
-            instruction::DELEGATE_VIEWING_KEY,
-            instruction::REVOKE_DELEGATION,
             instruction::ANNOUNCE_STEALTH_V2,
-            // .zkey name registry
-            instruction::REGISTER_NAME,
-            instruction::UPDATE_NAME,
-            instruction::TRANSFER_NAME,
-            // Direct stealth deposit
-            instruction::VERIFY_STEALTH_DEPOSIT,
+            instruction::ADD_DEMO_NOTE,
+            instruction::ADD_DEMO_STEALTH,
         ];
 
         for (i, &d1) in discriminators.iter().enumerate() {
             for (j, &d2) in discriminators.iter().enumerate() {
                 if i != j {
-                    assert_ne!(d1, d2, "Duplicate discriminator at indices {} and {}", i, j);
+                    assert_ne!(d1, d2, "Duplicate at {} and {}", i, j);
                 }
             }
         }

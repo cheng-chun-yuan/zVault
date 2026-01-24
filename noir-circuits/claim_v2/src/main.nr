@@ -1,84 +1,67 @@
-/**
- * Claim V2 Circuit - Ownership Proof with Grumpkin ECDH (SIMPLIFIED)
- *
- * This is the core ownership proof circuit for the dual-key ECDH system.
- * It proves that the claimer knows the spending private key that corresponds
- * to the stealth deposit.
- *
- * Key Security Properties:
- * - Sender knows: ephemeral_priv, shared_secret, commitment
- * - Sender does NOT know: recipient's spending_priv
- * - Nullifier = H(spending_priv, leaf_index, DOMAIN_NULL)
- * - Only recipient can compute valid nullifier!
- *
- * SECURITY IMPROVEMENTS (V2 Simplified):
- * - Removed random field: ephemeral key uniqueness is sufficient
- * - Removed double nullifier hashing: saves ~1.5k constraints
- * - Commitment: Poseidon2(notePubKey, amount) instead of (notePubKey, amount, random)
- * - Public input: nullifier directly (not hash of nullifier)
- *
- * If sender tries with wrong key:
- *   wrong_shared = ECDH(sender_priv, ephemeral_pub)
- *   wrong_note_pk = H(wrong_shared)
- *   wrong_commitment = H(wrong_note_pk, amount)
- *   → NOT IN MERKLE TREE → Proof fails
- *
- * Constraint Cost: ~8.5k total (saved ~1.5k from removing double hash)
- * - Grumpkin ECDH: ~2k
- * - Poseidon2 hashes: ~500 (reduced from ~1.5k)
- * - Merkle proof (20 levels): ~6k
- */
+// Claim V2 Circuit - Ownership Proof with Grumpkin ECDH (SHIELDED-ONLY)
+//
+// This is the core ownership proof circuit for the dual-key ECDH system.
+// It proves that the claimer knows the spending private key that corresponds
+// to the stealth deposit.
+//
+// SHIELDED-ONLY ARCHITECTURE:
+// - Amount is PRIVATE (not a public input)
+// - Amount is only revealed at withdrawal time (unavoidable for BTC)
+// - This provides maximum privacy for transfers/splits
+//
+// Key Security Properties:
+// - Sender knows: ephemeral_priv, shared_secret, commitment
+// - Sender does NOT know: recipient's spending_priv
+// - Nullifier = H(spending_priv, leaf_index, DOMAIN_NULL)
+// - Only recipient can compute valid nullifier!
+//
+// SECURITY IMPROVEMENTS (V2 Simplified):
+// - Removed random field: ephemeral key uniqueness is sufficient
+// - Removed double nullifier hashing: saves ~1.5k constraints
+// - Commitment: Poseidon2(notePubKey, amount) instead of (notePubKey, amount, random)
+// - Public input: nullifier directly (not hash of nullifier)
+// - Amount is private witness only (shielded-only architecture)
+//
+// If sender tries with wrong key:
+//   wrong_shared = ECDH(sender_priv, ephemeral_pub)
+//   wrong_note_pk = H(wrong_shared)
+//   wrong_commitment = H(wrong_note_pk, amount)
+//   NOT IN MERKLE TREE -> Proof fails
+//
+// Constraint Cost: ~8.5k total (saved ~1.5k from removing double hash)
+// - Grumpkin ECDH: ~2k
+// - Poseidon2 hashes: ~500 (reduced from ~1.5k)
+// - Merkle proof (20 levels): ~6k
 
-use dep::zvault_utils;
 use dep::zvault_utils::grumpkin;
 use dep::poseidon::poseidon2::Poseidon2;
 
-// Merkle tree depth (supports ~1M leaves)
-global TREE_DEPTH: u32 = 20;
-
 fn main(
-    // ============================================================
     // PRIVATE INPUTS (never revealed)
-    // ============================================================
-
-    /// Grumpkin spending private key (scalar field element)
+    // Grumpkin spending private key (scalar field element)
     spending_priv: Field,
-
-    /// Sender's ephemeral Grumpkin public key (x-coordinate)
+    // Sender's ephemeral Grumpkin public key (x-coordinate)
     ephemeral_spend_pub_x: Field,
-
-    /// Sender's ephemeral Grumpkin public key (y-coordinate)
+    // Sender's ephemeral Grumpkin public key (y-coordinate)
     ephemeral_spend_pub_y: Field,
-
-    /// Note amount in satoshis
+    // Note amount in satoshis (PRIVATE - shielded-only architecture)
+    // Amount is never revealed except at withdrawal time
     amount: Field,
-
-    /// Merkle tree leaf index
+    // Merkle tree leaf index
     leaf_index: Field,
-
-    /// Merkle path elements (siblings)
+    // Merkle path elements (siblings)
     merkle_path: [Field; 20],
-
-    /// Merkle path indices (0 = left, 1 = right)
+    // Merkle path indices (0 = left, 1 = right)
     merkle_indices: [u1; 20],
-
-    // ============================================================
     // PUBLIC INPUTS (verified on-chain)
-    // ============================================================
-
-    /// Current Merkle root
+    // Current Merkle root
     merkle_root: pub Field,
-
-    /// Nullifier (for double-spend prevention) - SIMPLIFIED: no hash wrapper
+    // Nullifier (for double-spend prevention) - SIMPLIFIED: no hash wrapper
     nullifier_pub: pub Field,
-
-    /// Amount being claimed (must match private amount)
-    amount_pub: pub Field,
+    // NOTE: amount_pub removed in shielded-only architecture
+    // Amount is only revealed at withdrawal time (unavoidable for BTC)
 ) {
-    // ============================================================
     // 1. GRUMPKIN ECDH (Efficient! ~2k constraints)
-    // ============================================================
-
     // Convert spending key to scalar
     let spending_scalar = grumpkin::scalar_from_field(spending_priv);
 
@@ -91,25 +74,16 @@ fn main(
     // Perform ECDH to get shared secret
     let (shared_x, shared_y) = grumpkin::ecdh(spending_scalar, ephemeral_pub);
 
-    // ============================================================
     // 2. DERIVE NOTE PUBLIC KEY
-    // ============================================================
-
     // notePubKey = Poseidon2(shared_x, shared_y, DOMAIN_NPK)
     let note_pub_key = grumpkin::derive_note_pubkey(shared_x, shared_y);
 
-    // ============================================================
     // 3. COMPUTE AND VERIFY COMMITMENT (SIMPLIFIED: no random)
-    // ============================================================
-
     // commitment = Poseidon2(notePubKey, amount)
     // Note: Pass 0 for random to use simplified V2 formula
     let commitment = grumpkin::compute_commitment_v2(note_pub_key, amount, 0);
 
-    // ============================================================
     // 4. VERIFY COMMITMENT EXISTS IN MERKLE TREE
-    // ============================================================
-
     let computed_root = compute_merkle_root_20(
         commitment,
         leaf_index,
@@ -118,10 +92,7 @@ fn main(
     );
     assert(merkle_root == computed_root, "Commitment not in Merkle tree");
 
-    // ============================================================
     // 5. COMPUTE AND VERIFY NULLIFIER (OWNERSHIP PROOF!)
-    // ============================================================
-
     // CRITICAL: Nullifier is derived from SPENDING PRIVATE KEY + leaf index
     // Only the legitimate recipient can compute this!
     // Sender knows shared secret but NOT spending_priv
@@ -133,16 +104,12 @@ fn main(
     // Direct comparison (no hash wrapper)
     assert(nullifier_pub == nullifier, "Invalid nullifier");
 
-    // ============================================================
-    // 6. VERIFY AMOUNT MATCHES
-    // ============================================================
-
-    assert(amount == amount_pub, "Amount mismatch");
+    // NOTE: Amount verification removed in shielded-only architecture
+    // Amount stays private - only verified via commitment in Merkle tree
+    // Amount is revealed only at withdrawal time (unavoidable for BTC)
 }
 
-/**
- * Compute Merkle root from leaf and path (20-level tree)
- */
+// Compute Merkle root from leaf and path (20-level tree)
 fn compute_merkle_root_20(
     leaf: Field,
     leaf_index: Field,
@@ -179,9 +146,7 @@ fn compute_merkle_root_20(
     current
 }
 
-// ============================================================================
 // Tests
-// ============================================================================
 
 #[test]
 fn test_claim_v2_basic() {
@@ -218,7 +183,7 @@ fn test_claim_v2_basic() {
     }
     let merkle_root = current;
 
-    // Run the circuit
+    // Run the circuit (shielded-only: no amount_pub)
     main(
         spending_priv,
         ephemeral_pub.x,
@@ -228,8 +193,7 @@ fn test_claim_v2_basic() {
         merkle_path,
         path_indices,
         merkle_root,
-        nullifier, // Direct nullifier, not hash
-        amount
+        nullifier
     );
 }
 
@@ -274,7 +238,7 @@ fn test_claim_v2_wrong_spending_key() {
 
     // This should FAIL because attacker's ECDH produces wrong commitment
     main(
-        attacker_priv, // WRONG KEY!
+        attacker_priv,
         ephemeral_pub.x,
         ephemeral_pub.y,
         amount,
@@ -282,8 +246,7 @@ fn test_claim_v2_wrong_spending_key() {
         merkle_path,
         path_indices,
         merkle_root,
-        attacker_nullifier,
-        amount
+        attacker_nullifier
     );
 }
 
@@ -330,7 +293,6 @@ fn test_claim_v2_wrong_nullifier() {
         merkle_path,
         path_indices,
         merkle_root,
-        wrong_nullifier,
-        amount
+        wrong_nullifier
     );
 }

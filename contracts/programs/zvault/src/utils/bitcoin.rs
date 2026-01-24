@@ -4,15 +4,96 @@
 
 use pinocchio::program_error::ProgramError;
 
-use crate::instructions::verify_stealth_deposit::{
-    StealthOpReturnData, STEALTH_OP_RETURN_MAGIC, STEALTH_OP_RETURN_SIZE, STEALTH_OP_RETURN_SIZE_V1,
-};
+use crate::error::ZVaultError;
 
 /// OP_RETURN opcode
 pub const OP_RETURN: u8 = 0x6a;
 
 /// Commitment size (32 bytes)
 pub const COMMITMENT_SIZE: usize = 32;
+
+/// Magic byte for stealth OP_RETURN
+pub const STEALTH_OP_RETURN_MAGIC: u8 = 0x7A; // 'z' for zVault stealth
+
+/// Current version for stealth OP_RETURN format (simplified)
+pub const STEALTH_OP_RETURN_VERSION: u8 = 2;
+
+/// Legacy version for backward compatibility
+pub const STEALTH_OP_RETURN_VERSION_V1: u32 = 1;
+
+/// Total size of stealth OP_RETURN data (SIMPLIFIED - 99 bytes)
+/// = 1 (magic) + 1 (version) + 32 (view pub) + 33 (spend pub) + 32 (commitment)
+pub const STEALTH_OP_RETURN_SIZE: usize = 99;
+
+/// Legacy size for V1 format
+pub const STEALTH_OP_RETURN_SIZE_V1: usize = 142;
+
+/// Parsed stealth data from OP_RETURN
+pub struct StealthOpReturnData {
+    pub version: u8,
+    pub ephemeral_view_pub: [u8; 32],
+    pub ephemeral_spend_pub: [u8; 33],
+    pub commitment: [u8; 32],
+}
+
+impl StealthOpReturnData {
+    /// Parse stealth data from OP_RETURN output data
+    /// Supports both V2 (99 bytes) and V1 (142 bytes) formats.
+    pub fn parse(data: &[u8]) -> Result<Self, ProgramError> {
+        if data.len() < STEALTH_OP_RETURN_SIZE {
+            return Err(ZVaultError::InvalidStealthOpReturn.into());
+        }
+
+        if data[0] != STEALTH_OP_RETURN_MAGIC {
+            return Err(ZVaultError::InvalidStealthOpReturn.into());
+        }
+
+        let version = data[1];
+
+        if version == STEALTH_OP_RETURN_VERSION {
+            // V2: Simplified format (99 bytes)
+            let mut ephemeral_view_pub = [0u8; 32];
+            ephemeral_view_pub.copy_from_slice(&data[2..34]);
+
+            let mut ephemeral_spend_pub = [0u8; 33];
+            ephemeral_spend_pub.copy_from_slice(&data[34..67]);
+
+            let mut commitment = [0u8; 32];
+            commitment.copy_from_slice(&data[67..99]);
+
+            Ok(Self {
+                version,
+                ephemeral_view_pub,
+                ephemeral_spend_pub,
+                commitment,
+            })
+        } else if data.len() >= STEALTH_OP_RETURN_SIZE_V1 {
+            // V1: Legacy format (142 bytes)
+            let version_v1 = u32::from_le_bytes(data[1..5].try_into().unwrap());
+            if version_v1 != STEALTH_OP_RETURN_VERSION_V1 {
+                return Err(ZVaultError::InvalidStealthOpReturn.into());
+            }
+
+            let mut ephemeral_view_pub = [0u8; 32];
+            ephemeral_view_pub.copy_from_slice(&data[5..37]);
+
+            let mut ephemeral_spend_pub = [0u8; 33];
+            ephemeral_spend_pub.copy_from_slice(&data[37..70]);
+
+            let mut commitment = [0u8; 32];
+            commitment.copy_from_slice(&data[110..142]);
+
+            Ok(Self {
+                version: 1,
+                ephemeral_view_pub,
+                ephemeral_spend_pub,
+                commitment,
+            })
+        } else {
+            Err(ZVaultError::InvalidStealthOpReturn.into())
+        }
+    }
+}
 
 /// Double SHA256 hash (Bitcoin standard)
 /// Uses Solana's native SHA256 syscall for efficiency
@@ -22,7 +103,7 @@ pub fn double_sha256(data: &[u8]) -> [u8; 32] {
 }
 
 /// SHA256 hash using Solana's syscall
-fn sha256(data: &[u8]) -> [u8; 32] {
+pub fn sha256(data: &[u8]) -> [u8; 32] {
     // Solana provides sol_sha256 syscall
     let mut result = [0u8; 32];
 

@@ -96,6 +96,47 @@ pub fn burn_sbbtc(
     invoke(&instruction, &[source, mint, authority])
 }
 
+/// Burn sbBTC tokens from a PDA-controlled account (e.g., pool vault)
+///
+/// # Arguments
+/// * `mint` - The sbBTC mint account
+/// * `source` - The PDA-controlled token account to burn from
+/// * `authority` - The PDA authority
+/// * `amount` - Amount to burn (in satoshis)
+/// * `signer_seeds` - PDA signer seeds
+pub fn burn_sbbtc_signed(
+    _token_program: &AccountInfo,
+    mint: &AccountInfo,
+    source: &AccountInfo,
+    authority: &AccountInfo,
+    amount: u64,
+    signer_seeds: &[&[u8]],
+) -> ProgramResult {
+    let mut data = [0u8; 9];
+    data[0] = token_instruction::BURN;
+    data[1..9].copy_from_slice(&amount.to_le_bytes());
+
+    let token_program_id = Pubkey::from(TOKEN_2022_PROGRAM_ID);
+
+    let accounts = [
+        AccountMeta::writable(source.key()),
+        AccountMeta::writable(mint.key()),
+        AccountMeta::readonly_signer(authority.key()),
+    ];
+
+    let instruction = Instruction {
+        program_id: &token_program_id,
+        accounts: &accounts,
+        data: &data,
+    };
+
+    let seeds: Vec<Seed> = signer_seeds.iter().map(|s| Seed::from(*s)).collect();
+    let signer = Signer::from(&seeds[..]);
+    let signers = [signer];
+
+    invoke_signed(&instruction, &[source, mint, authority], &signers)
+}
+
 /// Transfer sbBTC tokens between accounts
 ///
 /// # Arguments
