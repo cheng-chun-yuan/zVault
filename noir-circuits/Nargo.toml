@@ -2,6 +2,7 @@
 members = [
     "claim",
     "claim_v2",
+    "proof_of_innocence",
     "transfer",
     "split",
     "partial_withdraw",
