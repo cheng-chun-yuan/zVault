@@ -146,6 +146,14 @@ export {
   type Note,
   type SerializedNote,
   type NoteData,
+  // V2 Note types (dual-key ECDH support)
+  createNoteV2,
+  updateNoteV2WithHashes,
+  serializeNoteV2,
+  deserializeNoteV2,
+  noteV2HasComputedHashes,
+  type NoteV2,
+  type SerializedNoteV2,
 } from "./note";
 
 // Poseidon hash utilities (browser compatible via circomlibjs)

@@ -494,3 +494,151 @@ export function prepareWithdrawal(
 
   return { changeNote, changeAmount };
 }
+
+// ============================================================================
+// V2 Note Types (Dual-Key ECDH Support)
+// ============================================================================
+
+/**
+ * V2 Note structure for dual-key ECDH system
+ *
+ * Key differences from V1:
+ * - Uses random value instead of nullifier/secret for commitment
+ * - Stores ephemeral spending pubkey for proof generation
+ * - Nullifier derived from (spendingPrivKey, leafIndex) in circuit
+ */
+export interface NoteV2 {
+  /** Amount in satoshis */
+  amount: bigint;
+
+  /** Random value for commitment (replaces nullifier/secret) */
+  random: bigint;
+
+  /** Ephemeral Grumpkin spending public key (from sender) */
+  ephemeralSpendPubX: bigint;
+  ephemeralSpendPubY: bigint;
+
+  /** Leaf index in Merkle tree (set when commitment added on-chain) */
+  leafIndex: number;
+
+  /** Note public key = Poseidon2(ECDHShared.x, ECDHShared.y, DOMAIN_NPK) */
+  notePubKey: bigint;
+
+  /** Commitment = Poseidon2(notePubKey, amount, random) */
+  commitment: bigint;
+
+  /** Byte representations */
+  randomBytes: Uint8Array;
+  commitmentBytes: Uint8Array;
+}
+
+/**
+ * Serializable V2 note data
+ */
+export interface SerializedNoteV2 {
+  amount: string;
+  random: string;
+  ephemeralSpendPubX: string;
+  ephemeralSpendPubY: string;
+  leafIndex: number;
+  notePubKey?: string;
+  commitment?: string;
+}
+
+/**
+ * Create a V2 note from scanned announcement data
+ *
+ * @param amount - Decrypted amount
+ * @param random - Decrypted random value
+ * @param ephemeralSpendPub - Sender's ephemeral Grumpkin pubkey
+ * @param leafIndex - Merkle tree leaf index
+ * @returns NoteV2 structure
+ */
+export function createNoteV2(
+  amount: bigint,
+  random: bigint,
+  ephemeralSpendPub: { x: bigint; y: bigint },
+  leafIndex: number
+): NoteV2 {
+  return {
+    amount,
+    random,
+    ephemeralSpendPubX: ephemeralSpendPub.x,
+    ephemeralSpendPubY: ephemeralSpendPub.y,
+    leafIndex,
+    notePubKey: 0n, // Computed in circuit
+    commitment: 0n, // Computed in circuit
+    randomBytes: bigintToBytes(random),
+    commitmentBytes: new Uint8Array(32),
+  };
+}
+
+/**
+ * Update V2 note with computed values from circuit
+ */
+export function updateNoteV2WithHashes(
+  note: NoteV2,
+  notePubKey: bigint,
+  commitment: bigint
+): NoteV2 {
+  return {
+    ...note,
+    notePubKey,
+    commitment,
+    commitmentBytes: bigintToBytes(commitment),
+  };
+}
+
+/**
+ * Serialize V2 note for storage
+ */
+export function serializeNoteV2(note: NoteV2): SerializedNoteV2 {
+  const serialized: SerializedNoteV2 = {
+    amount: note.amount.toString(),
+    random: note.random.toString(),
+    ephemeralSpendPubX: note.ephemeralSpendPubX.toString(),
+    ephemeralSpendPubY: note.ephemeralSpendPubY.toString(),
+    leafIndex: note.leafIndex,
+  };
+
+  if (note.notePubKey !== 0n) {
+    serialized.notePubKey = note.notePubKey.toString();
+  }
+  if (note.commitment !== 0n) {
+    serialized.commitment = note.commitment.toString();
+  }
+
+  return serialized;
+}
+
+/**
+ * Deserialize V2 note from storage
+ */
+export function deserializeNoteV2(data: SerializedNoteV2): NoteV2 {
+  const note = createNoteV2(
+    BigInt(data.amount),
+    BigInt(data.random),
+    {
+      x: BigInt(data.ephemeralSpendPubX),
+      y: BigInt(data.ephemeralSpendPubY),
+    },
+    data.leafIndex
+  );
+
+  if (data.notePubKey && data.commitment) {
+    return updateNoteV2WithHashes(
+      note,
+      BigInt(data.notePubKey),
+      BigInt(data.commitment)
+    );
+  }
+
+  return note;
+}
+
+/**
+ * Check if V2 note has computed hashes
+ */
+export function noteV2HasComputedHashes(note: NoteV2): boolean {
+  return note.notePubKey !== 0n && note.commitment !== 0n;
+}
