@@ -54,6 +54,39 @@ export {
   poseidonHash2,
 } from "./crypto";
 
+// Grumpkin curve operations (Noir's embedded curve for efficient in-circuit ECDH)
+export {
+  // Constants
+  GRUMPKIN_FIELD_PRIME,
+  GRUMPKIN_ORDER,
+  GRUMPKIN_GENERATOR,
+  GRUMPKIN_INFINITY,
+  // Point operations
+  pointAdd,
+  pointDouble,
+  pointMul,
+  pointNegate,
+  isOnCurve,
+  isInfinity,
+  // Serialization
+  scalarFromBytes,
+  scalarToBytes,
+  pointToBytes,
+  pointFromBytes,
+  pointToCompressedBytes,
+  pointFromCompressedBytes,
+  pubKeyToBytes,
+  pubKeyFromBytes,
+  // Key generation
+  generateKeyPair as generateGrumpkinKeyPair,
+  deriveKeyPairFromSeed as deriveGrumpkinKeyPairFromSeed,
+  // ECDH
+  ecdh as grumpkinEcdh,
+  ecdhSharedSecret as grumpkinEcdhSharedSecret,
+  // Types
+  type GrumpkinPoint,
+} from "./grumpkin";
+
 // Note (shielded commitment) utilities
 export {
   generateNote,
