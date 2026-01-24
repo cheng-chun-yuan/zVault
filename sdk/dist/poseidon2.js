@@ -1,4 +1,3 @@
-"use strict";
 /**
  * Poseidon2 Hash Implementation for BN254
  *
@@ -14,30 +13,21 @@
  * - Implements full Poseidon2 permutation with correct round constants
  * - Sponge construction with rate=2, capacity=1
  */
-Object.defineProperty(exports, "__esModule", { value: true });
-exports.BN254_SCALAR_FIELD = void 0;
-exports.poseidon2Hash = poseidon2Hash;
-exports.deriveNotePubKey = deriveNotePubKey;
-exports.computeCommitmentV2 = computeCommitmentV2;
-exports.computeNullifierV2 = computeNullifierV2;
-exports.hashNullifier = hashNullifier;
-exports.computeCommitmentV1 = computeCommitmentV1;
-exports.computeNullifierHashV1 = computeNullifierHashV1;
 // BN254 scalar field prime (Noir's field)
-exports.BN254_SCALAR_FIELD = 21888242871839275222246405745257275088548364400416034343698204186575808495617n;
-// Poseidon2 round constants for BN254 (t=3 state width)
-// These must match Noir's implementation exactly
-const POSEIDON2_ROUND_CONSTANTS_T3 = generateRoundConstants();
-// Number of rounds
+export const BN254_SCALAR_FIELD = 21888242871839275222246405745257275088548364400416034343698204186575808495617n;
+// Number of rounds (must be defined before generateRoundConstants is called)
 const FULL_ROUNDS = 8;
 const PARTIAL_ROUNDS = 56;
 const HALF_FULL_ROUNDS = FULL_ROUNDS / 2;
+// Poseidon2 round constants for BN254 (t=3 state width)
+// These must match Noir's implementation exactly
+const POSEIDON2_ROUND_CONSTANTS_T3 = generateRoundConstants();
 /**
  * Modular arithmetic in the scalar field
  */
 function mod(n) {
-    const result = n % exports.BN254_SCALAR_FIELD;
-    return result >= 0n ? result : result + exports.BN254_SCALAR_FIELD;
+    const result = n % BN254_SCALAR_FIELD;
+    return result >= 0n ? result : result + BN254_SCALAR_FIELD;
 }
 /**
  * S-box: x^5 (Poseidon2 uses quintic S-box)
@@ -159,10 +149,10 @@ function poseidon2Permutation(state) {
  * @param len - Number of elements (for padding)
  * @returns Hash output as field element
  */
-function poseidon2Hash(inputs, len = inputs.length) {
+export function poseidon2Hash(inputs, len = inputs.length) {
     // Validate inputs are in field
     for (const input of inputs) {
-        if (input < 0n || input >= exports.BN254_SCALAR_FIELD) {
+        if (input < 0n || input >= BN254_SCALAR_FIELD) {
             throw new Error(`Input ${input} is not in the BN254 scalar field`);
         }
     }
@@ -190,7 +180,7 @@ function poseidon2Hash(inputs, len = inputs.length) {
  *
  * This must match Noir's grumpkin::derive_note_pubkey()
  */
-function deriveNotePubKey(sharedX, sharedY) {
+export function deriveNotePubKey(sharedX, sharedY) {
     const DOMAIN_NPK = 0x6e706bn; // "npk"
     return poseidon2Hash([sharedX, sharedY, DOMAIN_NPK], 3);
 }
@@ -201,7 +191,7 @@ function deriveNotePubKey(sharedX, sharedY) {
  *
  * This must match Noir's grumpkin::compute_commitment_v2()
  */
-function computeCommitmentV2(notePubKey, amount, random) {
+export function computeCommitmentV2(notePubKey, amount, random) {
     return poseidon2Hash([notePubKey, amount, random], 3);
 }
 /**
@@ -212,7 +202,7 @@ function computeCommitmentV2(notePubKey, amount, random) {
  * CRITICAL: This is what prevents sender from claiming recipient's funds.
  * This must match Noir's grumpkin::compute_nullifier_v2()
  */
-function computeNullifierV2(spendingPriv, leafIndex) {
+export function computeNullifierV2(spendingPriv, leafIndex) {
     const DOMAIN_NULL = 0x6e756c6cn; // "null"
     return poseidon2Hash([spendingPriv, leafIndex, DOMAIN_NULL], 3);
 }
@@ -224,7 +214,7 @@ function computeNullifierV2(spendingPriv, leafIndex) {
  * NOTE: This double-hashing is being evaluated for removal.
  * See security audit Phase 3 recommendation.
  */
-function hashNullifier(nullifier) {
+export function hashNullifier(nullifier) {
     return poseidon2Hash([nullifier], 1);
 }
 /**
@@ -235,7 +225,7 @@ function hashNullifier(nullifier) {
  *
  * This must match Noir's zvault_utils::compute_commitment_from_secrets()
  */
-function computeCommitmentV1(nullifier, secret, amount) {
+export function computeCommitmentV1(nullifier, secret, amount) {
     const note = poseidon2Hash([nullifier, secret], 2);
     return poseidon2Hash([note, amount], 2);
 }
@@ -246,6 +236,6 @@ function computeCommitmentV1(nullifier, secret, amount) {
  *
  * This must match Noir's zvault_utils::compute_nullifier_hash()
  */
-function computeNullifierHashV1(nullifier) {
+export function computeNullifierHashV1(nullifier) {
     return poseidon2Hash([nullifier], 1);
 }

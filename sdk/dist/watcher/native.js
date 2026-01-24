@@ -1,4 +1,3 @@
-"use strict";
 /**
  * React Native / Expo Deposit Watcher
  *
@@ -9,11 +8,7 @@
  * Note: This module requires @react-native-async-storage/async-storage
  * to be installed in your React Native/Expo project.
  */
-Object.defineProperty(exports, "__esModule", { value: true });
-exports.NativeDepositWatcher = void 0;
-exports.setAsyncStorage = setAsyncStorage;
-exports.createNativeWatcher = createNativeWatcher;
-const base_1 = require("./base");
+import { BaseDepositWatcher } from "./base";
 // Will be set by the user via setAsyncStorage()
 let asyncStorageInstance = null;
 /**
@@ -33,7 +28,7 @@ let asyncStorageInstance = null;
  * });
  * ```
  */
-function setAsyncStorage(storage) {
+export function setAsyncStorage(storage) {
     asyncStorageInstance = storage;
 }
 /**
@@ -71,7 +66,7 @@ const NATIVE_STORAGE = {
  * - Background reconnection
  * - Confirmation tracking
  */
-class NativeDepositWatcher extends base_1.BaseDepositWatcher {
+export class NativeDepositWatcher extends BaseDepositWatcher {
     constructor(callbacks = {}, config = {}) {
         super(NATIVE_STORAGE, callbacks, config);
         this.ws = null;
@@ -184,7 +179,6 @@ class NativeDepositWatcher extends base_1.BaseDepositWatcher {
         this.pollAddresses();
     }
 }
-exports.NativeDepositWatcher = NativeDepositWatcher;
 /**
  * Create a React Native deposit watcher instance
  *
@@ -221,6 +215,6 @@ exports.NativeDepositWatcher = NativeDepositWatcher;
  * console.log('Share this link:', deposit.claimLink);
  * ```
  */
-function createNativeWatcher(callbacks = {}, config = {}) {
+export function createNativeWatcher(callbacks = {}, config = {}) {
     return new NativeDepositWatcher(callbacks, config);
 }

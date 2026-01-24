@@ -1,4 +1,3 @@
-"use strict";
 /**
  * Base Deposit Watcher
  *
@@ -6,14 +5,12 @@
  * Platform-specific implementations (Web, React Native) extend this class
  * and provide their own WebSocket and storage implementations.
  */
-Object.defineProperty(exports, "__esModule", { value: true });
-exports.BaseDepositWatcher = void 0;
-const esplora_1 = require("../core/esplora");
-const types_1 = require("./types");
-const note_1 = require("../note");
-const taproot_1 = require("../taproot");
-const claim_link_1 = require("../claim-link");
-const crypto_1 = require("../crypto");
+import { EsploraClient } from "../core/esplora";
+import { serializeDeposit, deserializeDeposit, generateDepositId, DEFAULT_WATCHER_CONFIG, } from "./types";
+import { generateNote, initPoseidon } from "../note";
+import { deriveTaprootAddress } from "../taproot";
+import { createClaimLink } from "../claim-link";
+import { bytesToHex, bigintToBytes } from "../crypto";
 /**
  * Abstract base class for deposit watching
  *
@@ -22,15 +19,15 @@ const crypto_1 = require("../crypto");
  * - disconnectWebSocket()
  * - subscribeToAddress(address)
  */
-class BaseDepositWatcher {
+export class BaseDepositWatcher {
     constructor(storage, callbacks = {}, config = {}) {
         this.deposits = new Map();
         this.addressToDepositId = new Map();
         this.initialized = false;
         this.storage = storage;
         this.callbacks = callbacks;
-        this.config = { ...types_1.DEFAULT_WATCHER_CONFIG, ...config };
-        this.esplora = new esplora_1.EsploraClient(this.config.network, this.config.esploraUrl);
+        this.config = { ...DEFAULT_WATCHER_CONFIG, ...config };
+        this.esplora = new EsploraClient(this.config.network, this.config.esploraUrl);
     }
     // =========================================================================
     // Lifecycle
@@ -45,7 +42,7 @@ class BaseDepositWatcher {
         if (this.initialized)
             return;
         // Initialize Poseidon (needed for commitment computation)
-        await (0, note_1.initPoseidon)();
+        await initPoseidon();
         // Load persisted deposits
         await this.loadFromStorage();
         // Connect WebSocket for real-time updates
@@ -85,7 +82,7 @@ class BaseDepositWatcher {
             try {
                 const serialized = JSON.parse(data);
                 for (const s of serialized) {
-                    const deposit = (0, types_1.deserializeDeposit)(s);
+                    const deposit = deserializeDeposit(s);
                     this.deposits.set(deposit.id, deposit);
                     this.addressToDepositId.set(deposit.taprootAddress, deposit.id);
                 }
@@ -97,7 +94,7 @@ class BaseDepositWatcher {
     }
     async saveToStorage() {
         const key = `${this.config.storageKeyPrefix}deposits`;
-        const serialized = Array.from(this.deposits.values()).map(types_1.serializeDeposit);
+        const serialized = Array.from(this.deposits.values()).map(serializeDeposit);
         await this.storage.set(key, JSON.stringify(serialized));
     }
     // =========================================================================
@@ -112,27 +109,27 @@ class BaseDepositWatcher {
      */
     async createDeposit(amount, baseUrl) {
         // Generate note with random secrets
-        const note = (0, note_1.generateNote)(amount);
+        const note = generateNote(amount);
         // For taproot derivation, use XOR of nullifier/secret as placeholder commitment
         // In production, compute actual Poseidon2 hash via helper circuit or backend
-        const placeholderCommitment = (0, crypto_1.bigintToBytes)((note.nullifier ^ note.secret) % (2n ** 256n));
+        const placeholderCommitment = bigintToBytes((note.nullifier ^ note.secret) % (2n ** 256n));
         // Derive taproot address from commitment
         const network = this.config.network === "mainnet" ? "mainnet" : "testnet";
-        const { address } = await (0, taproot_1.deriveTaprootAddress)(placeholderCommitment, network);
+        const { address } = await deriveTaprootAddress(placeholderCommitment, network);
         // Create claim link
-        const claimLink = (0, claim_link_1.createClaimLink)(note, baseUrl);
+        const claimLink = createClaimLink(note, baseUrl);
         // Create pending deposit record
         const deposit = {
-            id: (0, types_1.generateDepositId)(),
+            id: generateDepositId(),
             taprootAddress: address,
-            nullifier: (0, crypto_1.bytesToHex)(note.nullifierBytes),
-            secret: (0, crypto_1.bytesToHex)(note.secretBytes),
+            nullifier: bytesToHex(note.nullifierBytes),
+            secret: bytesToHex(note.secretBytes),
             amount,
             claimLink,
             status: "waiting",
             confirmations: 0,
             requiredConfirmations: this.config.requiredConfirmations,
-            commitment: (0, crypto_1.bytesToHex)(placeholderCommitment),
+            commitment: bytesToHex(placeholderCommitment),
             createdAt: Date.now(),
         };
         // Store and subscribe
@@ -448,4 +445,3 @@ class BaseDepositWatcher {
         }
     }
 }
-exports.BaseDepositWatcher = BaseDepositWatcher;

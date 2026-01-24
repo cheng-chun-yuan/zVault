@@ -1,9 +1,11 @@
 /**
- * RAILGUN-Style Privacy Enhancement Tests
+ * Key Derivation & Dual-Key ECDH Tests
  *
- * Tests the dual-key ECDH system:
+ * Tests the privacy-preserving key system:
  * - Grumpkin curve operations
- * - Solana-derived key hierarchy
+ * - Solana-derived key hierarchy (spending + viewing keys)
+ * - Stealth meta-address encoding
+ * - Viewing key delegation
  * - Stealth deposit/scan/claim flow
  * - Key separation guarantees
  */

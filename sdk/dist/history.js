@@ -1,13 +1,10 @@
-"use strict";
-Object.defineProperty(exports, "__esModule", { value: true });
-exports.HistoryManager = exports.MockRecursiveProver = void 0;
-const crypto_1 = require("./crypto");
+import { bytesToHex } from "./crypto";
 // ========== Implementation ==========
 /**
  * Mocks a recursive prover for demonstration.
  * Real implementation would use Nova / Halo2 / Groth16 recursive verification.
  */
-class MockRecursiveProver {
+export class MockRecursiveProver {
     async aggregate(prevProof, currentProof, publicInputs) {
         // Simulating aggregation by concatenating hashes or similar
         // In real ZK, this is a computation heavy proof generation
@@ -25,11 +22,10 @@ class MockRecursiveProver {
         return proof.length > 0;
     }
 }
-exports.MockRecursiveProver = MockRecursiveProver;
 /**
  * Manages local transaction history and audit chains.
  */
-class HistoryManager {
+export class HistoryManager {
     constructor(aggregator = new MockRecursiveProver()) {
         this.chain = {
             nodes: new Map(),
@@ -54,7 +50,7 @@ class HistoryManager {
         // Generate recursive proof (aggregating history)
         const recursiveProof = await this.aggregator.aggregate(prevRecursiveProof, proof, data);
         // Create node ID (simple random for now, ideally hash of content)
-        const id = (0, crypto_1.bytesToHex)(crypto.getRandomValues(new Uint8Array(16)));
+        const id = bytesToHex(crypto.getRandomValues(new Uint8Array(16)));
         const node = {
             id,
             parentId,
@@ -119,4 +115,3 @@ class HistoryManager {
         this.chain.heads = new Set(data.heads);
     }
 }
-exports.HistoryManager = HistoryManager;

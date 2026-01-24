@@ -1,19 +1,16 @@
-"use strict";
 /**
  * Esplora Client - Platform-agnostic HTTP client for Bitcoin blockchain queries
  *
  * Uses standard fetch API (works in browser, Node.js 18+, React Native)
  * Supports mempool.space API for testnet/mainnet
  */
-Object.defineProperty(exports, "__esModule", { value: true });
-exports.esploraMainnet = exports.esploraTestnet = exports.EsploraClient = void 0;
 const NETWORK_URLS = {
     mainnet: "https://mempool.space/api",
     testnet: "https://mempool.space/testnet/api",
     testnet4: "https://mempool.space/testnet4/api",
     signet: "https://mempool.space/signet/api",
 };
-class EsploraClient {
+export class EsploraClient {
     constructor(networkOrUrl = "testnet", customBaseUrl) {
         if (customBaseUrl) {
             this.baseUrl = customBaseUrl.replace(/\/$/, "");
@@ -177,7 +174,6 @@ class EsploraClient {
         return this.baseUrl;
     }
 }
-exports.EsploraClient = EsploraClient;
 // =========================================================================
 // Utility functions
 // =========================================================================
@@ -192,5 +188,5 @@ function sleep(ms) {
     return new Promise((resolve) => setTimeout(resolve, ms));
 }
 // Default client for testnet
-exports.esploraTestnet = new EsploraClient("testnet");
-exports.esploraMainnet = new EsploraClient("mainnet");
+export const esploraTestnet = new EsploraClient("testnet");
+export const esploraMainnet = new EsploraClient("mainnet");

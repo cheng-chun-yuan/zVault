@@ -1,4 +1,3 @@
-"use strict";
 /**
  * ZVault Simplified API
  *
@@ -12,27 +11,19 @@
  *
  * @module api
  */
-Object.defineProperty(exports, "__esModule", { value: true });
-exports.isWalletAdapter = exports.prepareClaimInputs = exports.scanAnnouncements = exports.parseClaimLink = exports.estimateSeedStrength = exports.deriveNotes = exports.deriveNote = exports.createNoteFromSecrets = exports.generateNote = exports.DEFAULT_PROGRAM_ID = void 0;
-exports.deposit = deposit;
-exports.withdraw = withdraw;
-exports.privateClaim = privateClaim;
-exports.privateSplit = privateSplit;
-exports.sendLink = sendLink;
-exports.sendStealth = sendStealth;
-const web3_js_1 = require("@solana/web3.js");
-const note_1 = require("./note");
-const taproot_1 = require("./taproot");
-const claim_link_1 = require("./claim-link");
-const proof_1 = require("./proof");
-const stealth_1 = require("./stealth");
-const merkle_1 = require("./merkle");
-const crypto_1 = require("./crypto");
+import { PublicKey, Transaction, TransactionInstruction, SystemProgram } from "@solana/web3.js";
+import { generateNote, formatBtc } from "./note";
+import { deriveTaprootAddress } from "./taproot";
+import { createClaimLink, parseClaimLink } from "./claim-link";
+import { generateClaimProof, generateSplitProof, generatePartialWithdrawProof, } from "./proof";
+import { createStealthDeposit, } from "./stealth";
+import { TREE_DEPTH, ZERO_VALUE } from "./merkle";
+import { bigintToBytes } from "./crypto";
 // ============================================================================
 // Constants
 // ============================================================================
 /** Default program ID (Solana Devnet) */
-exports.DEFAULT_PROGRAM_ID = new web3_js_1.PublicKey("AtztELZfz3GHA8hFQCv7aT9Mt47Xhknv3ZCNb3fmXsgf");
+export const DEFAULT_PROGRAM_ID = new PublicKey("AtztELZfz3GHA8hFQCv7aT9Mt47Xhknv3ZCNb3fmXsgf");
 /** Instruction discriminators */
 const INSTRUCTION = {
     SPLIT_COMMITMENT: 4,
@@ -45,16 +36,16 @@ const INSTRUCTION = {
 // PDA Derivation Helpers
 // ============================================================================
 function derivePoolStatePDA(programId) {
-    return web3_js_1.PublicKey.findProgramAddressSync([Buffer.from("pool_state")], programId);
+    return PublicKey.findProgramAddressSync([Buffer.from("pool_state")], programId);
 }
 function deriveCommitmentTreePDA(programId) {
-    return web3_js_1.PublicKey.findProgramAddressSync([Buffer.from("commitment_tree")], programId);
+    return PublicKey.findProgramAddressSync([Buffer.from("commitment_tree")], programId);
 }
 function deriveNullifierRecordPDA(programId, nullifierHash) {
-    return web3_js_1.PublicKey.findProgramAddressSync([Buffer.from("nullifier"), nullifierHash], programId);
+    return PublicKey.findProgramAddressSync([Buffer.from("nullifier"), nullifierHash], programId);
 }
 function deriveStealthAnnouncementPDA(programId, commitment) {
-    return web3_js_1.PublicKey.findProgramAddressSync([Buffer.from("stealth"), commitment], programId);
+    return PublicKey.findProgramAddressSync([Buffer.from("stealth"), commitment], programId);
 }
 // ============================================================================
 // 1. DEPOSIT
@@ -84,21 +75,21 @@ function deriveStealthAnnouncementPDA(programId, commitment) {
  * console.log('Save this link:', result.claimLink);
  * ```
  */
-async function deposit(amountSats, network = "testnet", baseUrl) {
+export async function deposit(amountSats, network = "testnet", baseUrl) {
     // Generate note with random secrets
-    const note = (0, note_1.generateNote)(amountSats);
+    const note = generateNote(amountSats);
     // For taproot derivation, use XOR of nullifier/secret as placeholder commitment
     // In production, compute actual Poseidon2 hash via helper circuit
-    const placeholderCommitment = (0, crypto_1.bigintToBytes)((note.nullifier ^ note.secret) % (2n ** 256n));
+    const placeholderCommitment = bigintToBytes((note.nullifier ^ note.secret) % (2n ** 256n));
     // Derive taproot address
-    const { address: taprootAddress } = await (0, taproot_1.deriveTaprootAddress)(placeholderCommitment, network);
+    const { address: taprootAddress } = await deriveTaprootAddress(placeholderCommitment, network);
     // Create claim link
-    const claimLink = (0, claim_link_1.createClaimLink)(note, baseUrl);
+    const claimLink = createClaimLink(note, baseUrl);
     return {
         note,
         taprootAddress,
         claimLink,
-        displayAmount: (0, note_1.formatBtc)(amountSats),
+        displayAmount: formatBtc(amountSats),
     };
 }
 // ============================================================================
@@ -133,7 +124,7 @@ async function deposit(amountSats, network = "testnet", baseUrl) {
  * const result = await withdraw(config, myNote, 'bc1q...', myNote.amount / 2n);
  * ```
  */
-async function withdraw(config, note, btcAddress, withdrawAmount, merkleProof) {
+export async function withdraw(config, note, btcAddress, withdrawAmount, merkleProof) {
     if (!config.payer) {
         throw new Error("Payer keypair required for withdraw");
     }
@@ -149,16 +140,16 @@ async function withdraw(config, note, btcAddress, withdrawAmount, merkleProof) {
     if (isPartialWithdraw) {
         // Generate change note for remaining amount
         const changeAmount = note.amount - actualWithdrawAmount;
-        changeNote = (0, note_1.generateNote)(changeAmount);
+        changeNote = generateNote(changeAmount);
         // Generate partial withdraw proof
         const mp = merkleProof ?? createEmptyMerkleProofForNote();
-        proof = await (0, proof_1.generatePartialWithdrawProof)(note, actualWithdrawAmount, changeNote, mp, recipientBytes);
+        proof = await generatePartialWithdrawProof(note, actualWithdrawAmount, changeNote, mp, recipientBytes);
     }
     else {
         // Full withdrawal - use partial_withdraw with zero change
-        changeNote = (0, note_1.generateNote)(0n);
+        changeNote = generateNote(0n);
         const mp = merkleProof ?? createEmptyMerkleProofForNote();
-        proof = await (0, proof_1.generatePartialWithdrawProof)(note, actualWithdrawAmount, changeNote, mp, recipientBytes);
+        proof = await generatePartialWithdrawProof(note, actualWithdrawAmount, changeNote, mp, recipientBytes);
         changeNote = undefined; // No change for full withdrawal
     }
     // Build instruction data
@@ -168,25 +159,25 @@ async function withdraw(config, note, btcAddress, withdrawAmount, merkleProof) {
     const [commitmentTree] = deriveCommitmentTreePDA(config.programId);
     const [nullifierRecord] = deriveNullifierRecordPDA(config.programId, note.nullifierHashBytes);
     // Build transaction
-    const ix = new web3_js_1.TransactionInstruction({
+    const ix = new TransactionInstruction({
         programId: config.programId,
         keys: [
             { pubkey: poolState, isSigner: false, isWritable: true },
             { pubkey: commitmentTree, isSigner: false, isWritable: true },
             { pubkey: nullifierRecord, isSigner: false, isWritable: true },
             { pubkey: config.payer.publicKey, isSigner: true, isWritable: true },
-            { pubkey: web3_js_1.SystemProgram.programId, isSigner: false, isWritable: false },
+            { pubkey: SystemProgram.programId, isSigner: false, isWritable: false },
         ],
         data: Buffer.from(data),
     });
-    const tx = new web3_js_1.Transaction().add(ix);
+    const tx = new Transaction().add(ix);
     const signature = await config.connection.sendTransaction(tx, [config.payer]);
     await config.connection.confirmTransaction(signature);
     return {
         signature,
         withdrawAmount: actualWithdrawAmount,
         changeNote,
-        changeClaimLink: changeNote ? (0, claim_link_1.createClaimLink)(changeNote) : undefined,
+        changeClaimLink: changeNote ? createClaimLink(changeNote) : undefined,
     };
 }
 // ============================================================================
@@ -219,14 +210,14 @@ async function withdraw(config, note, btcAddress, withdrawAmount, merkleProof) {
  * const result = await privateClaim(config, myNote);
  * ```
  */
-async function privateClaim(config, claimLinkOrNote, merkleProof) {
+export async function privateClaim(config, claimLinkOrNote, merkleProof) {
     if (!config.payer) {
         throw new Error("Payer keypair required for claim");
     }
     // Parse note from link or use directly
     let note;
     if (typeof claimLinkOrNote === "string") {
-        const parsed = (0, claim_link_1.parseClaimLink)(claimLinkOrNote);
+        const parsed = parseClaimLink(claimLinkOrNote);
         if (!parsed) {
             throw new Error("Invalid claim link");
         }
@@ -238,7 +229,7 @@ async function privateClaim(config, claimLinkOrNote, merkleProof) {
     // Use provided merkle proof or create empty one
     const mp = merkleProof ?? createEmptyMerkleProofForNote();
     // Generate ZK proof
-    const proof = await (0, proof_1.generateClaimProof)(note, mp);
+    const proof = await generateClaimProof(note, mp);
     // Build instruction data
     const data = buildClaimData(proof, note.amount);
     // Derive PDAs
@@ -246,18 +237,18 @@ async function privateClaim(config, claimLinkOrNote, merkleProof) {
     const [commitmentTree] = deriveCommitmentTreePDA(config.programId);
     const [nullifierRecord] = deriveNullifierRecordPDA(config.programId, note.nullifierHashBytes);
     // Build transaction
-    const ix = new web3_js_1.TransactionInstruction({
+    const ix = new TransactionInstruction({
         programId: config.programId,
         keys: [
             { pubkey: poolState, isSigner: false, isWritable: true },
             { pubkey: commitmentTree, isSigner: false, isWritable: false },
             { pubkey: nullifierRecord, isSigner: false, isWritable: true },
             { pubkey: config.payer.publicKey, isSigner: true, isWritable: true },
-            { pubkey: web3_js_1.SystemProgram.programId, isSigner: false, isWritable: false },
+            { pubkey: SystemProgram.programId, isSigner: false, isWritable: false },
         ],
         data: Buffer.from(data),
     });
-    const tx = new web3_js_1.Transaction().add(ix);
+    const tx = new Transaction().add(ix);
     const signature = await config.connection.sendTransaction(tx, [config.payer]);
     await config.connection.confirmTransaction(signature);
     return {
@@ -299,7 +290,7 @@ async function privateClaim(config, claimLinkOrNote, merkleProof) {
  * const myLink = sendLink(output2);
  * ```
  */
-async function privateSplit(config, inputNote, amount1, merkleProof) {
+export async function privateSplit(config, inputNote, amount1, merkleProof) {
     if (!config.payer) {
         throw new Error("Payer keypair required for split");
     }
@@ -308,12 +299,12 @@ async function privateSplit(config, inputNote, amount1, merkleProof) {
         throw new Error("Both output amounts must be positive");
     }
     // Generate output notes
-    const output1 = (0, note_1.generateNote)(amount1);
-    const output2 = (0, note_1.generateNote)(amount2);
+    const output1 = generateNote(amount1);
+    const output2 = generateNote(amount2);
     // Use provided merkle proof or create empty one
     const mp = merkleProof ?? createEmptyMerkleProofForNote();
     // Generate split proof
-    const proof = await (0, proof_1.generateSplitProof)(inputNote, output1, output2, mp);
+    const proof = await generateSplitProof(inputNote, output1, output2, mp);
     // Build instruction data
     const data = buildSplitData(proof, output1.commitmentBytes, output2.commitmentBytes);
     // Derive PDAs
@@ -321,18 +312,18 @@ async function privateSplit(config, inputNote, amount1, merkleProof) {
     const [commitmentTree] = deriveCommitmentTreePDA(config.programId);
     const [nullifierRecord] = deriveNullifierRecordPDA(config.programId, inputNote.nullifierHashBytes);
     // Build transaction
-    const ix = new web3_js_1.TransactionInstruction({
+    const ix = new TransactionInstruction({
         programId: config.programId,
         keys: [
             { pubkey: poolState, isSigner: false, isWritable: true },
             { pubkey: commitmentTree, isSigner: false, isWritable: true },
             { pubkey: nullifierRecord, isSigner: false, isWritable: true },
             { pubkey: config.payer.publicKey, isSigner: true, isWritable: true },
-            { pubkey: web3_js_1.SystemProgram.programId, isSigner: false, isWritable: false },
+            { pubkey: SystemProgram.programId, isSigner: false, isWritable: false },
         ],
         data: Buffer.from(data),
     });
-    const tx = new web3_js_1.Transaction().add(ix);
+    const tx = new Transaction().add(ix);
     const signature = await config.connection.sendTransaction(tx, [config.payer]);
     await config.connection.confirmTransaction(signature);
     return {
@@ -366,8 +357,8 @@ async function privateSplit(config, inputNote, amount1, merkleProof) {
  * // Recipient calls: await privateClaim(config, link);
  * ```
  */
-function sendLink(note, baseUrl) {
-    return (0, claim_link_1.createClaimLink)(note, baseUrl);
+export function sendLink(note, baseUrl) {
+    return createClaimLink(note, baseUrl);
 }
 // ============================================================================
 // 6. SEND_STEALTH (ECDH Mode)
@@ -401,12 +392,12 @@ function sendLink(note, baseUrl) {
  * const claimInputs = await prepareClaimInputs(aliceKeys, found[0], merkleProof);
  * ```
  */
-async function sendStealth(config, recipientMeta, amountSats, leafIndex = 0) {
+export async function sendStealth(config, recipientMeta, amountSats, leafIndex = 0) {
     if (!config.payer) {
         throw new Error("Payer keypair required for stealth send");
     }
     // Create stealth deposit data using dual-key ECDH
-    const stealthDeposit = await (0, stealth_1.createStealthDeposit)(recipientMeta, amountSats);
+    const stealthDeposit = await createStealthDeposit(recipientMeta, amountSats);
     // Build instruction data (113 bytes)
     // ephemeral_view_pub (32) + ephemeral_spend_pub (33) + amount_sats (8) + commitment (32) + leaf_index (8)
     const data = new Uint8Array(1 + 113);
@@ -426,16 +417,16 @@ async function sendStealth(config, recipientMeta, amountSats, leafIndex = 0) {
     // Derive stealth announcement PDA
     const [stealthAnnouncement] = deriveStealthAnnouncementPDA(config.programId, stealthDeposit.commitment);
     // Build transaction
-    const ix = new web3_js_1.TransactionInstruction({
+    const ix = new TransactionInstruction({
         programId: config.programId,
         keys: [
             { pubkey: stealthAnnouncement, isSigner: false, isWritable: true },
             { pubkey: config.payer.publicKey, isSigner: true, isWritable: true },
-            { pubkey: web3_js_1.SystemProgram.programId, isSigner: false, isWritable: false },
+            { pubkey: SystemProgram.programId, isSigner: false, isWritable: false },
         ],
         data: Buffer.from(data),
     });
-    const tx = new web3_js_1.Transaction().add(ix);
+    const tx = new Transaction().add(ix);
     const signature = await config.connection.sendTransaction(tx, [config.payer]);
     await config.connection.confirmTransaction(signature);
     return {
@@ -452,12 +443,12 @@ async function sendStealth(config, recipientMeta, amountSats, leafIndex = 0) {
  */
 function createEmptyMerkleProofForNote() {
     return {
-        pathElements: Array(merkle_1.TREE_DEPTH)
+        pathElements: Array(TREE_DEPTH)
             .fill(null)
-            .map(() => new Uint8Array(merkle_1.ZERO_VALUE)),
-        pathIndices: Array(merkle_1.TREE_DEPTH).fill(0),
+            .map(() => new Uint8Array(ZERO_VALUE)),
+        pathIndices: Array(TREE_DEPTH).fill(0),
         leafIndex: 0,
-        root: new Uint8Array(merkle_1.ZERO_VALUE),
+        root: new Uint8Array(ZERO_VALUE),
     };
 }
 /**
@@ -518,15 +509,6 @@ function buildRequestRedemptionData(proof, withdrawAmount, recipient, changeComm
 // ============================================================================
 // Re-exports for convenience
 // ============================================================================
-var note_2 = require("./note");
-Object.defineProperty(exports, "generateNote", { enumerable: true, get: function () { return note_2.generateNote; } });
-Object.defineProperty(exports, "createNoteFromSecrets", { enumerable: true, get: function () { return note_2.createNoteFromSecrets; } });
-Object.defineProperty(exports, "deriveNote", { enumerable: true, get: function () { return note_2.deriveNote; } });
-Object.defineProperty(exports, "deriveNotes", { enumerable: true, get: function () { return note_2.deriveNotes; } });
-Object.defineProperty(exports, "estimateSeedStrength", { enumerable: true, get: function () { return note_2.estimateSeedStrength; } });
-var claim_link_2 = require("./claim-link");
-Object.defineProperty(exports, "parseClaimLink", { enumerable: true, get: function () { return claim_link_2.parseClaimLink; } });
-var stealth_2 = require("./stealth");
-Object.defineProperty(exports, "scanAnnouncements", { enumerable: true, get: function () { return stealth_2.scanAnnouncements; } });
-Object.defineProperty(exports, "prepareClaimInputs", { enumerable: true, get: function () { return stealth_2.prepareClaimInputs; } });
-Object.defineProperty(exports, "isWalletAdapter", { enumerable: true, get: function () { return stealth_2.isWalletAdapter; } });
+export { generateNote, createNoteFromSecrets, deriveNote, deriveNotes, estimateSeedStrength } from "./note";
+export { parseClaimLink } from "./claim-link";
+export { scanAnnouncements, prepareClaimInputs, isWalletAdapter, } from "./stealth";

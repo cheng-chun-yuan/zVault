@@ -1,47 +1,37 @@
-"use strict";
 /**
  * Verify Deposit Client
  *
  * Helper to call verify_deposit instruction with ChadBuffer data
  * Uses native Solana web3.js (no Anchor - using Pinocchio contracts)
  */
-Object.defineProperty(exports, "__esModule", { value: true });
-exports.derivePoolStatePDA = derivePoolStatePDA;
-exports.deriveLightClientPDA = deriveLightClientPDA;
-exports.deriveBlockHeaderPDA = deriveBlockHeaderPDA;
-exports.deriveCommitmentTreePDA = deriveCommitmentTreePDA;
-exports.deriveDepositRecordPDA = deriveDepositRecordPDA;
-exports.buildMerkleProof = buildMerkleProof;
-exports.verifyDeposit = verifyDeposit;
-exports.exampleUsage = exampleUsage;
-const web3_js_1 = require("@solana/web3.js");
-const chadbuffer_1 = require("./chadbuffer");
+import { Connection, Keypair, PublicKey, } from "@solana/web3.js";
+import { prepareVerifyDeposit, bytesToHex } from "./chadbuffer";
 // Program ID (Solana Devnet)
-const ZVAULT_PROGRAM_ID = new web3_js_1.PublicKey("AtztELZfz3GHA8hFQCv7aT9Mt47Xhknv3ZCNb3fmXsgf");
+const ZVAULT_PROGRAM_ID = new PublicKey("AtztELZfz3GHA8hFQCv7aT9Mt47Xhknv3ZCNb3fmXsgf");
 /**
  * Derive PDA addresses
  */
-function derivePoolStatePDA(programId) {
-    return web3_js_1.PublicKey.findProgramAddressSync([Buffer.from("pool")], programId);
+export function derivePoolStatePDA(programId) {
+    return PublicKey.findProgramAddressSync([Buffer.from("pool")], programId);
 }
-function deriveLightClientPDA(programId) {
-    return web3_js_1.PublicKey.findProgramAddressSync([Buffer.from("btc_light_client")], programId);
+export function deriveLightClientPDA(programId) {
+    return PublicKey.findProgramAddressSync([Buffer.from("btc_light_client")], programId);
 }
-function deriveBlockHeaderPDA(programId, blockHeight) {
+export function deriveBlockHeaderPDA(programId, blockHeight) {
     const heightBuffer = Buffer.alloc(8);
     heightBuffer.writeBigUInt64LE(BigInt(blockHeight));
-    return web3_js_1.PublicKey.findProgramAddressSync([Buffer.from("block_header"), heightBuffer], programId);
+    return PublicKey.findProgramAddressSync([Buffer.from("block_header"), heightBuffer], programId);
 }
-function deriveCommitmentTreePDA(programId) {
-    return web3_js_1.PublicKey.findProgramAddressSync([Buffer.from("commitment_tree")], programId);
+export function deriveCommitmentTreePDA(programId) {
+    return PublicKey.findProgramAddressSync([Buffer.from("commitment_tree")], programId);
 }
-function deriveDepositRecordPDA(programId, txid) {
-    return web3_js_1.PublicKey.findProgramAddressSync([Buffer.from("deposit"), txid], programId);
+export function deriveDepositRecordPDA(programId, txid) {
+    return PublicKey.findProgramAddressSync([Buffer.from("deposit"), txid], programId);
 }
 /**
  * Build TxMerkleProof structure for the instruction
  */
-function buildMerkleProof(txidBytes, merkleProof, txIndex) {
+export function buildMerkleProof(txidBytes, merkleProof, txIndex) {
     // Convert txid to array
     const txid = Array.from(txidBytes);
     // Convert siblings
@@ -62,12 +52,12 @@ function buildMerkleProof(txidBytes, merkleProof, txIndex) {
  * 2. Upload raw tx to ChadBuffer
  * 3. Call verify_deposit instruction
  */
-async function verifyDeposit(connection, payer, txid, expectedValue, network = "testnet", programId = ZVAULT_PROGRAM_ID) {
+export async function verifyDeposit(connection, payer, txid, expectedValue, network = "testnet", programId = ZVAULT_PROGRAM_ID) {
     console.log("=== Verify Deposit ===");
     console.log(`Txid: ${txid}`);
     console.log(`Expected value: ${expectedValue} sats`);
     // Step 1 & 2: Fetch tx, upload to buffer
-    const { bufferPubkey, transactionSize, merkleProof, blockHeight, txIndex, txidBytes, } = await (0, chadbuffer_1.prepareVerifyDeposit)(connection, payer, txid, network);
+    const { bufferPubkey, transactionSize, merkleProof, blockHeight, txIndex, txidBytes, } = await prepareVerifyDeposit(connection, payer, txid, network);
     console.log(`Buffer: ${bufferPubkey.toBase58()}`);
     console.log(`Block height: ${blockHeight}`);
     // Step 3: Derive PDAs
@@ -94,7 +84,7 @@ async function verifyDeposit(connection, payer, txid, expectedValue, network = "
     // Note: This would use the Anchor program interface
     // For now, showing the structure
     console.log("\nInstruction parameters:");
-    console.log(`  txid: ${(0, chadbuffer_1.bytesToHex)(txidBytes)}`);
+    console.log(`  txid: ${bytesToHex(txidBytes)}`);
     console.log(`  merkle_proof: ${merkleProofData.siblings.length} siblings`);
     console.log(`  block_height: ${blockHeight}`);
     console.log(`  transaction_size: ${transactionSize}`);
@@ -127,9 +117,9 @@ async function verifyDeposit(connection, payer, txid, expectedValue, network = "
 /**
  * Example usage
  */
-async function exampleUsage() {
-    const connection = new web3_js_1.Connection("https://api.devnet.solana.com");
-    const payer = web3_js_1.Keypair.generate(); // Replace with actual keypair
+export async function exampleUsage() {
+    const connection = new Connection("https://api.devnet.solana.com");
+    const payer = Keypair.generate(); // Replace with actual keypair
     // Example Bitcoin txid (replace with actual)
     const txid = "abc123..."; // 64 char hex
     try {

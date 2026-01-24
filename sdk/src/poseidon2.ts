@@ -18,14 +18,14 @@
 export const BN254_SCALAR_FIELD =
   21888242871839275222246405745257275088548364400416034343698204186575808495617n;
 
-// Poseidon2 round constants for BN254 (t=3 state width)
-// These must match Noir's implementation exactly
-const POSEIDON2_ROUND_CONSTANTS_T3: bigint[][] = generateRoundConstants();
-
-// Number of rounds
+// Number of rounds (must be defined before generateRoundConstants is called)
 const FULL_ROUNDS = 8;
 const PARTIAL_ROUNDS = 56;
 const HALF_FULL_ROUNDS = FULL_ROUNDS / 2;
+
+// Poseidon2 round constants for BN254 (t=3 state width)
+// These must match Noir's implementation exactly
+const POSEIDON2_ROUND_CONSTANTS_T3: bigint[][] = generateRoundConstants();
 
 /**
  * Modular arithmetic in the scalar field

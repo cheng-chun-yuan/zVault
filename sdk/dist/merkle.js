@@ -1,4 +1,3 @@
-"use strict";
 /**
  * Merkle tree utilities for zVault
  *
@@ -10,23 +9,13 @@
  * The on-chain program maintains the Merkle tree. This SDK provides
  * proof structures for interaction with the program.
  */
-Object.defineProperty(exports, "__esModule", { value: true });
-exports.ZERO_VALUE = exports.MAX_LEAVES = exports.ROOT_HISTORY_SIZE = exports.TREE_DEPTH = void 0;
-exports.createMerkleProof = createMerkleProof;
-exports.createMerkleProofFromBigints = createMerkleProofFromBigints;
-exports.proofToNoirFormat = proofToNoirFormat;
-exports.proofToOnChainFormat = proofToOnChainFormat;
-exports.pathIndicesToLeafIndex = pathIndicesToLeafIndex;
-exports.leafIndexToPathIndices = leafIndexToPathIndices;
-exports.createEmptyMerkleProof = createEmptyMerkleProof;
-exports.validateMerkleProofStructure = validateMerkleProofStructure;
-const crypto_1 = require("./crypto");
+import { bigintToBytes } from "./crypto";
 // Tree configuration - matches on-chain constants
-exports.TREE_DEPTH = 10;
-exports.ROOT_HISTORY_SIZE = 30;
-exports.MAX_LEAVES = 1 << exports.TREE_DEPTH; // 1024
+export const TREE_DEPTH = 10;
+export const ROOT_HISTORY_SIZE = 30;
+export const MAX_LEAVES = 1 << TREE_DEPTH; // 1024
 // Zero value for empty nodes (matches on-chain)
-exports.ZERO_VALUE = (0, crypto_1.bigintToBytes)(0x2fe54c60d3ada40e0000000000000000000000000000000000000000n);
+export const ZERO_VALUE = bigintToBytes(0x2fe54c60d3ada40e0000000000000000000000000000000000000000n);
 /**
  * Create a Merkle proof from on-chain data
  *
@@ -35,12 +24,12 @@ exports.ZERO_VALUE = (0, crypto_1.bigintToBytes)(0x2fe54c60d3ada40e0000000000000
  * @param leafIndex - Index of the leaf in the tree
  * @param root - Current Merkle root
  */
-function createMerkleProof(pathElements, pathIndices, leafIndex, root) {
-    if (pathElements.length !== exports.TREE_DEPTH) {
-        throw new Error(`Expected ${exports.TREE_DEPTH} path elements, got ${pathElements.length}`);
+export function createMerkleProof(pathElements, pathIndices, leafIndex, root) {
+    if (pathElements.length !== TREE_DEPTH) {
+        throw new Error(`Expected ${TREE_DEPTH} path elements, got ${pathElements.length}`);
     }
-    if (pathIndices.length !== exports.TREE_DEPTH) {
-        throw new Error(`Expected ${exports.TREE_DEPTH} path indices, got ${pathIndices.length}`);
+    if (pathIndices.length !== TREE_DEPTH) {
+        throw new Error(`Expected ${TREE_DEPTH} path indices, got ${pathIndices.length}`);
     }
     return {
         pathElements: pathElements.map((el) => new Uint8Array(el)),
@@ -52,13 +41,13 @@ function createMerkleProof(pathElements, pathIndices, leafIndex, root) {
 /**
  * Create a Merkle proof from bigint values
  */
-function createMerkleProofFromBigints(pathElements, pathIndices, leafIndex, root) {
-    return createMerkleProof(pathElements.map(crypto_1.bigintToBytes), pathIndices, leafIndex, (0, crypto_1.bigintToBytes)(root));
+export function createMerkleProofFromBigints(pathElements, pathIndices, leafIndex, root) {
+    return createMerkleProof(pathElements.map(bigintToBytes), pathIndices, leafIndex, bigintToBytes(root));
 }
 /**
  * Convert Merkle proof to format expected by Noir circuits
  */
-function proofToNoirFormat(proof) {
+export function proofToNoirFormat(proof) {
     return {
         merkle_path: proof.pathElements.map((el) => "0x" + Buffer.from(el).toString("hex")),
         path_indices: proof.pathIndices.map((i) => i.toString()),
@@ -68,7 +57,7 @@ function proofToNoirFormat(proof) {
 /**
  * Convert Merkle proof to format expected by on-chain program
  */
-function proofToOnChainFormat(proof) {
+export function proofToOnChainFormat(proof) {
     return {
         siblings: proof.pathElements.map((el) => Array.from(el)),
         path: proof.pathIndices.map((i) => i === 1),
@@ -77,7 +66,7 @@ function proofToOnChainFormat(proof) {
 /**
  * Compute leaf index from path indices
  */
-function pathIndicesToLeafIndex(pathIndices) {
+export function pathIndicesToLeafIndex(pathIndices) {
     let index = 0;
     for (let i = 0; i < pathIndices.length; i++) {
         if (pathIndices[i] === 1) {
@@ -89,7 +78,7 @@ function pathIndicesToLeafIndex(pathIndices) {
 /**
  * Compute path indices from leaf index
  */
-function leafIndexToPathIndices(leafIndex, depth = exports.TREE_DEPTH) {
+export function leafIndexToPathIndices(leafIndex, depth = TREE_DEPTH) {
     const indices = [];
     let idx = leafIndex;
     for (let i = 0; i < depth; i++) {
@@ -102,29 +91,29 @@ function leafIndexToPathIndices(leafIndex, depth = exports.TREE_DEPTH) {
  * Create an empty/placeholder Merkle proof
  * Used when constructing proofs before on-chain data is available
  */
-function createEmptyMerkleProof() {
+export function createEmptyMerkleProof() {
     const pathElements = [];
     const pathIndices = [];
-    for (let i = 0; i < exports.TREE_DEPTH; i++) {
-        pathElements.push(new Uint8Array(exports.ZERO_VALUE));
+    for (let i = 0; i < TREE_DEPTH; i++) {
+        pathElements.push(new Uint8Array(ZERO_VALUE));
         pathIndices.push(0);
     }
     return {
         pathElements,
         pathIndices,
         leafIndex: 0,
-        root: new Uint8Array(exports.ZERO_VALUE),
+        root: new Uint8Array(ZERO_VALUE),
     };
 }
 /**
  * Validate Merkle proof structure
  */
-function validateMerkleProofStructure(proof) {
-    if (proof.pathElements.length !== exports.TREE_DEPTH)
+export function validateMerkleProofStructure(proof) {
+    if (proof.pathElements.length !== TREE_DEPTH)
         return false;
-    if (proof.pathIndices.length !== exports.TREE_DEPTH)
+    if (proof.pathIndices.length !== TREE_DEPTH)
         return false;
-    if (proof.leafIndex < 0 || proof.leafIndex >= exports.MAX_LEAVES)
+    if (proof.leafIndex < 0 || proof.leafIndex >= MAX_LEAVES)
         return false;
     if (proof.root.length !== 32)
         return false;

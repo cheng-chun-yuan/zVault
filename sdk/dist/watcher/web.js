@@ -1,4 +1,3 @@
-"use strict";
 /**
  * Web Deposit Watcher
  *
@@ -6,10 +5,7 @@
  * - localStorage for persistence
  * - WebSocket for real-time transaction detection
  */
-Object.defineProperty(exports, "__esModule", { value: true });
-exports.WebDepositWatcher = void 0;
-exports.createWebWatcher = createWebWatcher;
-const base_1 = require("./base");
+import { BaseDepositWatcher } from "./base";
 /**
  * localStorage-based storage adapter
  */
@@ -42,7 +38,7 @@ const WEB_STORAGE = {
  * - Reconnection on disconnect
  * - Confirmation tracking
  */
-class WebDepositWatcher extends base_1.BaseDepositWatcher {
+export class WebDepositWatcher extends BaseDepositWatcher {
     constructor(callbacks = {}, config = {}) {
         super(WEB_STORAGE, callbacks, config);
         this.ws = null;
@@ -157,7 +153,6 @@ class WebDepositWatcher extends base_1.BaseDepositWatcher {
         this.pollAddresses();
     }
 }
-exports.WebDepositWatcher = WebDepositWatcher;
 /**
  * Create a web deposit watcher instance
  *
@@ -177,6 +172,6 @@ exports.WebDepositWatcher = WebDepositWatcher;
  * console.log('Send BTC to:', deposit.taprootAddress);
  * ```
  */
-function createWebWatcher(callbacks = {}, config = {}) {
+export function createWebWatcher(callbacks = {}, config = {}) {
     return new WebDepositWatcher(callbacks, config);
 }

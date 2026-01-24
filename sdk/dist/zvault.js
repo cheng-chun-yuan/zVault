@@ -1,4 +1,3 @@
-"use strict";
 /**
  * ZVault Client - Main SDK Entry Point
  *
@@ -14,19 +13,16 @@
  *
  * Note: This SDK uses Noir circuits with Poseidon2 hashing for ZK proofs.
  */
-Object.defineProperty(exports, "__esModule", { value: true });
-exports.ZVaultClient = exports.ZVAULT_PROGRAM_ID = void 0;
-exports.createClient = createClient;
-const web3_js_1 = require("@solana/web3.js");
-const note_1 = require("./note");
-const merkle_1 = require("./merkle");
-const taproot_1 = require("./taproot");
-const claim_link_1 = require("./claim-link");
-const proof_1 = require("./proof");
-const crypto_1 = require("./crypto");
-const api_1 = require("./api");
+import { PublicKey } from "@solana/web3.js";
+import { generateNote, formatBtc, } from "./note";
+import { createEmptyMerkleProof, TREE_DEPTH, ZERO_VALUE, leafIndexToPathIndices, } from "./merkle";
+import { deriveTaprootAddress, isValidBitcoinAddress } from "./taproot";
+import { createClaimLink, parseClaimLink } from "./claim-link";
+import { generateClaimProof, generateTransferProof, generateSplitProof, } from "./proof";
+import { bigintToBytes } from "./crypto";
+import { deposit as apiDeposit, withdraw as apiWithdraw, privateClaim as apiPrivateClaim, privateSplit as apiPrivateSplit, sendLink as apiSendLink, sendStealth as apiSendStealth, } from "./api";
 // Program ID (Solana Devnet)
-exports.ZVAULT_PROGRAM_ID = new web3_js_1.PublicKey("AtztELZfz3GHA8hFQCv7aT9Mt47Xhknv3ZCNb3fmXsgf");
+export const ZVAULT_PROGRAM_ID = new PublicKey("AtztELZfz3GHA8hFQCv7aT9Mt47Xhknv3ZCNb3fmXsgf");
 /**
  * ZVault SDK Client
  *
@@ -45,14 +41,14 @@ exports.ZVAULT_PROGRAM_ID = new web3_js_1.PublicKey("AtztELZfz3GHA8hFQCv7aT9Mt47
  * const result = await client.privateClaim(deposit.claimLink);
  * ```
  */
-class ZVaultClient {
-    constructor(connection, programId = exports.ZVAULT_PROGRAM_ID, historyManager) {
+export class ZVaultClient {
+    constructor(connection, programId = ZVAULT_PROGRAM_ID, historyManager) {
         this.connection = connection;
         this.programId = programId;
         this.merkleState = {
             leaves: [],
-            filledSubtrees: Array(merkle_1.TREE_DEPTH).fill(null).map(() => new Uint8Array(merkle_1.ZERO_VALUE)),
-            root: new Uint8Array(merkle_1.ZERO_VALUE),
+            filledSubtrees: Array(TREE_DEPTH).fill(null).map(() => new Uint8Array(ZERO_VALUE)),
+            root: new Uint8Array(ZERO_VALUE),
         };
         this.historyManager = historyManager;
     }
@@ -86,7 +82,7 @@ class ZVaultClient {
      * @param baseUrl - Base URL for claim link
      */
     async deposit(amountSats, network = "testnet", baseUrl) {
-        const result = await (0, api_1.deposit)(amountSats, network, baseUrl);
+        const result = await apiDeposit(amountSats, network, baseUrl);
         if (this.historyManager) {
             await this.historyManager.addEvent("deposit", { amount: amountSats }, new Uint8Array(0));
         }
@@ -103,7 +99,7 @@ class ZVaultClient {
      */
     async withdraw(note, btcAddress, withdrawAmount) {
         const merkleProof = this.generateMerkleProofForNote(note);
-        const result = await (0, api_1.withdraw)(this.getApiConfig(), note, btcAddress, withdrawAmount, merkleProof);
+        const result = await apiWithdraw(this.getApiConfig(), note, btcAddress, withdrawAmount, merkleProof);
         return result;
     }
     /**
@@ -116,7 +112,7 @@ class ZVaultClient {
     async privateClaim(claimLinkOrNote) {
         let note;
         if (typeof claimLinkOrNote === "string") {
-            const parsed = (0, claim_link_1.parseClaimLink)(claimLinkOrNote);
+            const parsed = parseClaimLink(claimLinkOrNote);
             if (!parsed) {
                 throw new Error("Invalid claim link");
             }
@@ -126,7 +122,7 @@ class ZVaultClient {
             note = claimLinkOrNote;
         }
         const merkleProof = this.generateMerkleProofForNote(note);
-        const result = await (0, api_1.privateClaim)(this.getApiConfig(), note, merkleProof);
+        const result = await apiPrivateClaim(this.getApiConfig(), note, merkleProof);
         if (this.historyManager) {
             await this.historyManager.addEvent("claim", { amount: result.amount }, new Uint8Array(0));
         }
@@ -143,7 +139,7 @@ class ZVaultClient {
      */
     async privateSplit(inputNote, amount1) {
         const merkleProof = this.generateMerkleProofForNote(inputNote);
-        const result = await (0, api_1.privateSplit)(this.getApiConfig(), inputNote, amount1, merkleProof);
+        const result = await apiPrivateSplit(this.getApiConfig(), inputNote, amount1, merkleProof);
         if (this.historyManager) {
             await this.historyManager.addEvent("split", { inputAmount: inputNote.amount, amount1, amount2: inputNote.amount - amount1 }, new Uint8Array(0));
         }
@@ -159,7 +155,7 @@ class ZVaultClient {
      * @param baseUrl - Base URL for the link
      */
     sendLink(note, baseUrl) {
-        return (0, api_1.sendLink)(note, baseUrl);
+        return apiSendLink(note, baseUrl);
     }
     /**
      * 6. SEND_STEALTH - Send to specific recipient via dual-key ECDH
@@ -171,7 +167,7 @@ class ZVaultClient {
      * @param leafIndex - Leaf index in tree
      */
     async sendStealth(recipientMeta, amountSats, leafIndex = 0) {
-        const result = await (0, api_1.sendStealth)(this.getApiConfig(), recipientMeta, amountSats, leafIndex);
+        const result = await apiSendStealth(this.getApiConfig(), recipientMeta, amountSats, leafIndex);
         return result;
     }
     /**
@@ -183,7 +179,7 @@ class ZVaultClient {
             return this.generateMerkleProof(leafIndex);
         }
         // Return empty proof if not found
-        return (0, merkle_1.createEmptyMerkleProof)();
+        return createEmptyMerkleProof();
     }
     // ==========================================================================
     // PDA Derivation
@@ -192,19 +188,19 @@ class ZVaultClient {
      * Derive pool state PDA
      */
     derivePoolStatePDA() {
-        return web3_js_1.PublicKey.findProgramAddressSync([Buffer.from("pool_state")], this.programId);
+        return PublicKey.findProgramAddressSync([Buffer.from("pool_state")], this.programId);
     }
     /**
      * Derive light client PDA
      */
     deriveLightClientPDA() {
-        return web3_js_1.PublicKey.findProgramAddressSync([Buffer.from("btc_light_client")], this.programId);
+        return PublicKey.findProgramAddressSync([Buffer.from("btc_light_client")], this.programId);
     }
     /**
      * Derive commitment tree PDA
      */
     deriveCommitmentTreePDA() {
-        return web3_js_1.PublicKey.findProgramAddressSync([Buffer.from("commitment_tree")], this.programId);
+        return PublicKey.findProgramAddressSync([Buffer.from("commitment_tree")], this.programId);
     }
     /**
      * Derive block header PDA
@@ -212,26 +208,26 @@ class ZVaultClient {
     deriveBlockHeaderPDA(height) {
         const heightBuffer = Buffer.alloc(8);
         heightBuffer.writeBigUInt64LE(BigInt(height));
-        return web3_js_1.PublicKey.findProgramAddressSync([Buffer.from("block_header"), heightBuffer], this.programId);
+        return PublicKey.findProgramAddressSync([Buffer.from("block_header"), heightBuffer], this.programId);
     }
     /**
      * Derive deposit record PDA
      */
     deriveDepositRecordPDA(txid) {
-        return web3_js_1.PublicKey.findProgramAddressSync([Buffer.from("deposit"), txid], this.programId);
+        return PublicKey.findProgramAddressSync([Buffer.from("deposit"), txid], this.programId);
     }
     /**
      * Derive nullifier record PDA
      */
     deriveNullifierRecordPDA(nullifierHash) {
-        return web3_js_1.PublicKey.findProgramAddressSync([Buffer.from("nullifier"), nullifierHash], this.programId);
+        return PublicKey.findProgramAddressSync([Buffer.from("nullifier"), nullifierHash], this.programId);
     }
     /**
      * Derive stealth announcement PDA
      */
     deriveStealthAnnouncementPDA(commitment) {
         const commitmentBuffer = Buffer.from(commitment.toString(16).padStart(64, "0"), "hex");
-        return web3_js_1.PublicKey.findProgramAddressSync([Buffer.from("stealth"), commitmentBuffer], this.programId);
+        return PublicKey.findProgramAddressSync([Buffer.from("stealth"), commitmentBuffer], this.programId);
     }
     // ==========================================================================
     // Deposit Flow
@@ -249,14 +245,14 @@ class ZVaultClient {
     async generateDeposit(amountSats, network = "testnet", baseUrl) {
         // Generate note with random secrets
         // Note: commitment is 0n until computed by Noir circuit
-        const note = (0, note_1.generateNote)(amountSats);
+        const note = generateNote(amountSats);
         // For Taproot address, we need a commitment
         // In practice, compute via helper circuit or use a deterministic derivation
         // For demo, use a hash of the secrets as placeholder
-        const placeholderCommitment = (0, crypto_1.bigintToBytes)((note.nullifier ^ note.secret) % (2n ** 256n));
-        const { address: taprootAddress } = await (0, taproot_1.deriveTaprootAddress)(placeholderCommitment, network);
+        const placeholderCommitment = bigintToBytes((note.nullifier ^ note.secret) % (2n ** 256n));
+        const { address: taprootAddress } = await deriveTaprootAddress(placeholderCommitment, network);
         // Generate claim link
-        const claimLink = (0, claim_link_1.createClaimLink)(note, baseUrl);
+        const claimLink = createClaimLink(note, baseUrl);
         if (this.historyManager) {
             await this.historyManager.addEvent("deposit", { amount: amountSats, commitment: placeholderCommitment }, new Uint8Array(0));
         }
@@ -264,7 +260,7 @@ class ZVaultClient {
             note,
             taprootAddress,
             claimLink,
-            displayAmount: (0, note_1.formatBtc)(amountSats),
+            displayAmount: formatBtc(amountSats),
         };
     }
     /**
@@ -274,13 +270,13 @@ class ZVaultClient {
         const note = deserializeNoteFromClaimLink(link);
         if (!note)
             return null;
-        const placeholderCommitment = (0, crypto_1.bigintToBytes)((note.nullifier ^ note.secret) % (2n ** 256n));
-        const { address: taprootAddress } = await (0, taproot_1.deriveTaprootAddress)(placeholderCommitment, "testnet");
+        const placeholderCommitment = bigintToBytes((note.nullifier ^ note.secret) % (2n ** 256n));
+        const { address: taprootAddress } = await deriveTaprootAddress(placeholderCommitment, "testnet");
         return {
             note,
             taprootAddress,
             claimLink: link,
-            displayAmount: (0, note_1.formatBtc)(note.amount),
+            displayAmount: formatBtc(note.amount),
         };
     }
     // ==========================================================================
@@ -300,7 +296,7 @@ class ZVaultClient {
         }
         const merkleProof = this.generateMerkleProof(leafIndex);
         // Generate ZK proof using Noir circuit
-        const proofResult = await (0, proof_1.generateClaimProof)(note, merkleProof);
+        const proofResult = await generateClaimProof(note, merkleProof);
         if (this.historyManager) {
             await this.historyManager.addEvent("claim", { nullifier: note.nullifierHashBytes, amount: note.amount }, proofResult.proof);
         }
@@ -327,10 +323,10 @@ class ZVaultClient {
      * query the on-chain Merkle tree for accurate proofs.
      */
     generateMerkleProof(leafIndex) {
-        const pathIndices = (0, merkle_1.leafIndexToPathIndices)(leafIndex);
+        const pathIndices = leafIndexToPathIndices(leafIndex);
         const pathElements = [];
         // Use filled subtrees for proof (simplified)
-        for (let i = 0; i < merkle_1.TREE_DEPTH; i++) {
+        for (let i = 0; i < TREE_DEPTH; i++) {
             pathElements.push(new Uint8Array(this.merkleState.filledSubtrees[i]));
         }
         return {
@@ -359,8 +355,8 @@ class ZVaultClient {
             throw new Error("Both output amounts must be positive");
         }
         // Generate output notes
-        const output1 = (0, note_1.generateNote)(amount1);
-        const output2 = (0, note_1.generateNote)(finalAmount2);
+        const output1 = generateNote(amount1);
+        const output2 = generateNote(finalAmount2);
         // Get Merkle proof for input
         const leafIndex = this.findLeafIndex(inputNote.commitmentBytes);
         if (leafIndex === -1) {
@@ -368,7 +364,7 @@ class ZVaultClient {
         }
         const merkleProof = this.generateMerkleProof(leafIndex);
         // Generate split proof using Noir circuit
-        const proofResult = await (0, proof_1.generateSplitProof)(inputNote, output1, output2, merkleProof);
+        const proofResult = await generateSplitProof(inputNote, output1, output2, merkleProof);
         if (this.historyManager) {
             await this.historyManager.addEvent("split", {
                 inputNullifier: inputNote.nullifierHashBytes,
@@ -379,8 +375,8 @@ class ZVaultClient {
         return {
             output1,
             output2,
-            claimLink1: (0, claim_link_1.createClaimLink)(output1),
-            claimLink2: (0, claim_link_1.createClaimLink)(output2),
+            claimLink1: createClaimLink(output1),
+            claimLink2: createClaimLink(output2),
             proof: proofResult,
             inputNullifierHash: inputNote.nullifierHashBytes,
         };
@@ -395,14 +391,14 @@ class ZVaultClient {
      * Useful for privacy enhancement.
      */
     async generateTransfer(inputNote) {
-        const outputNote = (0, note_1.generateNote)(inputNote.amount);
+        const outputNote = generateNote(inputNote.amount);
         const leafIndex = this.findLeafIndex(inputNote.commitmentBytes);
         if (leafIndex === -1) {
             throw new Error("Input commitment not found in tree");
         }
         const merkleProof = this.generateMerkleProof(leafIndex);
         // Generate transfer proof using Noir circuit
-        const proofResult = await (0, proof_1.generateTransferProof)(inputNote, outputNote, merkleProof);
+        const proofResult = await generateTransferProof(inputNote, outputNote, merkleProof);
         if (this.historyManager) {
             await this.historyManager.addEvent("transfer", {
                 inputNullifier: inputNote.nullifierHashBytes,
@@ -411,7 +407,7 @@ class ZVaultClient {
         }
         return {
             outputNote,
-            claimLink: (0, claim_link_1.createClaimLink)(outputNote),
+            claimLink: createClaimLink(outputNote),
             proof: proofResult,
             inputNullifierHash: inputNote.nullifierHashBytes,
         };
@@ -423,7 +419,7 @@ class ZVaultClient {
      * Validate a BTC address
      */
     validateBtcAddress(address) {
-        const result = (0, taproot_1.isValidBitcoinAddress)(address);
+        const result = isValidBitcoinAddress(address);
         return result.valid;
     }
     /**
@@ -472,13 +468,12 @@ class ZVaultClient {
         return true;
     }
 }
-exports.ZVaultClient = ZVaultClient;
 /**
  * Helper to deserialize note from claim link
  */
 function deserializeNoteFromClaimLink(link) {
     try {
-        return (0, claim_link_1.parseClaimLink)(link);
+        return parseClaimLink(link);
     }
     catch {
         return null;
@@ -487,6 +482,6 @@ function deserializeNoteFromClaimLink(link) {
 /**
  * Create a new ZVault client (Solana Devnet)
  */
-function createClient(connection, historyManager) {
-    return new ZVaultClient(connection, exports.ZVAULT_PROGRAM_ID, historyManager);
+export function createClient(connection, historyManager) {
+    return new ZVaultClient(connection, ZVAULT_PROGRAM_ID, historyManager);
 }

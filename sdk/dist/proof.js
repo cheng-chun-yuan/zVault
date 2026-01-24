@@ -1,4 +1,3 @@
-"use strict";
 /**
  * ZK Proof generation utilities for zVault
  *
@@ -8,34 +7,21 @@
  * - Split (1-in-2-out)
  * - Partial Withdraw (withdraw with change)
  */
-Object.defineProperty(exports, "__esModule", { value: true });
-exports.getNoirCircuitsDir = getNoirCircuitsDir;
-exports.isNargoAvailable = isNargoAvailable;
-exports.isBbAvailable = isBbAvailable;
-exports.isProofGenerationAvailable = isProofGenerationAvailable;
-exports.generateProof = generateProof;
-exports.verifyProof = verifyProof;
-exports.generateClaimProof = generateClaimProof;
-exports.generateTransferProof = generateTransferProof;
-exports.generateSplitProof = generateSplitProof;
-exports.generatePartialWithdrawProof = generatePartialWithdrawProof;
-exports.serializeProof = serializeProof;
-exports.deserializeProof = deserializeProof;
-const child_process_1 = require("child_process");
-const fs_1 = require("fs");
-const path_1 = require("path");
+import { execSync } from "child_process";
+import { readFileSync, writeFileSync, existsSync, mkdirSync } from "fs";
+import { join } from "path";
 /**
  * Get the path to noir circuits directory
  */
-function getNoirCircuitsDir() {
+export function getNoirCircuitsDir() {
     // Try relative path from SDK (development)
-    const devPath = (0, path_1.join)(__dirname, "../../noir-circuits");
-    if ((0, fs_1.existsSync)(devPath)) {
+    const devPath = join(__dirname, "../../noir-circuits");
+    if (existsSync(devPath)) {
         return devPath;
     }
     // Try node_modules path (installed)
-    const nodePath = (0, path_1.join)(__dirname, "../../../noir-circuits");
-    if ((0, fs_1.existsSync)(nodePath)) {
+    const nodePath = join(__dirname, "../../../noir-circuits");
+    if (existsSync(nodePath)) {
         return nodePath;
     }
     throw new Error("Noir circuits directory not found. Make sure noir-circuits is available.");
@@ -43,9 +29,9 @@ function getNoirCircuitsDir() {
 /**
  * Check if nargo is available
  */
-function isNargoAvailable() {
+export function isNargoAvailable() {
     try {
-        (0, child_process_1.execSync)("nargo --version", { stdio: "pipe" });
+        execSync("nargo --version", { stdio: "pipe" });
         return true;
     }
     catch {
@@ -55,13 +41,13 @@ function isNargoAvailable() {
 /**
  * Check if bb CLI is available
  */
-function isBbAvailable() {
+export function isBbAvailable() {
     try {
         const circuitsDir = getNoirCircuitsDir();
-        const bbPath = (0, path_1.join)(circuitsDir, "node_modules/.bin/bb");
-        if (!(0, fs_1.existsSync)(bbPath))
+        const bbPath = join(circuitsDir, "node_modules/.bin/bb");
+        if (!existsSync(bbPath))
             return false;
-        (0, child_process_1.execSync)(`"${bbPath}" --version`, { stdio: "pipe" });
+        execSync(`"${bbPath}" --version`, { stdio: "pipe" });
         return true;
     }
     catch {
@@ -71,7 +57,7 @@ function isBbAvailable() {
 /**
  * Check if proof generation is available
  */
-function isProofGenerationAvailable() {
+export function isProofGenerationAvailable() {
     return isNargoAvailable() && isBbAvailable();
 }
 /**
@@ -98,34 +84,34 @@ function toProverToml(inputs) {
  * @param inputs - Input values for the circuit
  * @returns The generated proof
  */
-async function generateProof(circuitType, inputs) {
+export async function generateProof(circuitType, inputs) {
     if (!isProofGenerationAvailable()) {
         throw new Error("Proof generation not available. Install nargo and run 'bun install' in noir-circuits/");
     }
     const circuitsDir = getNoirCircuitsDir();
-    const circuitPath = (0, path_1.join)(circuitsDir, circuitType);
-    const bbPath = (0, path_1.join)(circuitsDir, "node_modules/.bin/bb");
+    const circuitPath = join(circuitsDir, circuitType);
+    const bbPath = join(circuitsDir, "node_modules/.bin/bb");
     // Write Prover.toml with inputs
     const proverToml = toProverToml(inputs);
-    (0, fs_1.writeFileSync)((0, path_1.join)(circuitPath, "Prover.toml"), proverToml);
+    writeFileSync(join(circuitPath, "Prover.toml"), proverToml);
     // Execute circuit to generate witness
-    (0, child_process_1.execSync)("nargo execute", {
+    execSync("nargo execute", {
         cwd: circuitPath,
         stdio: "pipe",
     });
     // Create proofs directory
-    const proofsDir = (0, path_1.join)(circuitPath, "proofs");
-    if (!(0, fs_1.existsSync)(proofsDir)) {
-        (0, fs_1.mkdirSync)(proofsDir, { recursive: true });
+    const proofsDir = join(circuitPath, "proofs");
+    if (!existsSync(proofsDir)) {
+        mkdirSync(proofsDir, { recursive: true });
     }
     // Generate proof with bb
-    const bytecode = (0, path_1.join)(circuitPath, "target", `zvault_${circuitType}.json`);
-    const witness = (0, path_1.join)(circuitPath, "target", `zvault_${circuitType}.gz`);
-    const proofOutputDir = (0, path_1.join)(proofsDir, "proof");
-    (0, child_process_1.execSync)(`"${bbPath}" prove -b "${bytecode}" -w "${witness}" -o "${proofOutputDir}" --write_vk`, { cwd: circuitPath, stdio: "pipe" });
+    const bytecode = join(circuitPath, "target", `zvault_${circuitType}.json`);
+    const witness = join(circuitPath, "target", `zvault_${circuitType}.gz`);
+    const proofOutputDir = join(proofsDir, "proof");
+    execSync(`"${bbPath}" prove -b "${bytecode}" -w "${witness}" -o "${proofOutputDir}" --write_vk`, { cwd: circuitPath, stdio: "pipe" });
     // Read proof files
-    const proof = (0, fs_1.readFileSync)((0, path_1.join)(proofOutputDir, "proof"));
-    const publicInputsBinary = (0, fs_1.readFileSync)((0, path_1.join)(proofOutputDir, "public_inputs"));
+    const proof = readFileSync(join(proofOutputDir, "proof"));
+    const publicInputsBinary = readFileSync(join(proofOutputDir, "public_inputs"));
     // Parse binary public inputs (each is 32 bytes)
     const publicInputs = [];
     for (let i = 0; i < publicInputsBinary.length; i += 32) {
@@ -136,8 +122,8 @@ async function generateProof(circuitType, inputs) {
                 .join("");
         publicInputs.push(hex);
     }
-    const verificationKey = (0, fs_1.readFileSync)((0, path_1.join)(proofOutputDir, "vk"));
-    const vkHash = (0, fs_1.readFileSync)((0, path_1.join)(proofOutputDir, "vk_hash"));
+    const verificationKey = readFileSync(join(proofOutputDir, "vk"));
+    const vkHash = readFileSync(join(proofOutputDir, "vk_hash"));
     return {
         proof: new Uint8Array(proof),
         publicInputs,
@@ -148,16 +134,16 @@ async function generateProof(circuitType, inputs) {
 /**
  * Verify a Noir proof using bb CLI
  */
-async function verifyProof(circuitType, proof) {
+export async function verifyProof(circuitType, proof) {
     const circuitsDir = getNoirCircuitsDir();
-    const circuitPath = (0, path_1.join)(circuitsDir, circuitType);
-    const bbPath = (0, path_1.join)(circuitsDir, "node_modules/.bin/bb");
-    const proofsDir = (0, path_1.join)(circuitPath, "proofs", "proof");
+    const circuitPath = join(circuitsDir, circuitType);
+    const bbPath = join(circuitsDir, "node_modules/.bin/bb");
+    const proofsDir = join(circuitPath, "proofs", "proof");
     // Write proof and vk files
-    (0, fs_1.writeFileSync)((0, path_1.join)(proofsDir, "proof"), proof.proof);
-    (0, fs_1.writeFileSync)((0, path_1.join)(proofsDir, "vk"), proof.verificationKey);
+    writeFileSync(join(proofsDir, "proof"), proof.proof);
+    writeFileSync(join(proofsDir, "vk"), proof.verificationKey);
     try {
-        (0, child_process_1.execSync)(`"${bbPath}" verify -p "${(0, path_1.join)(proofsDir, "proof")}" -k "${(0, path_1.join)(proofsDir, "vk")}"`, { cwd: circuitPath, stdio: "pipe" });
+        execSync(`"${bbPath}" verify -p "${join(proofsDir, "proof")}" -k "${join(proofsDir, "vk")}"`, { cwd: circuitPath, stdio: "pipe" });
         return true;
     }
     catch {
@@ -172,7 +158,7 @@ async function verifyProof(circuitType, proof) {
  * - Commitment exists in Merkle tree at given root
  * - Outputs correct nullifier hash
  */
-async function generateClaimProof(note, merkleProof) {
+export async function generateClaimProof(note, merkleProof) {
     const inputs = {
         nullifier: note.nullifier.toString(),
         secret: note.secret.toString(),
@@ -191,7 +177,7 @@ async function generateClaimProof(note, merkleProof) {
  * 1-in-1-out: Spends input commitment, creates new output commitment
  * with same amount but new secrets
  */
-async function generateTransferProof(inputNote, outputNote, merkleProof) {
+export async function generateTransferProof(inputNote, outputNote, merkleProof) {
     if (inputNote.amount !== outputNote.amount) {
         throw new Error("Transfer must preserve amount (input == output)");
     }
@@ -215,7 +201,7 @@ async function generateTransferProof(inputNote, outputNote, merkleProof) {
  * 1-in-2-out: Spends input commitment, creates two output commitments
  * Individual output amounts are private (only conservation proven)
  */
-async function generateSplitProof(inputNote, output1Note, output2Note, merkleProof) {
+export async function generateSplitProof(inputNote, output1Note, output2Note, merkleProof) {
     if (inputNote.amount !== output1Note.amount + output2Note.amount) {
         throw new Error("Split must conserve amount (input == output1 + output2)");
     }
@@ -243,7 +229,7 @@ async function generateSplitProof(inputNote, output1Note, output2Note, merklePro
  *
  * Withdraw any amount with change returned as a new commitment
  */
-async function generatePartialWithdrawProof(inputNote, withdrawAmount, changeNote, merkleProof, recipient) {
+export async function generatePartialWithdrawProof(inputNote, withdrawAmount, changeNote, merkleProof, recipient) {
     const changeAmount = inputNote.amount - withdrawAmount;
     if (changeNote.amount !== changeAmount) {
         throw new Error("Change amount mismatch");
@@ -268,7 +254,7 @@ async function generatePartialWithdrawProof(inputNote, withdrawAmount, changeNot
 /**
  * Serialize NoirProof for transport/storage
  */
-function serializeProof(proof) {
+export function serializeProof(proof) {
     // Format: proof_len (4) | proof | vk_len (4) | vk | vk_hash (32) | public_inputs_count (4) | public_inputs
     const encoder = new TextEncoder();
     const publicInputsEncoded = proof.publicInputs.map((pi) => encoder.encode(pi + "\n"));
@@ -308,7 +294,7 @@ function serializeProof(proof) {
 /**
  * Deserialize NoirProof from bytes
  */
-function deserializeProof(data) {
+export function deserializeProof(data) {
     const view = new DataView(data.buffer, data.byteOffset, data.byteLength);
     const decoder = new TextDecoder();
     let offset = 0;

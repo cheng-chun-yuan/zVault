@@ -1,4 +1,3 @@
-"use strict";
 /**
  * Claim link utilities for zVault
  *
@@ -7,18 +6,7 @@
  *
  * SECURITY: Claim links are bearer instruments - anyone with the link can claim!
  */
-Object.defineProperty(exports, "__esModule", { value: true });
-exports.createClaimLink = createClaimLink;
-exports.parseClaimLink = parseClaimLink;
-exports.isValidClaimLinkFormat = isValidClaimLinkFormat;
-exports.shortenClaimLink = shortenClaimLink;
-exports.createProtectedClaimLink = createProtectedClaimLink;
-exports.extractAmountFromClaimLink = extractAmountFromClaimLink;
-exports.encodeClaimLink = encodeClaimLink;
-exports.decodeClaimLink = decodeClaimLink;
-exports.generateClaimUrl = generateClaimUrl;
-exports.parseClaimUrl = parseClaimUrl;
-const note_1 = require("./note");
+import { deserializeNote } from "./note";
 // Base URL for claim links (configurable)
 const DEFAULT_BASE_URL = "https://sbbtc.app";
 /**
@@ -28,7 +16,7 @@ const DEFAULT_BASE_URL = "https://sbbtc.app";
  * @param baseUrl - Base URL for the link
  * @returns Full claim link URL
  */
-function createClaimLink(note, baseUrl = DEFAULT_BASE_URL) {
+export function createClaimLink(note, baseUrl = DEFAULT_BASE_URL) {
     const data = {
         v: 1,
         n: bigintToBase64(note.nullifier),
@@ -44,7 +32,7 @@ function createClaimLink(note, baseUrl = DEFAULT_BASE_URL) {
  * @param link - Claim link URL or just the encoded note parameter
  * @returns Note data or null if invalid
  */
-function parseClaimLink(link) {
+export function parseClaimLink(link) {
     try {
         // Extract note parameter from URL
         let encoded;
@@ -69,7 +57,7 @@ function parseClaimLink(link) {
             console.warn(`Unknown claim link version: ${data.v}`);
         }
         // Reconstruct note
-        const note = (0, note_1.deserializeNote)({
+        const note = deserializeNote({
             nullifier: base64ToBigint(data.n).toString(),
             secret: base64ToBigint(data.s).toString(),
             amount: data.a,
@@ -87,7 +75,7 @@ function parseClaimLink(link) {
  * @param link - Claim link to validate
  * @returns true if format is valid
  */
-function isValidClaimLinkFormat(link) {
+export function isValidClaimLinkFormat(link) {
     try {
         let encoded;
         if (link.includes("note=")) {
@@ -117,7 +105,7 @@ function isValidClaimLinkFormat(link) {
  * @param maxLength - Maximum display length
  * @returns Shortened link for display
  */
-function shortenClaimLink(link, maxLength = 40) {
+export function shortenClaimLink(link, maxLength = 40) {
     if (link.length <= maxLength)
         return link;
     const start = link.slice(0, 20);
@@ -133,7 +121,7 @@ function shortenClaimLink(link, maxLength = 40) {
  * @param baseUrl - Base URL for the link
  * @returns Claim link (password-protected if password provided)
  */
-function createProtectedClaimLink(note, password, baseUrl = DEFAULT_BASE_URL) {
+export function createProtectedClaimLink(note, password, baseUrl = DEFAULT_BASE_URL) {
     if (!password) {
         return createClaimLink(note, baseUrl);
     }
@@ -175,7 +163,7 @@ function base64ToBigint(base64) {
  * Extract amount from claim link without full parsing
  * Useful for display purposes
  */
-function extractAmountFromClaimLink(link) {
+export function extractAmountFromClaimLink(link) {
     try {
         let encoded;
         if (link.includes("note=")) {
@@ -195,7 +183,7 @@ function extractAmountFromClaimLink(link) {
         return null;
     }
 }
-function encodeClaimLink(seedOrNullifier, secret) {
+export function encodeClaimLink(seedOrNullifier, secret) {
     // New format: single seed string
     if (secret === undefined && typeof seedOrNullifier === "string") {
         // URL-encode the seed phrase
@@ -218,7 +206,7 @@ function encodeClaimLink(seedOrNullifier, secret) {
  * @param encoded - Encoded claim link data
  * @returns Seed string, or { nullifier, secret } for legacy format, or null if invalid
  */
-function decodeClaimLink(encoded) {
+export function decodeClaimLink(encoded) {
     // First, try legacy format (base64 JSON with { n, s })
     // This needs to be checked first because base64 strings can look like seed phrases
     try {
@@ -258,7 +246,7 @@ function decodeClaimLink(encoded) {
  * @param secret - Secret value
  * @returns Full claim URL
  */
-function generateClaimUrl(baseUrl, nullifier, secret) {
+export function generateClaimUrl(baseUrl, nullifier, secret) {
     const encoded = encodeClaimLink(nullifier, secret);
     return `${baseUrl}?note=${encoded}`;
 }
@@ -271,7 +259,7 @@ function generateClaimUrl(baseUrl, nullifier, secret) {
  * @param url - URL string or URLSearchParams
  * @returns Seed string, or { nullifier, secret } for legacy, or null if invalid
  */
-function parseClaimUrl(url) {
+export function parseClaimUrl(url) {
     let params;
     if (typeof url === "string") {
         // Extract query string if full URL provided

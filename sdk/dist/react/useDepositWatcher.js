@@ -1,4 +1,3 @@
-"use strict";
 /**
  * React Hook for Deposit Watching
  *
@@ -11,12 +10,9 @@
  * - Automatic persistence
  * - TypeScript support
  */
-Object.defineProperty(exports, "__esModule", { value: true });
-exports.useDepositWatcher = useDepositWatcher;
-exports.useSingleDeposit = useSingleDeposit;
-const react_1 = require("react");
-const web_1 = require("../watcher/web");
-const native_1 = require("../watcher/native");
+import { useEffect, useState, useCallback, useRef } from "react";
+import { createWebWatcher } from "../watcher/web";
+import { createNativeWatcher } from "../watcher/native";
 /**
  * Detect if running in React Native
  */
@@ -69,17 +65,17 @@ function isReactNative() {
  * }
  * ```
  */
-function useDepositWatcher(options = {}) {
+export function useDepositWatcher(options = {}) {
     const { callbacks: userCallbacks, autoInit = true, ...config } = options;
     // State
-    const [deposits, setDeposits] = (0, react_1.useState)([]);
-    const [isReady, setIsReady] = (0, react_1.useState)(false);
-    const [isLoading, setIsLoading] = (0, react_1.useState)(true);
-    const [error, setError] = (0, react_1.useState)(null);
+    const [deposits, setDeposits] = useState([]);
+    const [isReady, setIsReady] = useState(false);
+    const [isLoading, setIsLoading] = useState(true);
+    const [error, setError] = useState(null);
     // Watcher ref
-    const watcherRef = (0, react_1.useRef)(null);
+    const watcherRef = useRef(null);
     // Update deposits state from watcher
-    const syncDeposits = (0, react_1.useCallback)(() => {
+    const syncDeposits = useCallback(() => {
         if (watcherRef.current) {
             setDeposits([...watcherRef.current.getAllDeposits()]);
         }
@@ -116,7 +112,7 @@ function useDepositWatcher(options = {}) {
         },
     };
     // Initialize watcher on mount
-    (0, react_1.useEffect)(() => {
+    useEffect(() => {
         if (!autoInit) {
             setIsLoading(false);
             return;
@@ -124,10 +120,10 @@ function useDepositWatcher(options = {}) {
         let watcher;
         // Create platform-specific watcher
         if (isReactNative()) {
-            watcher = (0, native_1.createNativeWatcher)(internalCallbacks, config);
+            watcher = createNativeWatcher(internalCallbacks, config);
         }
         else {
-            watcher = (0, web_1.createWebWatcher)(internalCallbacks, config);
+            watcher = createWebWatcher(internalCallbacks, config);
         }
         watcherRef.current = watcher;
         // Initialize
@@ -149,7 +145,7 @@ function useDepositWatcher(options = {}) {
         };
     }, []); // eslint-disable-line react-hooks/exhaustive-deps
     // Actions
-    const createDeposit = (0, react_1.useCallback)(async (amount, baseUrl) => {
+    const createDeposit = useCallback(async (amount, baseUrl) => {
         if (!watcherRef.current) {
             throw new Error("Watcher not initialized");
         }
@@ -157,41 +153,41 @@ function useDepositWatcher(options = {}) {
         syncDeposits();
         return deposit;
     }, [syncDeposits]);
-    const watchDeposit = (0, react_1.useCallback)(async (deposit) => {
+    const watchDeposit = useCallback(async (deposit) => {
         if (!watcherRef.current) {
             throw new Error("Watcher not initialized");
         }
         await watcherRef.current.watchDeposit(deposit);
         syncDeposits();
     }, [syncDeposits]);
-    const getDeposit = (0, react_1.useCallback)((id) => {
+    const getDeposit = useCallback((id) => {
         return watcherRef.current?.getDeposit(id);
     }, []);
-    const getDepositsByStatus = (0, react_1.useCallback)((status) => {
+    const getDepositsByStatus = useCallback((status) => {
         return watcherRef.current?.getDepositsByStatus(status) || [];
     }, []);
-    const removeDeposit = (0, react_1.useCallback)(async (id) => {
+    const removeDeposit = useCallback(async (id) => {
         if (!watcherRef.current) {
             throw new Error("Watcher not initialized");
         }
         await watcherRef.current.removeDeposit(id);
         syncDeposits();
     }, [syncDeposits]);
-    const markVerified = (0, react_1.useCallback)(async (id, leafIndex) => {
+    const markVerified = useCallback(async (id, leafIndex) => {
         if (!watcherRef.current) {
             throw new Error("Watcher not initialized");
         }
         await watcherRef.current.markVerified(id, leafIndex);
         syncDeposits();
     }, [syncDeposits]);
-    const markClaimed = (0, react_1.useCallback)(async (id) => {
+    const markClaimed = useCallback(async (id) => {
         if (!watcherRef.current) {
             throw new Error("Watcher not initialized");
         }
         await watcherRef.current.markClaimed(id);
         syncDeposits();
     }, [syncDeposits]);
-    const refreshDeposit = (0, react_1.useCallback)(async (id) => {
+    const refreshDeposit = useCallback(async (id) => {
         if (!watcherRef.current) {
             throw new Error("Watcher not initialized");
         }
@@ -199,7 +195,7 @@ function useDepositWatcher(options = {}) {
         syncDeposits();
         return deposit;
     }, [syncDeposits]);
-    const refreshAll = (0, react_1.useCallback)(async () => {
+    const refreshAll = useCallback(async () => {
         if (!watcherRef.current) {
             throw new Error("Watcher not initialized");
         }
@@ -273,22 +269,22 @@ function useDepositWatcher(options = {}) {
  * }
  * ```
  */
-function useSingleDeposit(options = {}) {
+export function useSingleDeposit(options = {}) {
     const { deposits, isReady, isLoading, createDeposit, markVerified, markClaimed } = useDepositWatcher(options);
     // Track current deposit ID
-    const [currentDepositId, setCurrentDepositId] = (0, react_1.useState)(null);
+    const [currentDepositId, setCurrentDepositId] = useState(null);
     // Get current deposit
     const deposit = currentDepositId
         ? deposits.find((d) => d.id === currentDepositId)
         : null;
     // Start a new deposit
-    const startDeposit = (0, react_1.useCallback)(async (amount, baseUrl) => {
+    const startDeposit = useCallback(async (amount, baseUrl) => {
         const newDeposit = await createDeposit(amount, baseUrl);
         setCurrentDepositId(newDeposit.id);
         return newDeposit;
     }, [createDeposit]);
     // Reset to start a new deposit
-    const reset = (0, react_1.useCallback)(() => {
+    const reset = useCallback(() => {
         setCurrentDepositId(null);
     }, []);
     // Computed state

@@ -1,4 +1,3 @@
-"use strict";
 /**
  * RAILGUN-style Key Derivation for zVault
  *
@@ -25,34 +24,13 @@
  * - Both derived from Solana wallet - no separate backup needed
  * - Delegation: Viewing key can be shared with auditors for read-only access
  */
-Object.defineProperty(exports, "__esModule", { value: true });
-exports.SPENDING_KEY_DERIVATION_MESSAGE = exports.ViewPermissions = void 0;
-exports.deriveKeysFromWallet = deriveKeysFromWallet;
-exports.deriveKeysFromSignature = deriveKeysFromSignature;
-exports.deriveKeysFromSeed = deriveKeysFromSeed;
-exports.createStealthMetaAddress = createStealthMetaAddress;
-exports.serializeStealthMetaAddress = serializeStealthMetaAddress;
-exports.deserializeStealthMetaAddress = deserializeStealthMetaAddress;
-exports.parseStealthMetaAddress = parseStealthMetaAddress;
-exports.encodeStealthMetaAddress = encodeStealthMetaAddress;
-exports.decodeStealthMetaAddress = decodeStealthMetaAddress;
-exports.createDelegatedViewKey = createDelegatedViewKey;
-exports.serializeDelegatedViewKey = serializeDelegatedViewKey;
-exports.deserializeDelegatedViewKey = deserializeDelegatedViewKey;
-exports.isDelegatedKeyValid = isDelegatedKeyValid;
-exports.hasPermission = hasPermission;
-exports.constantTimeCompare = constantTimeCompare;
-exports.clearKey = clearKey;
-exports.clearZVaultKeys = clearZVaultKeys;
-exports.clearDelegatedViewKey = clearDelegatedViewKey;
-exports.extractViewOnlyBundle = extractViewOnlyBundle;
-const sha256_1 = require("@noble/hashes/sha256");
-const tweetnacl_1 = require("tweetnacl");
-const grumpkin_1 = require("./grumpkin");
+import { sha256 } from "@noble/hashes/sha256";
+import { box } from "tweetnacl";
+import { scalarFromBytes, pointMul, GRUMPKIN_GENERATOR, pubKeyToBytes, pubKeyFromBytes, } from "./grumpkin";
 /**
  * View permission flags for delegated viewing keys
  */
-var ViewPermissions;
+export var ViewPermissions;
 (function (ViewPermissions) {
     /** Can scan announcements and see amounts */
     ViewPermissions[ViewPermissions["SCAN"] = 1] = "SCAN";
@@ -62,10 +40,10 @@ var ViewPermissions;
     ViewPermissions[ViewPermissions["INCOMING_ONLY"] = 4] = "INCOMING_ONLY";
     /** Full viewing access (scan + history) */
     ViewPermissions[ViewPermissions["FULL"] = 3] = "FULL";
-})(ViewPermissions || (exports.ViewPermissions = ViewPermissions = {}));
+})(ViewPermissions || (ViewPermissions = {}));
 // ========== Constants ==========
 /** Message to sign for key derivation */
-exports.SPENDING_KEY_DERIVATION_MESSAGE = "zVault spending key derivation v1";
+export const SPENDING_KEY_DERIVATION_MESSAGE = "zVault spending key derivation v1";
 /** Domain separator for viewing key derivation */
 const VIEWING_KEY_DOMAIN = "viewing";
 // ========== Key Derivation ==========
@@ -78,11 +56,11 @@ const VIEWING_KEY_DOMAIN = "viewing";
  * @param wallet - Solana wallet adapter with signMessage capability
  * @returns Complete zVault key hierarchy
  */
-async function deriveKeysFromWallet(wallet) {
+export async function deriveKeysFromWallet(wallet) {
     if (!wallet.publicKey) {
         throw new Error("Wallet not connected");
     }
-    const message = new TextEncoder().encode(exports.SPENDING_KEY_DERIVATION_MESSAGE);
+    const message = new TextEncoder().encode(SPENDING_KEY_DERIVATION_MESSAGE);
     const signature = await wallet.signMessage(message);
     return deriveKeysFromSignature(signature, wallet.publicKey.toBytes());
 }
@@ -95,7 +73,7 @@ async function deriveKeysFromWallet(wallet) {
  * @param solanaPublicKey - 32-byte Solana public key
  * @returns Complete zVault key hierarchy
  */
-function deriveKeysFromSignature(signature, solanaPublicKey) {
+export function deriveKeysFromSignature(signature, solanaPublicKey) {
     if (signature.length !== 64) {
         throw new Error("Signature must be 64 bytes");
     }
@@ -103,15 +81,15 @@ function deriveKeysFromSignature(signature, solanaPublicKey) {
         throw new Error("Solana public key must be 32 bytes");
     }
     // Derive spending key: SHA256(signature) → Grumpkin scalar
-    const spendingSeed = (0, sha256_1.sha256)(signature);
-    const spendingPrivKey = (0, grumpkin_1.scalarFromBytes)(spendingSeed);
-    const spendingPubKey = (0, grumpkin_1.pointMul)(spendingPrivKey, grumpkin_1.GRUMPKIN_GENERATOR);
+    const spendingSeed = sha256(signature);
+    const spendingPrivKey = scalarFromBytes(spendingSeed);
+    const spendingPubKey = pointMul(spendingPrivKey, GRUMPKIN_GENERATOR);
     // Clear intermediate seed
     clearKey(spendingSeed);
     // Derive viewing key: SHA256(signature || "viewing") → X25519 scalar
-    const viewingSeed = (0, sha256_1.sha256)(concatBytes(signature, new TextEncoder().encode(VIEWING_KEY_DOMAIN)));
+    const viewingSeed = sha256(concatBytes(signature, new TextEncoder().encode(VIEWING_KEY_DOMAIN)));
     // X25519 requires clamping (done by tweetnacl internally)
-    const viewingKeyPair = tweetnacl_1.box.keyPair.fromSecretKey(viewingSeed);
+    const viewingKeyPair = box.keyPair.fromSecretKey(viewingSeed);
     // Clear intermediate seed
     clearKey(viewingSeed);
     return {
@@ -128,11 +106,11 @@ function deriveKeysFromSignature(signature, solanaPublicKey) {
  * @param seed - Arbitrary seed bytes
  * @returns Complete zVault key hierarchy (with zero solanaPublicKey)
  */
-function deriveKeysFromSeed(seed) {
+export function deriveKeysFromSeed(seed) {
     // Create a deterministic "signature" from seed
     const fakeSig = new Uint8Array(64);
-    const hash1 = (0, sha256_1.sha256)(seed);
-    const hash2 = (0, sha256_1.sha256)(concatBytes(seed, new Uint8Array([1])));
+    const hash1 = sha256(seed);
+    const hash2 = sha256(concatBytes(seed, new Uint8Array([1])));
     fakeSig.set(hash1, 0);
     fakeSig.set(hash2, 32);
     return deriveKeysFromSignature(fakeSig, new Uint8Array(32));
@@ -144,16 +122,16 @@ function deriveKeysFromSeed(seed) {
  * This is the public address that users share to receive funds.
  * It contains the spending and viewing public keys.
  */
-function createStealthMetaAddress(keys) {
+export function createStealthMetaAddress(keys) {
     return {
-        spendingPubKey: (0, grumpkin_1.pubKeyToBytes)(keys.spendingPubKey),
+        spendingPubKey: pubKeyToBytes(keys.spendingPubKey),
         viewingPubKey: keys.viewingPubKey,
     };
 }
 /**
  * Serialize a stealth meta-address for display/sharing
  */
-function serializeStealthMetaAddress(meta) {
+export function serializeStealthMetaAddress(meta) {
     return {
         spendingPubKey: bytesToHex(meta.spendingPubKey),
         viewingPubKey: bytesToHex(meta.viewingPubKey),
@@ -162,7 +140,7 @@ function serializeStealthMetaAddress(meta) {
 /**
  * Deserialize a stealth meta-address from string representation
  */
-function deserializeStealthMetaAddress(serialized) {
+export function deserializeStealthMetaAddress(serialized) {
     return {
         spendingPubKey: hexToBytes(serialized.spendingPubKey),
         viewingPubKey: hexToBytes(serialized.viewingPubKey),
@@ -171,9 +149,9 @@ function deserializeStealthMetaAddress(serialized) {
 /**
  * Parse a stealth meta-address and extract the Grumpkin public key
  */
-function parseStealthMetaAddress(meta) {
+export function parseStealthMetaAddress(meta) {
     return {
-        spendingPubKey: (0, grumpkin_1.pubKeyFromBytes)(meta.spendingPubKey),
+        spendingPubKey: pubKeyFromBytes(meta.spendingPubKey),
         viewingPubKey: meta.viewingPubKey,
     };
 }
@@ -181,14 +159,14 @@ function parseStealthMetaAddress(meta) {
  * Encode stealth meta-address as a single string (65 bytes → hex)
  * Format: spendingPubKey (33 bytes) || viewingPubKey (32 bytes)
  */
-function encodeStealthMetaAddress(meta) {
+export function encodeStealthMetaAddress(meta) {
     const combined = concatBytes(meta.spendingPubKey, meta.viewingPubKey);
     return bytesToHex(combined);
 }
 /**
  * Decode stealth meta-address from a single string
  */
-function decodeStealthMetaAddress(encoded) {
+export function decodeStealthMetaAddress(encoded) {
     const bytes = hexToBytes(encoded);
     if (bytes.length !== 65) {
         throw new Error("Invalid stealth meta-address length (expected 65 bytes)");
@@ -210,7 +188,7 @@ function decodeStealthMetaAddress(encoded) {
  * @param options - Optional expiration and label
  * @returns Delegated viewing key
  */
-function createDelegatedViewKey(keys, permissions = ViewPermissions.FULL, options = {}) {
+export function createDelegatedViewKey(keys, permissions = ViewPermissions.FULL, options = {}) {
     return {
         viewingPrivKey: keys.viewingPrivKey,
         permissions,
@@ -228,7 +206,7 @@ function createDelegatedViewKey(keys, permissions = ViewPermissions.FULL, option
  * @param password - Password for encryption (optional, if not provided returns unencrypted - NOT RECOMMENDED)
  * @returns Encrypted JSON string
  */
-function serializeDelegatedViewKey(key, password) {
+export function serializeDelegatedViewKey(key, password) {
     if (!password) {
         // WARNING: Unencrypted serialization - for backward compatibility only
         console.warn("WARNING: Serializing viewing key without encryption. " +
@@ -249,18 +227,18 @@ function serializeDelegatedViewKey(key, password) {
     crypto.getRandomValues(salt);
     // Simple PBKDF: key = SHA256(password || salt)
     const keyMaterial = concatBytes(passwordBytes, salt);
-    const encryptionKey = (0, sha256_1.sha256)(keyMaterial);
+    const encryptionKey = sha256(keyMaterial);
     // Generate nonce for XOR encryption
     const nonce = new Uint8Array(32);
     crypto.getRandomValues(nonce);
     // Encrypt viewing private key: ciphertext = privKey XOR SHA256(encryptionKey || nonce)
-    const xorKey = (0, sha256_1.sha256)(concatBytes(encryptionKey, nonce));
+    const xorKey = sha256(concatBytes(encryptionKey, nonce));
     const encryptedPrivKey = new Uint8Array(32);
     for (let i = 0; i < 32; i++) {
         encryptedPrivKey[i] = key.viewingPrivKey[i] ^ xorKey[i];
     }
     // Compute MAC: SHA256(encryptionKey || encryptedPrivKey)
-    const mac = (0, sha256_1.sha256)(concatBytes(encryptionKey, encryptedPrivKey));
+    const mac = sha256(concatBytes(encryptionKey, encryptedPrivKey));
     const obj = {
         version: 2,
         encrypted: true,
@@ -281,7 +259,7 @@ function serializeDelegatedViewKey(key, password) {
  * @param password - Password for decryption (required if encrypted)
  * @returns Delegated viewing key
  */
-function deserializeDelegatedViewKey(json, password) {
+export function deserializeDelegatedViewKey(json, password) {
     const obj = JSON.parse(json);
     if (!obj.encrypted || obj.version === 1) {
         // Unencrypted format (legacy or no password provided during serialization)
@@ -303,14 +281,14 @@ function deserializeDelegatedViewKey(json, password) {
     // Derive encryption key
     const passwordBytes = new TextEncoder().encode(password);
     const keyMaterial = concatBytes(passwordBytes, salt);
-    const encryptionKey = (0, sha256_1.sha256)(keyMaterial);
+    const encryptionKey = sha256(keyMaterial);
     // Verify MAC
-    const computedMac = (0, sha256_1.sha256)(concatBytes(encryptionKey, ciphertext));
+    const computedMac = sha256(concatBytes(encryptionKey, ciphertext));
     if (!constantTimeCompare(computedMac, storedMac)) {
         throw new Error("Invalid password or corrupted data");
     }
     // Decrypt viewing private key
-    const xorKey = (0, sha256_1.sha256)(concatBytes(encryptionKey, nonce));
+    const xorKey = sha256(concatBytes(encryptionKey, nonce));
     const viewingPrivKey = new Uint8Array(32);
     for (let i = 0; i < 32; i++) {
         viewingPrivKey[i] = ciphertext[i] ^ xorKey[i];
@@ -325,7 +303,7 @@ function deserializeDelegatedViewKey(json, password) {
 /**
  * Check if a delegated viewing key is valid (not expired)
  */
-function isDelegatedKeyValid(key) {
+export function isDelegatedKeyValid(key) {
     if (!key.expiresAt)
         return true;
     return Date.now() < key.expiresAt;
@@ -333,14 +311,14 @@ function isDelegatedKeyValid(key) {
 /**
  * Check if a delegated key has a specific permission
  */
-function hasPermission(key, permission) {
+export function hasPermission(key, permission) {
     return (key.permissions & permission) === permission;
 }
 // ========== Key Security ==========
 /**
  * Safely compare two keys in constant time
  */
-function constantTimeCompare(a, b) {
+export function constantTimeCompare(a, b) {
     if (a.length !== b.length)
         return false;
     let result = 0;
@@ -359,7 +337,7 @@ function constantTimeCompare(a, b) {
  *
  * For maximum security, use WebAssembly or native modules.
  */
-function clearKey(key) {
+export function clearKey(key) {
     crypto.getRandomValues(key);
     key.fill(0);
 }
@@ -369,7 +347,7 @@ function clearKey(key) {
  * Call this when you're done using the keys to minimize exposure window.
  * Note: The spendingPrivKey is a bigint and cannot be reliably cleared in JS.
  */
-function clearZVaultKeys(keys) {
+export function clearZVaultKeys(keys) {
     clearKey(keys.viewingPrivKey);
     // Note: spendingPrivKey is a bigint, we can only set it to 0n
     // This doesn't guarantee memory clearing but removes the reference
@@ -378,17 +356,17 @@ function clearZVaultKeys(keys) {
 /**
  * Securely clear a delegated viewing key
  */
-function clearDelegatedViewKey(key) {
+export function clearDelegatedViewKey(key) {
     clearKey(key.viewingPrivKey);
 }
 /**
  * Derive a view-only key bundle (no spending key)
  * Safe to export/backup separately from spending key
  */
-function extractViewOnlyBundle(keys) {
+export function extractViewOnlyBundle(keys) {
     return {
         solanaPublicKey: keys.solanaPublicKey,
-        spendingPubKey: (0, grumpkin_1.pubKeyToBytes)(keys.spendingPubKey),
+        spendingPubKey: pubKeyToBytes(keys.spendingPubKey),
         viewingPrivKey: keys.viewingPrivKey,
         viewingPubKey: keys.viewingPubKey,
     };

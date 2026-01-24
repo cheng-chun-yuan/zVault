@@ -4,12 +4,13 @@ import { useState, useEffect, useCallback } from "react";
 import { useWallet } from "@solana/wallet-adapter-react";
 import {
   Copy, Check, AlertCircle, Key, Eye, EyeOff,
-  RefreshCw, QrCode, ExternalLink
+  RefreshCw, QrCode, ExternalLink, Shield
 } from "lucide-react";
 import { QRCodeSVG } from "qrcode.react";
 import { cn } from "@/lib/utils";
 import { useNoteStorage } from "@/hooks/use-note-storage";
 import { useCopyToClipboard } from "@/hooks/use-copy-to-clipboard";
+import { useZVaultKeys } from "@/hooks/use-zvault-keys";
 import {
   createDepositFromSeed,
   serializeNote,
@@ -52,6 +53,20 @@ export function DepositFlow() {
   const { publicKey, connected } = useWallet();
   const { saveNote } = useNoteStorage();
   const { copied, copy } = useCopyToClipboard();
+  const {
+    keys,
+    stealthAddressEncoded,
+    deriveKeys,
+    isLoading: keysLoading,
+  } = useZVaultKeys();
+  const [stealthCopied, setStealthCopied] = useState(false);
+
+  const copyStealthAddress = async () => {
+    if (!stealthAddressEncoded) return;
+    await navigator.clipboard.writeText(stealthAddressEncoded);
+    setStealthCopied(true);
+    setTimeout(() => setStealthCopied(false), 2000);
+  };
 
   // State
   const [secretNote, setSecretNote] = useState("");
@@ -233,6 +248,48 @@ export function DepositFlow() {
 
   return (
     <div className="flex flex-col">
+      {/* Stealth Address Section - for receiving from others */}
+      <div className="mb-4 p-3 bg-[#14F1950D] border border-[#14F19526] rounded-[12px]">
+        <div className="flex items-center gap-2 mb-2">
+          <Shield className="w-4 h-4 text-[#14F195]" />
+          <span className="text-caption text-[#14F195]">Your Stealth Address</span>
+        </div>
+        {!keys ? (
+          <div className="flex items-center justify-between">
+            <span className="text-caption text-[#8B8A9E]">
+              Sign to derive your private address
+            </span>
+            <button
+              onClick={deriveKeys}
+              disabled={keysLoading}
+              className="px-3 py-1 text-caption bg-[#14F19526] hover:bg-[#14F19533] text-[#14F195] rounded-[6px] transition-colors disabled:opacity-50"
+            >
+              {keysLoading ? "..." : "Derive"}
+            </button>
+          </div>
+        ) : (
+          <div className="flex items-center gap-2">
+            <code className="flex-1 text-caption font-mono text-[#C7C5D1] truncate">
+              {stealthAddressEncoded?.slice(0, 20)}...{stealthAddressEncoded?.slice(-20)}
+            </code>
+            <button
+              onClick={copyStealthAddress}
+              className="p-1.5 rounded-[6px] bg-[#14F1951A] hover:bg-[#14F19533] transition-colors"
+              title="Copy to share with others"
+            >
+              {stealthCopied ? (
+                <Check className="w-3.5 h-3.5 text-[#4ADE80]" />
+              ) : (
+                <Copy className="w-3.5 h-3.5 text-[#14F195]" />
+              )}
+            </button>
+          </div>
+        )}
+        <p className="text-caption text-[#8B8A9E] mt-1">
+          Share this to receive private payments from others
+        </p>
+      </div>
+
       {/* Secret note input */}
       <div className="mb-4">
         <label className="text-body2 text-[#C7C5D1] pl-2 mb-2 block">Secret Note</label>

@@ -1,4 +1,3 @@
-"use strict";
 /**
  * ChadBuffer Client
  *
@@ -9,18 +8,9 @@
  *
  * Reference: https://github.com/deanmlittle/chadbuffer
  */
-Object.defineProperty(exports, "__esModule", { value: true });
-exports.CHADBUFFER_PROGRAM_ID = void 0;
-exports.uploadTransactionToBuffer = uploadTransactionToBuffer;
-exports.closeBuffer = closeBuffer;
-exports.readBufferData = readBufferData;
-exports.fetchRawTransaction = fetchRawTransaction;
-exports.fetchMerkleProof = fetchMerkleProof;
-exports.bytesToHex = bytesToHex;
-exports.prepareVerifyDeposit = prepareVerifyDeposit;
-const web3_js_1 = require("@solana/web3.js");
+import { Keypair, PublicKey, SystemProgram, Transaction, TransactionInstruction, sendAndConfirmTransaction, } from "@solana/web3.js";
 // ChadBuffer Program ID
-exports.CHADBUFFER_PROGRAM_ID = new web3_js_1.PublicKey("CHADqH6wybhBMB9RR2xQVu2XRjuLcNvffTjwvv3ygMyn");
+export const CHADBUFFER_PROGRAM_ID = new PublicKey("CHADqH6wybhBMB9RR2xQVu2XRjuLcNvffTjwvv3ygMyn");
 // Buffer authority size (32 bytes)
 const AUTHORITY_SIZE = 32;
 // Maximum chunk size per transaction (keeping under tx size limit)
@@ -56,11 +46,11 @@ function createInstructionData(instruction, data) {
  * @param seed - Optional seed for buffer PDA derivation
  * @returns Buffer public key
  */
-async function uploadTransactionToBuffer(connection, payer, rawTx, seed) {
+export async function uploadTransactionToBuffer(connection, payer, rawTx, seed) {
     // Generate buffer keypair or derive from seed
     const bufferKeypair = seed
-        ? web3_js_1.Keypair.fromSeed(seed.slice(0, 32))
-        : web3_js_1.Keypair.generate();
+        ? Keypair.fromSeed(seed.slice(0, 32))
+        : Keypair.generate();
     // Calculate required space: authority (32) + data
     const space = AUTHORITY_SIZE + rawTx.length;
     // Get rent exemption
@@ -68,38 +58,38 @@ async function uploadTransactionToBuffer(connection, payer, rawTx, seed) {
     // Split data into chunks
     const chunks = splitIntoChunks(rawTx, MAX_CHUNK_SIZE);
     // Create buffer account with first chunk
-    const createIx = new web3_js_1.TransactionInstruction({
-        programId: exports.CHADBUFFER_PROGRAM_ID,
+    const createIx = new TransactionInstruction({
+        programId: CHADBUFFER_PROGRAM_ID,
         keys: [
             { pubkey: payer.publicKey, isSigner: true, isWritable: true },
             { pubkey: bufferKeypair.publicKey, isSigner: true, isWritable: true },
-            { pubkey: web3_js_1.SystemProgram.programId, isSigner: false, isWritable: false },
+            { pubkey: SystemProgram.programId, isSigner: false, isWritable: false },
         ],
         data: createInstructionData(ChadBufferInstruction.Create, chunks[0]),
     });
     // Create account instruction
-    const createAccountIx = web3_js_1.SystemProgram.createAccount({
+    const createAccountIx = SystemProgram.createAccount({
         fromPubkey: payer.publicKey,
         newAccountPubkey: bufferKeypair.publicKey,
         lamports: rentExemption,
         space,
-        programId: exports.CHADBUFFER_PROGRAM_ID,
+        programId: CHADBUFFER_PROGRAM_ID,
     });
     // Send create transaction
-    const createTx = new web3_js_1.Transaction().add(createAccountIx, createIx);
-    await (0, web3_js_1.sendAndConfirmTransaction)(connection, createTx, [payer, bufferKeypair]);
+    const createTx = new Transaction().add(createAccountIx, createIx);
+    await sendAndConfirmTransaction(connection, createTx, [payer, bufferKeypair]);
     // Write remaining chunks
     for (let i = 1; i < chunks.length; i++) {
-        const writeIx = new web3_js_1.TransactionInstruction({
-            programId: exports.CHADBUFFER_PROGRAM_ID,
+        const writeIx = new TransactionInstruction({
+            programId: CHADBUFFER_PROGRAM_ID,
             keys: [
                 { pubkey: payer.publicKey, isSigner: true, isWritable: true },
                 { pubkey: bufferKeypair.publicKey, isSigner: false, isWritable: true },
             ],
             data: createInstructionData(ChadBufferInstruction.Write, chunks[i]),
         });
-        const writeTx = new web3_js_1.Transaction().add(writeIx);
-        await (0, web3_js_1.sendAndConfirmTransaction)(connection, writeTx, [payer]);
+        const writeTx = new Transaction().add(writeIx);
+        await sendAndConfirmTransaction(connection, writeTx, [payer]);
     }
     console.log(`Buffer created: ${bufferKeypair.publicKey.toBase58()}`);
     console.log(`Transaction size: ${rawTx.length} bytes`);
@@ -109,9 +99,9 @@ async function uploadTransactionToBuffer(connection, payer, rawTx, seed) {
 /**
  * Close buffer and reclaim rent
  */
-async function closeBuffer(connection, payer, bufferPubkey, recipient) {
-    const closeIx = new web3_js_1.TransactionInstruction({
-        programId: exports.CHADBUFFER_PROGRAM_ID,
+export async function closeBuffer(connection, payer, bufferPubkey, recipient) {
+    const closeIx = new TransactionInstruction({
+        programId: CHADBUFFER_PROGRAM_ID,
         keys: [
             { pubkey: payer.publicKey, isSigner: true, isWritable: true },
             { pubkey: bufferPubkey, isSigner: false, isWritable: true },
@@ -123,18 +113,18 @@ async function closeBuffer(connection, payer, bufferPubkey, recipient) {
         ],
         data: createInstructionData(ChadBufferInstruction.Close),
     });
-    const tx = new web3_js_1.Transaction().add(closeIx);
-    return (0, web3_js_1.sendAndConfirmTransaction)(connection, tx, [payer]);
+    const tx = new Transaction().add(closeIx);
+    return sendAndConfirmTransaction(connection, tx, [payer]);
 }
 /**
  * Read buffer data
  */
-async function readBufferData(connection, bufferPubkey) {
+export async function readBufferData(connection, bufferPubkey) {
     const accountInfo = await connection.getAccountInfo(bufferPubkey);
     if (!accountInfo) {
         throw new Error("Buffer account not found");
     }
-    const authority = new web3_js_1.PublicKey(accountInfo.data.slice(0, AUTHORITY_SIZE));
+    const authority = new PublicKey(accountInfo.data.slice(0, AUTHORITY_SIZE));
     const data = accountInfo.data.slice(AUTHORITY_SIZE);
     return { authority, data };
 }
@@ -151,7 +141,7 @@ function splitIntoChunks(data, chunkSize) {
 /**
  * Fetch raw Bitcoin transaction from Esplora/Blockstream API
  */
-async function fetchRawTransaction(txid, network = "testnet") {
+export async function fetchRawTransaction(txid, network = "testnet") {
     const baseUrl = network === "testnet"
         ? "https://blockstream.info/testnet/api"
         : "https://blockstream.info/api";
@@ -165,7 +155,7 @@ async function fetchRawTransaction(txid, network = "testnet") {
 /**
  * Fetch merkle proof from Esplora/Blockstream API
  */
-async function fetchMerkleProof(txid, network = "testnet") {
+export async function fetchMerkleProof(txid, network = "testnet") {
     const baseUrl = network === "testnet"
         ? "https://blockstream.info/testnet/api"
         : "https://blockstream.info/api";
@@ -200,7 +190,7 @@ function hexToBytes(hex) {
 /**
  * Convert Uint8Array to hex string
  */
-function bytesToHex(bytes) {
+export function bytesToHex(bytes) {
     return Array.from(bytes)
         .map((b) => b.toString(16).padStart(2, "0"))
         .join("");
@@ -208,7 +198,7 @@ function bytesToHex(bytes) {
 /**
  * Complete flow: Fetch tx, upload to buffer, return verification data
  */
-async function prepareVerifyDeposit(connection, payer, txid, network = "testnet") {
+export async function prepareVerifyDeposit(connection, payer, txid, network = "testnet") {
     console.log(`Preparing verification for txid: ${txid}`);
     // Fetch raw transaction
     console.log("Fetching raw transaction...");

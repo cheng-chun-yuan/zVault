@@ -7,6 +7,7 @@ import { PhantomWalletAdapter } from "@solana/wallet-adapter-wallets";
 import { clusterApiUrl } from "@solana/web3.js";
 import { BitcoinWalletProvider } from "@/contexts/bitcoin-wallet-context";
 import { NoteStorageProvider } from "@/hooks/use-note-storage";
+import { ZVaultKeysProvider } from "@/hooks/use-zvault-keys";
 
 // Import wallet adapter CSS
 import "@solana/wallet-adapter-react-ui/styles.css";
@@ -32,11 +33,13 @@ export function Providers({ children }: { children: React.ReactNode }) {
     <ConnectionProvider endpoint={endpoint}>
       <WalletProvider wallets={wallets} autoConnect>
         <WalletModalProvider>
-          <BitcoinWalletProvider>
-            <NoteStorageProvider>
-              {children}
-            </NoteStorageProvider>
-          </BitcoinWalletProvider>
+          <ZVaultKeysProvider>
+            <BitcoinWalletProvider>
+              <NoteStorageProvider>
+                {children}
+              </NoteStorageProvider>
+            </BitcoinWalletProvider>
+          </ZVaultKeysProvider>
         </WalletModalProvider>
       </WalletProvider>
     </ConnectionProvider>

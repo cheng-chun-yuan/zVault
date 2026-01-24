@@ -1,4 +1,3 @@
-"use strict";
 /**
  * Note (shielded commitment) utilities for zVault
  *
@@ -11,32 +10,7 @@
  * using Poseidon2. This SDK stores the raw secrets and optionally
  * accepts pre-computed hash values.
  */
-Object.defineProperty(exports, "__esModule", { value: true });
-exports.generateNote = generateNote;
-exports.createNoteFromSecrets = createNoteFromSecrets;
-exports.updateNoteWithHashes = updateNoteWithHashes;
-exports.serializeNote = serializeNote;
-exports.deserializeNote = deserializeNote;
-exports.formatBtc = formatBtc;
-exports.parseBtc = parseBtc;
-exports.noteHasComputedHashes = noteHasComputedHashes;
-exports.deriveNote = deriveNote;
-exports.deriveMasterKey = deriveMasterKey;
-exports.deriveNoteFromMaster = deriveNoteFromMaster;
-exports.deriveNotes = deriveNotes;
-exports.estimateSeedStrength = estimateSeedStrength;
-exports.computeCommitment = computeCommitment;
-exports.computeNullifierHash = computeNullifierHash;
-exports.createNote = createNote;
-exports.initPoseidon = initPoseidon;
-exports.isPoseidonReady = isPoseidonReady;
-exports.prepareWithdrawal = prepareWithdrawal;
-exports.createNoteV2 = createNoteV2;
-exports.updateNoteV2WithHashes = updateNoteV2WithHashes;
-exports.serializeNoteV2 = serializeNoteV2;
-exports.deserializeNoteV2 = deserializeNoteV2;
-exports.noteV2HasComputedHashes = noteV2HasComputedHashes;
-const crypto_1 = require("./crypto");
+import { randomFieldElement, bigintToBytes, sha256Hash, bytesToBigint, BN254_FIELD_PRIME } from "./crypto";
 /**
  * Generate a new note with random nullifier and secret
  *
@@ -46,9 +20,9 @@ const crypto_1 = require("./crypto");
  * @param amountSats - Amount in satoshis
  * @returns Note with secrets (hashes are 0n until circuit execution)
  */
-function generateNote(amountSats) {
-    const nullifier = (0, crypto_1.randomFieldElement)();
-    const secret = (0, crypto_1.randomFieldElement)();
+export function generateNote(amountSats) {
+    const nullifier = randomFieldElement();
+    const secret = randomFieldElement();
     return createNoteFromSecrets(nullifier, secret, amountSats);
 }
 /**
@@ -61,7 +35,7 @@ function generateNote(amountSats) {
  * @param nullifierHash - Optional pre-computed nullifier hash (from circuit)
  * @returns Note structure
  */
-function createNoteFromSecrets(nullifier, secret, amountSats, commitment, nullifierHash) {
+export function createNoteFromSecrets(nullifier, secret, amountSats, commitment, nullifierHash) {
     // Computed values are 0n until provided from circuit outputs
     const comm = commitment ?? 0n;
     const nullHash = nullifierHash ?? 0n;
@@ -73,10 +47,10 @@ function createNoteFromSecrets(nullifier, secret, amountSats, commitment, nullif
         note: noteHash,
         commitment: comm,
         nullifierHash: nullHash,
-        nullifierBytes: (0, crypto_1.bigintToBytes)(nullifier),
-        secretBytes: (0, crypto_1.bigintToBytes)(secret),
-        commitmentBytes: (0, crypto_1.bigintToBytes)(comm),
-        nullifierHashBytes: (0, crypto_1.bigintToBytes)(nullHash),
+        nullifierBytes: bigintToBytes(nullifier),
+        secretBytes: bigintToBytes(secret),
+        commitmentBytes: bigintToBytes(comm),
+        nullifierHashBytes: bigintToBytes(nullHash),
     };
 }
 /**
@@ -87,13 +61,13 @@ function createNoteFromSecrets(nullifier, secret, amountSats, commitment, nullif
  * @param nullifierHash - Nullifier hash from circuit output
  * @returns Updated note
  */
-function updateNoteWithHashes(note, commitment, nullifierHash) {
+export function updateNoteWithHashes(note, commitment, nullifierHash) {
     return {
         ...note,
         commitment,
         nullifierHash,
-        commitmentBytes: (0, crypto_1.bigintToBytes)(commitment),
-        nullifierHashBytes: (0, crypto_1.bigintToBytes)(nullifierHash),
+        commitmentBytes: bigintToBytes(commitment),
+        nullifierHashBytes: bigintToBytes(nullifierHash),
     };
 }
 /**
@@ -102,7 +76,7 @@ function updateNoteWithHashes(note, commitment, nullifierHash) {
  * Only stores the essential data (amount, nullifier, secret).
  * Optionally includes pre-computed hash values.
  */
-function serializeNote(note) {
+export function serializeNote(note) {
     const serialized = {
         amount: note.amount.toString(),
         nullifier: note.nullifier.toString(),
@@ -120,7 +94,7 @@ function serializeNote(note) {
 /**
  * Deserialize and restore a note from stored data
  */
-function deserializeNote(data) {
+export function deserializeNote(data) {
     const amount = BigInt(data.amount);
     const nullifier = BigInt(data.nullifier);
     const secret = BigInt(data.secret);
@@ -133,21 +107,21 @@ function deserializeNote(data) {
 /**
  * Format satoshis as BTC string
  */
-function formatBtc(sats) {
+export function formatBtc(sats) {
     const btc = Number(sats) / 100000000;
     return btc.toFixed(8) + " BTC";
 }
 /**
  * Parse BTC string to satoshis
  */
-function parseBtc(btcString) {
+export function parseBtc(btcString) {
     const btc = parseFloat(btcString.replace(" BTC", ""));
     return BigInt(Math.round(btc * 100000000));
 }
 /**
  * Check if a note has computed hash values
  */
-function noteHasComputedHashes(note) {
+export function noteHasComputedHashes(note) {
     return note.commitment !== 0n && note.nullifierHash !== 0n;
 }
 // ============================================================================
@@ -178,7 +152,7 @@ function noteHasComputedHashes(note) {
  * // recovered.nullifier === note0.nullifier ✓
  * ```
  */
-function deriveNote(seed, index, amountSats) {
+export function deriveNote(seed, index, amountSats) {
     // Step 1: Hash seed to get 32-byte master key (normalizes any input)
     const master = deriveMasterKey(seed);
     // Step 2: Derive nullifier and secret from master + index
@@ -193,10 +167,10 @@ function deriveNote(seed, index, amountSats) {
  *
  * You can cache this and use deriveNoteFromMaster() for efficiency.
  */
-function deriveMasterKey(seed) {
+export function deriveMasterKey(seed) {
     const encoder = new TextEncoder();
     const seedBytes = encoder.encode(seed);
-    return (0, crypto_1.sha256Hash)(seedBytes);
+    return sha256Hash(seedBytes);
 }
 /**
  * Derive a note from a pre-computed master key
@@ -210,7 +184,7 @@ function deriveMasterKey(seed) {
  * const note1 = deriveNoteFromMaster(master, 1, 50_000n);
  * ```
  */
-function deriveNoteFromMaster(master, index, amountSats) {
+export function deriveNoteFromMaster(master, index, amountSats) {
     const nullifier = deriveFromMaster(master, index, 0);
     const secret = deriveFromMaster(master, index, 1);
     return createNoteFromSecrets(nullifier, secret, amountSats);
@@ -234,8 +208,8 @@ function deriveFromMaster(master, index, domain) {
     // Domain as 1 byte
     input[36] = domain;
     // Hash and reduce to field
-    const hash = (0, crypto_1.sha256Hash)(input);
-    return (0, crypto_1.bytesToBigint)(hash) % crypto_1.BN254_FIELD_PRIME;
+    const hash = sha256Hash(input);
+    return bytesToBigint(hash) % BN254_FIELD_PRIME;
 }
 /**
  * Derive multiple notes at once from a seed
@@ -254,7 +228,7 @@ function deriveFromMaster(master, index, domain) {
  * const notes = deriveNotes("albertgogogo", [100_000n, 50_000n, 25_000n]);
  * ```
  */
-function deriveNotes(seed, amounts, startIndex = 0) {
+export function deriveNotes(seed, amounts, startIndex = 0) {
     // Compute master once, derive all notes from it
     const master = deriveMasterKey(seed);
     return amounts.map((amount, i) => deriveNoteFromMaster(master, startIndex + i, amount));
@@ -265,7 +239,7 @@ function deriveNotes(seed, amounts, startIndex = 0) {
  * Returns estimated bits of entropy.
  * Recommended: >= 80 bits for moderate security, >= 128 bits for high security
  */
-function estimateSeedStrength(seed) {
+export function estimateSeedStrength(seed) {
     // Very rough entropy estimation
     const length = seed.length;
     const hasLower = /[a-z]/.test(seed);
@@ -314,7 +288,7 @@ let poseidonInitialized = false;
  *
  * @deprecated Use Noir circuit for commitment computation
  */
-function computeCommitment(note) {
+export function computeCommitment(note) {
     throw new Error("computeCommitment is not available in Noir mode. " +
         "Commitments are computed inside the Noir circuit using Poseidon2. " +
         "Pass note data (nullifier, secret, amount) directly to your Noir circuit.");
@@ -326,7 +300,7 @@ function computeCommitment(note) {
  *
  * @deprecated Use Noir circuit for nullifier hash computation
  */
-function computeNullifierHash(nullifier) {
+export function computeNullifierHash(nullifier) {
     throw new Error("computeNullifierHash is not available in Noir mode. " +
         "Nullifier hashes are computed inside the Noir circuit using Poseidon2. " +
         "Pass nullifier directly to your Noir circuit.");
@@ -339,7 +313,7 @@ function computeNullifierHash(nullifier) {
  * @param amount - Amount in satoshis
  * @returns NoteData with nullifier, secret, and amount
  */
-function createNote(amount) {
+export function createNote(amount) {
     const note = generateNote(amount);
     return {
         nullifier: note.nullifier,
@@ -352,7 +326,7 @@ function createNote(amount) {
  *
  * Kept for API compatibility. In Noir mode, this is a no-op.
  */
-async function initPoseidon() {
+export async function initPoseidon() {
     poseidonInitialized = true;
     // No actual initialization needed - Noir circuit handles Poseidon2
 }
@@ -361,7 +335,7 @@ async function initPoseidon() {
  *
  * Always returns true after initPoseidon() is called (for API compatibility).
  */
-function isPoseidonReady() {
+export function isPoseidonReady() {
     return poseidonInitialized;
 }
 /**
@@ -374,7 +348,7 @@ function isPoseidonReady() {
  * @param withdrawAmount - Amount to withdraw
  * @returns Change note with remaining balance (can be 0)
  */
-function prepareWithdrawal(inputNote, withdrawAmount) {
+export function prepareWithdrawal(inputNote, withdrawAmount) {
     if (withdrawAmount <= 0n) {
         throw new Error("Withdraw amount must be positive");
     }
@@ -394,7 +368,7 @@ function prepareWithdrawal(inputNote, withdrawAmount) {
  * @param leafIndex - Merkle tree leaf index
  * @returns NoteV2 structure
  */
-function createNoteV2(amount, random, ephemeralSpendPub, leafIndex) {
+export function createNoteV2(amount, random, ephemeralSpendPub, leafIndex) {
     return {
         amount,
         random,
@@ -403,25 +377,25 @@ function createNoteV2(amount, random, ephemeralSpendPub, leafIndex) {
         leafIndex,
         notePubKey: 0n, // Computed in circuit
         commitment: 0n, // Computed in circuit
-        randomBytes: (0, crypto_1.bigintToBytes)(random),
+        randomBytes: bigintToBytes(random),
         commitmentBytes: new Uint8Array(32),
     };
 }
 /**
  * Update V2 note with computed values from circuit
  */
-function updateNoteV2WithHashes(note, notePubKey, commitment) {
+export function updateNoteV2WithHashes(note, notePubKey, commitment) {
     return {
         ...note,
         notePubKey,
         commitment,
-        commitmentBytes: (0, crypto_1.bigintToBytes)(commitment),
+        commitmentBytes: bigintToBytes(commitment),
     };
 }
 /**
  * Serialize V2 note for storage
  */
-function serializeNoteV2(note) {
+export function serializeNoteV2(note) {
     const serialized = {
         amount: note.amount.toString(),
         random: note.random.toString(),
@@ -440,7 +414,7 @@ function serializeNoteV2(note) {
 /**
  * Deserialize V2 note from storage
  */
-function deserializeNoteV2(data) {
+export function deserializeNoteV2(data) {
     const note = createNoteV2(BigInt(data.amount), BigInt(data.random), {
         x: BigInt(data.ephemeralSpendPubX),
         y: BigInt(data.ephemeralSpendPubY),
@@ -453,6 +427,6 @@ function deserializeNoteV2(data) {
 /**
  * Check if V2 note has computed hashes
  */
-function noteV2HasComputedHashes(note) {
+export function noteV2HasComputedHashes(note) {
     return note.notePubKey !== 0n && note.commitment !== 0n;
 }

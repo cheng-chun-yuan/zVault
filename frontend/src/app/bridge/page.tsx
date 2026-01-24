@@ -1,5 +1,6 @@
 "use client";
 
+import { useState } from "react";
 import Link from "next/link";
 import {
   ArrowLeft,
@@ -9,10 +10,21 @@ import {
   Scissors,
   Wallet,
   Shield,
+  Key,
+  Copy,
+  Check,
+  Send,
+  Tag,
+  Loader2,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { FeatureCard, type FeatureCardColor } from "@/components/ui";
 import { BitcoinIcon } from "@/components/bitcoin-wallet-selector";
+import { useWallet } from "@solana/wallet-adapter-react";
+import { useWalletModal } from "@solana/wallet-adapter-react-ui";
+import { useZVaultKeys } from "@/hooks/use-zvault-keys";
+import { useCopyToClipboard } from "@/hooks/use-copy-to-clipboard";
+import { useZkeyName } from "@/hooks/use-zkey-name";
 
 interface FeatureConfig {
   icon: React.ReactNode;
@@ -33,12 +45,12 @@ const features: FeatureConfig[] = [
     color: "btc",
   },
   {
-    icon: <ArrowUpFromLine className="w-full h-full" />,
-    title: "Withdraw",
-    description: "sbBTC → zBTC",
-    subtext: "Public SPL token",
-    href: "/bridge/withdraw",
-    color: "purple",
+    icon: <Send className="w-full h-full" />,
+    title: "Stealth Send",
+    description: "Private transfer",
+    subtext: "To stealth address",
+    href: "/bridge/stealth-send",
+    color: "privacy",
   },
   {
     icon: <Gift className="w-full h-full" />,
@@ -46,15 +58,23 @@ const features: FeatureConfig[] = [
     description: "Use claim link",
     subtext: "Redeem sbBTC",
     href: "/claim",
-    color: "privacy",
+    color: "sol",
+  },
+  {
+    icon: <ArrowUpFromLine className="w-full h-full" />,
+    title: "Withdraw",
+    description: "sbBTC → BTC",
+    subtext: "Back to Bitcoin",
+    href: "/bridge/withdraw",
+    color: "btc",
   },
   {
     icon: <Scissors className="w-full h-full" />,
     title: "Split",
     description: "Divide note",
-    subtext: "Send to friend",
+    subtext: "Multiple outputs",
     href: "/claim?action=split",
-    color: "sol",
+    color: "purple",
   },
   {
     icon: <Wallet className="w-full h-full" />,
@@ -64,17 +84,46 @@ const features: FeatureConfig[] = [
     href: "/bridge/activity",
     color: "gray",
   },
-  {
-    icon: <Shield className="w-full h-full" />,
-    title: "Prove",
-    description: "Test ZK proofs",
-    subtext: "Developer tool",
-    href: "/prove",
-    color: "privacy",
-  },
 ];
 
 export default function BridgePage() {
+  const wallet = useWallet();
+  const { setVisible } = useWalletModal();
+  const {
+    keys,
+    stealthAddressEncoded,
+    isLoading,
+    error,
+    deriveKeys
+  } = useZVaultKeys();
+  const { copied, copy } = useCopyToClipboard();
+  const {
+    registeredName,
+    isRegistering,
+    error: nameError,
+    registerName,
+    formatName,
+    validateName,
+  } = useZkeyName();
+
+  // Name registration state
+  const [showNameInput, setShowNameInput] = useState(false);
+  const [nameInput, setNameInput] = useState("");
+  const nameValidationError = nameInput ? validateName(nameInput) : null;
+
+  const handleRegisterName = async () => {
+    if (!nameInput || nameValidationError) return;
+    const success = await registerName(nameInput);
+    if (success) {
+      setShowNameInput(false);
+      setNameInput("");
+    }
+  };
+
+  const shortAddress = stealthAddressEncoded
+    ? `${stealthAddressEncoded.slice(0, 16)}...${stealthAddressEncoded.slice(-16)}`
+    : "";
+
   return (
     <main className="min-h-screen bg-background hacker-bg noise-overlay flex flex-col items-center justify-center p-4">
       {/* Header */}
@@ -114,6 +163,174 @@ export default function BridgePage() {
           <p className="text-body2 text-gray">
             Bridge Bitcoin to Solana with zero-knowledge privacy
           </p>
+        </div>
+
+        {/* Stealth Address Section */}
+        <div className="mb-6 p-4 bg-muted border border-privacy/20 rounded-[16px]">
+          <div className="flex items-center gap-2 mb-3">
+            <Key className="w-5 h-5 text-privacy" />
+            <h2 className="text-body1 text-foreground">Your Stealth Address</h2>
+          </div>
+
+          {!wallet.connected ? (
+            <div className="text-center py-4">
+              <p className="text-body2 text-gray mb-3">
+                Connect your wallet to generate a private stealth address
+              </p>
+              <button
+                onClick={() => setVisible(true)}
+                className={cn(
+                  "inline-flex items-center gap-2 px-4 py-2 rounded-[10px]",
+                  "bg-privacy/20 hover:bg-privacy/30 border border-privacy/30",
+                  "text-body2 text-privacy transition-colors"
+                )}
+              >
+                <Wallet className="w-4 h-4" />
+                Connect Wallet
+              </button>
+            </div>
+          ) : !keys ? (
+            <div className="text-center py-4">
+              <p className="text-body2 text-gray mb-3">
+                Sign a message to derive your private zVault keys
+              </p>
+              {error && (
+                <p className="text-caption text-red-400 mb-3">{error}</p>
+              )}
+              <button
+                onClick={deriveKeys}
+                disabled={isLoading}
+                className={cn(
+                  "inline-flex items-center gap-2 px-4 py-2 rounded-[10px]",
+                  "bg-privacy hover:bg-privacy/80 disabled:bg-gray/30",
+                  "text-body2 text-background disabled:text-gray transition-colors"
+                )}
+              >
+                <Key className="w-4 h-4" />
+                {isLoading ? "Signing..." : "Sign to Derive Keys"}
+              </button>
+            </div>
+          ) : (
+            <div>
+              {/* Show registered name if available */}
+              {registeredName && (
+                <div className="flex items-center gap-2 p-3 bg-privacy/10 border border-privacy/30 rounded-[10px] mb-3">
+                  <Tag className="w-4 h-4 text-privacy" />
+                  <span className="text-body2-semibold text-privacy">
+                    {formatName(registeredName)}
+                  </span>
+                  <button
+                    onClick={() => copy(formatName(registeredName))}
+                    className="ml-auto p-1.5 rounded-[6px] bg-privacy/10 hover:bg-privacy/20 transition-colors"
+                    title="Copy .zkey name"
+                  >
+                    {copied ? (
+                      <Check className="w-3 h-3 text-green-400" />
+                    ) : (
+                      <Copy className="w-3 h-3 text-privacy" />
+                    )}
+                  </button>
+                </div>
+              )}
+
+              {/* Stealth address */}
+              <div className="flex items-center gap-2 p-3 bg-background/50 rounded-[10px] mb-2">
+                <code className="flex-1 text-caption font-mono text-privacy truncate">
+                  {shortAddress}
+                </code>
+                <button
+                  onClick={() => copy(stealthAddressEncoded || "")}
+                  className={cn(
+                    "p-2 rounded-[6px] transition-colors",
+                    "bg-privacy/10 hover:bg-privacy/20"
+                  )}
+                  title="Copy stealth address"
+                >
+                  {copied ? (
+                    <Check className="w-4 h-4 text-green-400" />
+                  ) : (
+                    <Copy className="w-4 h-4 text-privacy" />
+                  )}
+                </button>
+              </div>
+
+              {/* Name registration */}
+              {!registeredName && !showNameInput && (
+                <button
+                  onClick={() => setShowNameInput(true)}
+                  className="flex items-center gap-2 text-caption text-privacy hover:text-privacy/80 transition-colors mt-2"
+                >
+                  <Tag className="w-3 h-3" />
+                  Register a .zkey name
+                </button>
+              )}
+
+              {showNameInput && (
+                <div className="mt-3 p-3 bg-background/50 rounded-[10px] border border-gray/20">
+                  <div className="flex items-center gap-2 mb-2">
+                    <input
+                      type="text"
+                      value={nameInput}
+                      onChange={(e) => setNameInput(e.target.value.toLowerCase())}
+                      placeholder="yourname"
+                      className={cn(
+                        "flex-1 px-3 py-2 bg-muted border rounded-[8px]",
+                        "text-body2 text-foreground placeholder:text-gray",
+                        "outline-none transition-colors",
+                        nameValidationError
+                          ? "border-red-500/50"
+                          : "border-gray/30 focus:border-privacy/50"
+                      )}
+                    />
+                    <span className="text-body2 text-gray">.zkey</span>
+                  </div>
+                  {nameValidationError && (
+                    <p className="text-caption text-red-400 mb-2">{nameValidationError}</p>
+                  )}
+                  {nameError && (
+                    <p className="text-caption text-red-400 mb-2">{nameError}</p>
+                  )}
+                  <div className="flex gap-2">
+                    <button
+                      onClick={handleRegisterName}
+                      disabled={isRegistering || !nameInput || !!nameValidationError}
+                      className={cn(
+                        "flex-1 flex items-center justify-center gap-2 px-3 py-2 rounded-[8px]",
+                        "bg-privacy hover:bg-privacy/80 text-background",
+                        "disabled:bg-gray/30 disabled:text-gray disabled:cursor-not-allowed",
+                        "transition-colors text-caption"
+                      )}
+                    >
+                      {isRegistering ? (
+                        <>
+                          <Loader2 className="w-3 h-3 animate-spin" />
+                          Registering...
+                        </>
+                      ) : (
+                        <>
+                          <Tag className="w-3 h-3" />
+                          Register
+                        </>
+                      )}
+                    </button>
+                    <button
+                      onClick={() => {
+                        setShowNameInput(false);
+                        setNameInput("");
+                      }}
+                      className="px-3 py-2 rounded-[8px] bg-gray/20 hover:bg-gray/30 text-gray-light text-caption transition-colors"
+                    >
+                      Cancel
+                    </button>
+                  </div>
+                </div>
+              )}
+
+              <p className="text-caption text-gray mt-2">
+                Share this address to receive private payments. Only you can claim funds sent here.
+              </p>
+            </div>
+          )}
         </div>
 
         {/* Feature Cards Grid */}

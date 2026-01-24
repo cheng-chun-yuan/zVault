@@ -1,4 +1,3 @@
-"use strict";
 /**
  * Taproot address utilities for zVault
  *
@@ -6,49 +5,8 @@
  * The deposit address is derived from the commitment, ensuring
  * cryptographic binding between the BTC deposit and the claim.
  */
-var __createBinding = (this && this.__createBinding) || (Object.create ? (function(o, m, k, k2) {
-    if (k2 === undefined) k2 = k;
-    var desc = Object.getOwnPropertyDescriptor(m, k);
-    if (!desc || ("get" in desc ? !m.__esModule : desc.writable || desc.configurable)) {
-      desc = { enumerable: true, get: function() { return m[k]; } };
-    }
-    Object.defineProperty(o, k2, desc);
-}) : (function(o, m, k, k2) {
-    if (k2 === undefined) k2 = k;
-    o[k2] = m[k];
-}));
-var __setModuleDefault = (this && this.__setModuleDefault) || (Object.create ? (function(o, v) {
-    Object.defineProperty(o, "default", { enumerable: true, value: v });
-}) : function(o, v) {
-    o["default"] = v;
-});
-var __importStar = (this && this.__importStar) || (function () {
-    var ownKeys = function(o) {
-        ownKeys = Object.getOwnPropertyNames || function (o) {
-            var ar = [];
-            for (var k in o) if (Object.prototype.hasOwnProperty.call(o, k)) ar[ar.length] = k;
-            return ar;
-        };
-        return ownKeys(o);
-    };
-    return function (mod) {
-        if (mod && mod.__esModule) return mod;
-        var result = {};
-        if (mod != null) for (var k = ownKeys(mod), i = 0; i < k.length; i++) if (k[i] !== "default") __createBinding(result, mod, k[i]);
-        __setModuleDefault(result, mod);
-        return result;
-    };
-})();
-Object.defineProperty(exports, "__esModule", { value: true });
-exports.deriveTaprootAddress = deriveTaprootAddress;
-exports.verifyTaprootAddress = verifyTaprootAddress;
-exports.createP2TRScriptPubkey = createP2TRScriptPubkey;
-exports.parseP2TRScriptPubkey = parseP2TRScriptPubkey;
-exports.isValidBitcoinAddress = isValidBitcoinAddress;
-exports.getInternalKey = getInternalKey;
-exports.createCustomInternalKey = createCustomInternalKey;
-const crypto_1 = require("./crypto");
-const bech32 = __importStar(require("bech32"));
+import { taggedHash, hexToBytes } from "./crypto";
+import * as bech32 from "bech32";
 // zVault internal key (x-only pubkey)
 // In production, this should be the FROST threshold key
 // Using a test key for demonstration
@@ -66,9 +24,9 @@ const INTERNAL_KEY_HEX = "79be667ef9dcbbac55a06295ce870b07029bfcdb2dce28d959f281
  * @param internalKey - Optional custom internal key (x-only, 32 bytes)
  * @returns Taproot address (bc1p... or tb1p...)
  */
-async function deriveTaprootAddress(commitment, network = "testnet", internalKey) {
+export async function deriveTaprootAddress(commitment, network = "testnet", internalKey) {
     // Use provided internal key or default
-    const key = internalKey || (0, crypto_1.hexToBytes)(INTERNAL_KEY_HEX);
+    const key = internalKey || hexToBytes(INTERNAL_KEY_HEX);
     if (key.length !== 32) {
         throw new Error("Internal key must be 32 bytes (x-only)");
     }
@@ -76,7 +34,7 @@ async function deriveTaprootAddress(commitment, network = "testnet", internalKey
     const tweakInput = new Uint8Array(64);
     tweakInput.set(key, 0);
     tweakInput.set(commitment, 32);
-    const tweak = await (0, crypto_1.taggedHash)("TapTweak", tweakInput);
+    const tweak = await taggedHash("TapTweak", tweakInput);
     // For a full implementation, we would add tweak * G to the internal key
     // This requires secp256k1 point arithmetic
     // For now, we use a simplified approach that still provides binding
@@ -105,7 +63,7 @@ async function deriveTaprootAddress(commitment, network = "testnet", internalKey
  * @param internalKey - Optional internal key
  * @returns true if address matches expected derivation
  */
-async function verifyTaprootAddress(address, commitment, internalKey) {
+export async function verifyTaprootAddress(address, commitment, internalKey) {
     try {
         // Decode address
         const decoded = bech32.bech32m.decode(address);
@@ -130,7 +88,7 @@ async function verifyTaprootAddress(address, commitment, internalKey) {
  * @param outputKey - 32-byte output key (x-only)
  * @returns Script pubkey bytes (OP_1 <32-byte key>)
  */
-function createP2TRScriptPubkey(outputKey) {
+export function createP2TRScriptPubkey(outputKey) {
     if (outputKey.length !== 32) {
         throw new Error("Output key must be 32 bytes");
     }
@@ -147,7 +105,7 @@ function createP2TRScriptPubkey(outputKey) {
  * @param scriptPubkey - Script pubkey bytes
  * @returns Output key or null if not P2TR
  */
-function parseP2TRScriptPubkey(scriptPubkey) {
+export function parseP2TRScriptPubkey(scriptPubkey) {
     if (scriptPubkey.length !== 34)
         return null;
     if (scriptPubkey[0] !== 0x51)
@@ -159,7 +117,7 @@ function parseP2TRScriptPubkey(scriptPubkey) {
 /**
  * Validate a Bitcoin address format
  */
-function isValidBitcoinAddress(address) {
+export function isValidBitcoinAddress(address) {
     try {
         // Bech32m (Taproot)
         if (address.startsWith("bc1p") || address.startsWith("tb1p")) {
@@ -225,13 +183,13 @@ function arraysEqual(a, b) {
  * Get the internal key used by zVault
  * In production, this would be the FROST threshold public key
  */
-function getInternalKey() {
-    return (0, crypto_1.hexToBytes)(INTERNAL_KEY_HEX);
+export function getInternalKey() {
+    return hexToBytes(INTERNAL_KEY_HEX);
 }
 /**
  * Set a custom internal key (for testing or custom deployments)
  */
-function createCustomInternalKey(key) {
+export function createCustomInternalKey(key) {
     if (key.length !== 32) {
         throw new Error("Internal key must be 32 bytes (x-only pubkey)");
     }

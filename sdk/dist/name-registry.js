@@ -1,4 +1,3 @@
-"use strict";
 /**
  * Optional .zkey Name Registry for zVault
  *
@@ -24,26 +23,12 @@
  * const deposit = await sendToName(connection, "albert", 100000n);
  * ```
  */
-Object.defineProperty(exports, "__esModule", { value: true });
-exports.NAME_REGISTRY_SEED = exports.NAME_REGEX = exports.MAX_NAME_LENGTH = void 0;
-exports.isValidName = isValidName;
-exports.normalizeName = normalizeName;
-exports.hashName = hashName;
-exports.formatZkeyName = formatZkeyName;
-exports.buildRegisterNameData = buildRegisterNameData;
-exports.buildUpdateNameData = buildUpdateNameData;
-exports.buildTransferNameData = buildTransferNameData;
-exports.deriveNameRegistryPDA = deriveNameRegistryPDA;
-exports.parseNameEntry = parseNameEntry;
-exports.entryToStealthAddress = entryToStealthAddress;
-exports.isNameAvailable = isNameAvailable;
-exports.getNameValidationError = getNameValidationError;
-const sha256_1 = require("@noble/hashes/sha256");
+import { sha256 } from "@noble/hashes/sha256";
 // ========== Constants ==========
 /** Maximum name length (excluding .zkey suffix) */
-exports.MAX_NAME_LENGTH = 32;
+export const MAX_NAME_LENGTH = 32;
 /** Allowed characters in names */
-exports.NAME_REGEX = /^[a-z0-9_]{1,32}$/;
+export const NAME_REGEX = /^[a-z0-9_]{1,32}$/;
 // ========== Name Utilities ==========
 /**
  * Validate a name format
@@ -56,8 +41,8 @@ exports.NAME_REGEX = /^[a-z0-9_]{1,32}$/;
  * @param name - The name to validate
  * @returns True if valid
  */
-function isValidName(name) {
-    return exports.NAME_REGEX.test(name);
+export function isValidName(name) {
+    return NAME_REGEX.test(name);
 }
 /**
  * Normalize a name (lowercase, trim, remove .zkey suffix)
@@ -65,7 +50,7 @@ function isValidName(name) {
  * @param name - The name to normalize
  * @returns Normalized name
  */
-function normalizeName(name) {
+export function normalizeName(name) {
     let normalized = name.toLowerCase().trim();
     // Remove .zkey suffix if present
     if (normalized.endsWith(".zkey")) {
@@ -79,13 +64,13 @@ function normalizeName(name) {
  * @param name - The name (will be normalized)
  * @returns SHA256 hash of the normalized name
  */
-function hashName(name) {
+export function hashName(name) {
     const normalized = normalizeName(name);
     if (!isValidName(normalized)) {
         throw new Error(`Invalid name "${name}". Must be 1-32 lowercase letters, numbers, or underscores.`);
     }
     const encoder = new TextEncoder();
-    return (0, sha256_1.sha256)(encoder.encode(normalized));
+    return sha256(encoder.encode(normalized));
 }
 /**
  * Format a name with .zkey suffix
@@ -93,7 +78,7 @@ function hashName(name) {
  * @param name - The name
  * @returns Name with .zkey suffix
  */
-function formatZkeyName(name) {
+export function formatZkeyName(name) {
     const normalized = normalizeName(name);
     return `${normalized}.zkey`;
 }
@@ -106,7 +91,7 @@ function formatZkeyName(name) {
  * @param viewingPubKey - X25519 viewing public key (32 bytes)
  * @returns Instruction data bytes
  */
-function buildRegisterNameData(name, spendingPubKey, viewingPubKey) {
+export function buildRegisterNameData(name, spendingPubKey, viewingPubKey) {
     const normalized = normalizeName(name);
     if (!isValidName(normalized)) {
         throw new Error(`Invalid name: ${name}`);
@@ -141,7 +126,7 @@ function buildRegisterNameData(name, spendingPubKey, viewingPubKey) {
  * @param viewingPubKey - New X25519 viewing public key (32 bytes)
  * @returns Instruction data bytes
  */
-function buildUpdateNameData(name, spendingPubKey, viewingPubKey) {
+export function buildUpdateNameData(name, spendingPubKey, viewingPubKey) {
     const nameHash = hashName(name);
     if (spendingPubKey.length !== 33) {
         throw new Error("Spending public key must be 33 bytes");
@@ -162,12 +147,12 @@ function buildUpdateNameData(name, spendingPubKey, viewingPubKey) {
  * @param name - The name to transfer
  * @returns Instruction data bytes (just the name hash)
  */
-function buildTransferNameData(name) {
+export function buildTransferNameData(name) {
     return hashName(name);
 }
 // ========== PDA Derivation ==========
 /** Seed for name registry PDAs */
-exports.NAME_REGISTRY_SEED = "zkey";
+export const NAME_REGISTRY_SEED = "zkey";
 /**
  * Derive the PDA for a name registry entry
  *
@@ -175,7 +160,7 @@ exports.NAME_REGISTRY_SEED = "zkey";
  * @param programId - The program ID
  * @returns PDA address and bump seed
  */
-function deriveNameRegistryPDA(name, programId) {
+export function deriveNameRegistryPDA(name, programId) {
     // Note: This is a placeholder - actual implementation would use
     // @solana/web3.js PublicKey.findProgramAddressSync
     const nameHash = hashName(name);
@@ -197,7 +182,7 @@ function deriveNameRegistryPDA(name, programId) {
  * @param data - Raw account data
  * @returns Parsed name entry
  */
-function parseNameEntry(data) {
+export function parseNameEntry(data) {
     if (data.length < 179) {
         return null;
     }
@@ -226,7 +211,7 @@ function parseNameEntry(data) {
 /**
  * Create a stealth meta-address from a name entry
  */
-function entryToStealthAddress(entry) {
+export function entryToStealthAddress(entry) {
     return {
         spendingPubKey: entry.spendingPubKey,
         viewingPubKey: entry.viewingPubKey,
@@ -239,7 +224,7 @@ function entryToStealthAddress(entry) {
  * @param name - The name to check
  * @returns True if available
  */
-function isNameAvailable(name) {
+export function isNameAvailable(name) {
     // Validate format first
     if (!isValidName(normalizeName(name))) {
         return false;
@@ -251,15 +236,15 @@ function isNameAvailable(name) {
 /**
  * Format error message for invalid names
  */
-function getNameValidationError(name) {
+export function getNameValidationError(name) {
     const normalized = normalizeName(name);
     if (normalized.length === 0) {
         return "Name cannot be empty";
     }
-    if (normalized.length > exports.MAX_NAME_LENGTH) {
-        return `Name cannot exceed ${exports.MAX_NAME_LENGTH} characters`;
+    if (normalized.length > MAX_NAME_LENGTH) {
+        return `Name cannot exceed ${MAX_NAME_LENGTH} characters`;
     }
-    if (!exports.NAME_REGEX.test(normalized)) {
+    if (!NAME_REGEX.test(normalized)) {
         return "Name can only contain lowercase letters, numbers, and underscores";
     }
     return null;
