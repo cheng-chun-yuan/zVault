@@ -8,8 +8,8 @@ use pinocchio::{
     instruction::{Seed, Signer},
     program_error::ProgramError,
     pubkey::{find_program_address, Pubkey},
-    sysvars::rent::Rent,
-    ProgramResult, Sysvar,
+    sysvars::{rent::Rent, Sysvar},
+    ProgramResult,
 };
 
 use crate::state::{ViewingKeyRegistry, VIEWING_KEY_REGISTRY_DISCRIMINATOR};

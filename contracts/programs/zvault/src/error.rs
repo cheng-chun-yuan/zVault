@@ -90,6 +90,12 @@ pub enum ZVaultError {
 
     #[error("Invalid account data")]
     InvalidAccountData = 6027,
+
+    #[error("Invalid stealth OP_RETURN data")]
+    InvalidStealthOpReturn = 6028,
+
+    #[error("Stealth data not found in transaction")]
+    StealthDataNotFound = 6029,
 }
 
 impl From<ZVaultError> for ProgramError {

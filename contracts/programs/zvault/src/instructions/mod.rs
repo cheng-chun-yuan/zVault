@@ -30,6 +30,7 @@ pub mod announce_stealth_v2;
 pub mod register_viewing_key;
 pub mod delegate_viewing_key;
 pub mod register_name;
+pub mod verify_stealth_deposit;
 
 pub use initialize::*;
 pub use claim::*;
@@ -43,3 +44,4 @@ pub use announce_stealth_v2::*;
 pub use register_viewing_key::*;
 pub use delegate_viewing_key::*;
 pub use register_name::*;
+pub use verify_stealth_deposit::*;

@@ -58,6 +58,9 @@ pub const ID: Pubkey = [
 /// - REGISTER_NAME (17): Register "alice.zkey"
 /// - UPDATE_NAME (18): Update keys for a name
 /// - TRANSFER_NAME (19): Transfer name ownership
+///
+/// Direct stealth deposit:
+/// - VERIFY_STEALTH_DEPOSIT (20): Combine deposit verification + stealth announcement
 pub mod instruction {
     pub const INITIALIZE: u8 = 0;
     // Discriminators 1-3 removed (record_deposit, claim_direct, mint_to_commitment)
@@ -79,6 +82,8 @@ pub mod instruction {
     pub const REGISTER_NAME: u8 = 17;
     pub const UPDATE_NAME: u8 = 18;
     pub const TRANSFER_NAME: u8 = 19;
+    // Direct stealth deposit (combined verify + announce)
+    pub const VERIFY_STEALTH_DEPOSIT: u8 = 20;
 }
 
 entrypoint!(process_instruction);
@@ -147,6 +152,10 @@ pub fn process_instruction(
         }
         instruction::TRANSFER_NAME => {
             instructions::process_transfer_name(program_id, accounts, data)
+        }
+        // Direct stealth deposit
+        instruction::VERIFY_STEALTH_DEPOSIT => {
+            instructions::process_verify_stealth_deposit(program_id, accounts, data)
         }
         _ => Err(ProgramError::InvalidInstructionData),
     }
@@ -235,6 +244,8 @@ mod tests {
             instruction::REGISTER_NAME,
             instruction::UPDATE_NAME,
             instruction::TRANSFER_NAME,
+            // Direct stealth deposit
+            instruction::VERIFY_STEALTH_DEPOSIT,
         ];
 
         for (i, &d1) in discriminators.iter().enumerate() {

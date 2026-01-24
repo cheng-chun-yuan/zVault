@@ -23,7 +23,7 @@ cluster = "devnet"
 wallet = "~/.config/solana/johnny.json"
 
 [workspace]
-# Note: zVault-pinocchio is excluded because it's not an Anchor program
+# Note: programs/zvault is excluded because it's a Pinocchio program (not Anchor)
 members = ["programs/zVault", "programs/btc-light-client"]
 
 [scripts]

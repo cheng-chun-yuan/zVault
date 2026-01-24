@@ -4,6 +4,10 @@
 
 use pinocchio::program_error::ProgramError;
 
+use crate::instructions::verify_stealth_deposit::{
+    StealthOpReturnData, STEALTH_OP_RETURN_MAGIC, STEALTH_OP_RETURN_SIZE, STEALTH_OP_RETURN_SIZE_V1,
+};
+
 /// OP_RETURN opcode
 pub const OP_RETURN: u8 = 0x6a;
 
@@ -151,6 +155,37 @@ impl<'a> TxOutput<'a> {
         commitment.copy_from_slice(&self.script_pubkey[2..2 + COMMITMENT_SIZE]);
         Some(commitment)
     }
+
+    /// Check if this is a stealth OP_RETURN (starts with magic byte 0x7A)
+    /// Supports both V2 (99 bytes) and V1 (142 bytes) formats.
+    pub fn is_stealth_op_return(&self) -> bool {
+        if !self.is_op_return() || self.script_pubkey.len() < 3 {
+            return false;
+        }
+
+        let push_len = self.script_pubkey[1] as usize;
+        // Accept both V2 (99 bytes) and V1 (142 bytes) sizes
+        if self.script_pubkey.len() < 2 + push_len || push_len < STEALTH_OP_RETURN_SIZE {
+            return false;
+        }
+
+        // Check magic byte
+        self.script_pubkey[2] == STEALTH_OP_RETURN_MAGIC
+    }
+
+    /// Get raw OP_RETURN data (after opcode and push length)
+    pub fn get_op_return_data(&self) -> Option<&'a [u8]> {
+        if !self.is_op_return() || self.script_pubkey.len() < 2 {
+            return None;
+        }
+
+        let push_len = self.script_pubkey[1] as usize;
+        if self.script_pubkey.len() < 2 + push_len {
+            return None;
+        }
+
+        Some(&self.script_pubkey[2..2 + push_len])
+    }
 }
 
 /// Parsed Bitcoin transaction (minimal, zero-copy where possible)
@@ -265,6 +300,20 @@ impl<'a> ParsedTransaction<'a> {
         for output in self.outputs() {
             if !output.is_op_return() && output.value > 0 {
                 return Some(output);
+            }
+        }
+        None
+    }
+
+    /// Find stealth OP_RETURN and parse stealth data
+    pub fn find_stealth_op_return(&self) -> Option<StealthOpReturnData> {
+        for output in self.outputs() {
+            if output.is_stealth_op_return() {
+                if let Some(data) = output.get_op_return_data() {
+                    if let Ok(stealth_data) = StealthOpReturnData::parse(data) {
+                        return Some(stealth_data);
+                    }
+                }
             }
         }
         None
