@@ -1,0 +1,27 @@
+[package]
+name = "zVault-pinocchio"
+version = "0.1.0"
+description = "zVault - Privacy-preserving BTC to Solana bridge (Pinocchio)"
+edition = "2021"
+
+[lib]
+crate-type = ["cdylib", "lib"]
+name = "zVault_pinocchio"
+
+[features]
+default = []
+testing = []
+idl-build = []
+
+[dependencies]
+pinocchio = "0.9"
+pinocchio-token = "0.4"
+pinocchio-system = "0.3"
+pinocchio-associated-token-account = "0.3"
+solana-bn254 = "~2.1"
+thiserror = "2.0"
+num-derive = "0.4"
+
+[dev-dependencies]
+mollusk-svm = "0.0.13"
+solana-sdk = "2.1"

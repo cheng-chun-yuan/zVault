@@ -1,0 +1,20 @@
+[package]
+name = "btc-light-client"
+version = "0.1.0"
+description = "Simple Bitcoin Light Client for Solana - Permissionless header relay"
+edition = "2021"
+
+[lib]
+crate-type = ["cdylib", "lib"]
+name = "btc_light_client"
+
+[features]
+no-entrypoint = []
+no-idl = []
+no-log-ix-name = []
+cpi = ["no-entrypoint"]
+default = []
+idl-build = ["anchor-lang/idl-build"]
+
+[dependencies]
+anchor-lang = "0.31.0"

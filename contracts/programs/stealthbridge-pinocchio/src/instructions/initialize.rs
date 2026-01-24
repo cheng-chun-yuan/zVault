@@ -1,0 +1,211 @@
+//! Initialize instruction - sets up the zVault pool
+
+use pinocchio::{
+    account_info::AccountInfo,
+    instruction::{Seed, Signer},
+    program_error::ProgramError,
+    pubkey::{find_program_address, Pubkey},
+    sysvars::{clock::Clock, rent::Rent, Sysvar},
+    ProgramResult,
+};
+
+use crate::constants::{MAX_DEPOSIT_SATS, MIN_DEPOSIT_SATS, TOKEN_2022_PROGRAM_ID};
+use crate::error::ZVaultError;
+use crate::state::{CommitmentTree, PoolState, POOL_STATE_DISCRIMINATOR};
+
+/// Initialize instruction data
+pub struct InitializeData {
+    pub pool_bump: u8,
+    pub tree_bump: u8,
+}
+
+impl InitializeData {
+    pub fn from_bytes(data: &[u8]) -> Result<Self, ProgramError> {
+        if data.len() < 2 {
+            return Err(ProgramError::InvalidInstructionData);
+        }
+        Ok(Self {
+            pool_bump: data[0],
+            tree_bump: data[1],
+        })
+    }
+}
+
+/// Initialize accounts
+pub struct InitializeAccounts<'a> {
+    pub pool_state: &'a AccountInfo,
+    pub commitment_tree: &'a AccountInfo,
+    pub sbbtc_mint: &'a AccountInfo,
+    pub pool_vault: &'a AccountInfo,
+    pub frost_vault: &'a AccountInfo,
+    pub privacy_cash_pool: &'a AccountInfo,
+    pub authority: &'a AccountInfo,
+    pub system_program: &'a AccountInfo,
+}
+
+impl<'a> InitializeAccounts<'a> {
+    pub fn from_accounts(accounts: &'a [AccountInfo]) -> Result<Self, ProgramError> {
+        if accounts.len() < 8 {
+            return Err(ProgramError::NotEnoughAccountKeys);
+        }
+
+        let pool_state = &accounts[0];
+        let commitment_tree = &accounts[1];
+        let sbbtc_mint = &accounts[2];
+        let pool_vault = &accounts[3];
+        let frost_vault = &accounts[4];
+        let privacy_cash_pool = &accounts[5];
+        let authority = &accounts[6];
+        let system_program = &accounts[7];
+
+        // Validate authority is signer
+        if !authority.is_signer() {
+            return Err(ProgramError::MissingRequiredSignature);
+        }
+
+        Ok(Self {
+            pool_state,
+            commitment_tree,
+            sbbtc_mint,
+            pool_vault,
+            frost_vault,
+            privacy_cash_pool,
+            authority,
+            system_program,
+        })
+    }
+}
+
+/// Create account via CPI to system program using pinocchio-system
+fn create_pda_account<'a>(
+    payer: &'a AccountInfo,
+    pda_account: &'a AccountInfo,
+    _system_program: &'a AccountInfo,
+    program_id: &Pubkey,
+    lamports: u64,
+    space: u64,
+    signer_seeds: &[&[u8]],
+) -> ProgramResult {
+    // Use pinocchio-system CreateAccount helper
+    let create_account = pinocchio_system::instructions::CreateAccount {
+        from: payer,
+        to: pda_account,
+        lamports,
+        space,
+        owner: program_id,
+    };
+
+    let seeds: Vec<Seed> = signer_seeds.iter().map(|s| Seed::from(*s)).collect();
+    let signer = Signer::from(&seeds[..]);
+
+    create_account.invoke_signed(&[signer])
+}
+
+/// Initialize the zVault pool
+pub fn process_initialize(
+    program_id: &Pubkey,
+    accounts: &[AccountInfo],
+    data: &[u8],
+) -> ProgramResult {
+    let accounts = InitializeAccounts::from_accounts(accounts)?;
+    let _ix_data = InitializeData::from_bytes(data)?;
+
+    // Validate sbbtc_mint is owned by Token-2022
+    let token_2022_id = Pubkey::from(TOKEN_2022_PROGRAM_ID);
+    let mint_owner = accounts.sbbtc_mint.owner();
+    if mint_owner != &token_2022_id {
+        return Err(ProgramError::InvalidAccountOwner);
+    }
+
+    // Verify pool_state PDA
+    let pool_seeds: &[&[u8]] = &[PoolState::SEED];
+    let (expected_pool_pda, pool_bump) = find_program_address(pool_seeds, program_id);
+    if accounts.pool_state.key() != &expected_pool_pda {
+        return Err(ProgramError::InvalidSeeds);
+    }
+
+    // Verify commitment_tree PDA
+    let tree_seeds: &[&[u8]] = &[CommitmentTree::SEED];
+    let (expected_tree_pda, tree_bump) = find_program_address(tree_seeds, program_id);
+    if accounts.commitment_tree.key() != &expected_tree_pda {
+        return Err(ProgramError::InvalidSeeds);
+    }
+
+    // Get rent for account sizes
+    let rent = Rent::get()?;
+    let pool_lamports = rent.minimum_balance(PoolState::LEN);
+    let tree_lamports = rent.minimum_balance(CommitmentTree::LEN);
+
+    // Check if pool_state already exists
+    let pool_data_len = accounts.pool_state.data_len();
+
+    if pool_data_len > 0 {
+        // Account exists, check if initialized
+        let pool_data = accounts.pool_state.try_borrow_data()?;
+        if pool_data[0] == POOL_STATE_DISCRIMINATOR {
+            return Err(ZVaultError::AlreadyInitialized.into());
+        }
+    } else {
+        // Create pool_state PDA
+        let pool_bump_bytes = [pool_bump];
+        let pool_signer_seeds: &[&[u8]] = &[PoolState::SEED, &pool_bump_bytes];
+
+        create_pda_account(
+            accounts.authority,
+            accounts.pool_state,
+            accounts.system_program,
+            program_id,
+            pool_lamports,
+            PoolState::LEN as u64,
+            pool_signer_seeds,
+        )?;
+    }
+
+    // Check if commitment_tree already exists
+    let tree_data_len = accounts.commitment_tree.data_len();
+
+    if tree_data_len == 0 {
+        // Create commitment_tree PDA
+        let tree_bump_bytes = [tree_bump];
+        let tree_signer_seeds: &[&[u8]] = &[CommitmentTree::SEED, &tree_bump_bytes];
+
+        create_pda_account(
+            accounts.authority,
+            accounts.commitment_tree,
+            accounts.system_program,
+            program_id,
+            tree_lamports,
+            CommitmentTree::LEN as u64,
+            tree_signer_seeds,
+        )?;
+    }
+
+    // Get clock for timestamp
+    let clock = Clock::get()?;
+
+    // Initialize pool state
+    {
+        let mut pool_data = accounts.pool_state.try_borrow_mut_data()?;
+        let pool = PoolState::init(&mut pool_data)?;
+
+        pool.bump = pool_bump;
+        pool.authority.copy_from_slice(accounts.authority.key().as_ref());
+        pool.sbbtc_mint.copy_from_slice(accounts.sbbtc_mint.key().as_ref());
+        pool.privacy_cash_pool.copy_from_slice(accounts.privacy_cash_pool.key().as_ref());
+        pool.pool_vault.copy_from_slice(accounts.pool_vault.key().as_ref());
+        pool.frost_vault.copy_from_slice(accounts.frost_vault.key().as_ref());
+        pool.set_min_deposit(MIN_DEPOSIT_SATS);
+        pool.set_max_deposit(MAX_DEPOSIT_SATS);
+        pool.set_last_update(clock.unix_timestamp);
+        pool.set_paused(false);
+    }
+
+    // Initialize commitment tree
+    {
+        let mut tree_data = accounts.commitment_tree.try_borrow_mut_data()?;
+        let tree = CommitmentTree::init(&mut tree_data)?;
+        tree.bump = tree_bump;
+    }
+
+    Ok(())
+}
