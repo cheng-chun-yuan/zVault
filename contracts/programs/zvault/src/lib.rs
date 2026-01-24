@@ -57,6 +57,11 @@ pub mod instruction {
     pub const VERIFY_DEPOSIT: u8 = 8;
     pub const ANNOUNCE_STEALTH_V2: u8 = 16;
 
+    // Name registry
+    pub const REGISTER_NAME: u8 = 17;
+    pub const UPDATE_NAME: u8 = 18;
+    pub const TRANSFER_NAME: u8 = 19;
+
     // Demo/testing (admin only)
     pub const ADD_DEMO_NOTE: u8 = 21;
     pub const ADD_DEMO_STEALTH: u8 = 22;
@@ -96,6 +101,16 @@ pub fn process_instruction(
         }
         instruction::ANNOUNCE_STEALTH_V2 => {
             instructions::process_announce_stealth_v2(program_id, accounts, data)
+        }
+        // Name registry
+        instruction::REGISTER_NAME => {
+            instructions::process_register_name(program_id, accounts, data)
+        }
+        instruction::UPDATE_NAME => {
+            instructions::process_update_name(program_id, accounts, data)
+        }
+        instruction::TRANSFER_NAME => {
+            instructions::process_transfer_name(program_id, accounts, data)
         }
         // Demo/testing
         instruction::ADD_DEMO_NOTE => {
@@ -173,6 +188,9 @@ mod tests {
             instruction::SET_PAUSED,
             instruction::VERIFY_DEPOSIT,
             instruction::ANNOUNCE_STEALTH_V2,
+            instruction::REGISTER_NAME,
+            instruction::UPDATE_NAME,
+            instruction::TRANSFER_NAME,
             instruction::ADD_DEMO_NOTE,
             instruction::ADD_DEMO_STEALTH,
         ];

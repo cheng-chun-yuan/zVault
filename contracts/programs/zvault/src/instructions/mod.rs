@@ -30,6 +30,9 @@ pub mod announce_stealth_v2;
 pub mod add_demo_note;
 pub mod add_demo_stealth;
 
+// Name registry
+pub mod register_name;
+
 // Re-exports
 pub use initialize::*;
 pub use verify_deposit::*;
@@ -39,3 +42,4 @@ pub use complete_redemption::*;
 pub use announce_stealth_v2::*;
 pub use add_demo_note::*;
 pub use add_demo_stealth::*;
+pub use register_name::*;

@@ -22,6 +22,7 @@ pub mod redemption;
 pub mod btc_light_client;
 pub mod block_header;
 pub mod stealth_announcement;
+pub mod name_registry;
 
 // Re-exports
 pub use pool::*;
@@ -32,3 +33,4 @@ pub use redemption::*;
 pub use btc_light_client::*;
 pub use block_header::*;
 pub use stealth_announcement::*;
+pub use name_registry::*;
