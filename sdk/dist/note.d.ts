@@ -184,26 +184,6 @@ export interface NoteData {
     amount: bigint;
 }
 /**
- * Compute commitment from note data
- *
- * NOTE: In Noir mode, commitments are computed INSIDE the Noir circuit.
- * This function is a placeholder that throws an error to guide developers.
- *
- * For Noir: Pass note data directly to your Noir circuit, which will compute:
- *   commitment = poseidon2(nullifier, secret, amount)
- *
- * @deprecated Use Noir circuit for commitment computation
- */
-export declare function computeCommitment(note: NoteData | Note): bigint;
-/**
- * Compute nullifier hash (for double-spend prevention)
- *
- * NOTE: In Noir mode, nullifier hashes are computed INSIDE the Noir circuit.
- *
- * @deprecated Use Noir circuit for nullifier hash computation
- */
-export declare function computeNullifierHash(nullifier: bigint): bigint;
-/**
  * Create a simple note (alias for generateNote but returns NoteData)
  *
  * Use this to generate note data for Noir circuit inputs.

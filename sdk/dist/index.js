@@ -37,88 +37,54 @@
  * await client.sendStealth(output2, recipientPubKey);
  * ```
  */
+// ==========================================================================
 // Cryptographic utilities
-export { randomFieldElement, bigintToBytes, bytesToBigint, hexToBytes, bytesToHex, sha256Hash, doubleSha256, taggedHash, BN254_FIELD_PRIME, 
-// Legacy exports (throw errors directing to Noir)
-poseidonHash1, poseidonHash2, } from "./crypto";
+// ==========================================================================
+export { randomFieldElement, bigintToBytes, bytesToBigint, hexToBytes, bytesToHex, sha256Hash, doubleSha256, taggedHash, BN254_FIELD_PRIME, } from "./crypto";
 // Grumpkin curve operations (Noir's embedded curve for efficient in-circuit ECDH)
-export { 
-// Constants
-GRUMPKIN_FIELD_PRIME, GRUMPKIN_ORDER, GRUMPKIN_GENERATOR, GRUMPKIN_INFINITY, 
-// Point operations
-pointAdd, pointDouble, pointMul, pointNegate, isOnCurve, isInfinity, 
-// Serialization
-scalarFromBytes, scalarToBytes, pointToBytes, pointFromBytes, pointToCompressedBytes, pointFromCompressedBytes, pubKeyToBytes, pubKeyFromBytes, 
-// Key generation
-generateKeyPair as generateGrumpkinKeyPair, deriveKeyPairFromSeed as deriveGrumpkinKeyPairFromSeed, 
-// ECDH
-ecdh as grumpkinEcdh, ecdhSharedSecret as grumpkinEcdhSharedSecret, } from "./grumpkin";
-// RAILGUN-style key derivation (Solana wallet → spending/viewing keys)
-export { 
-// Key derivation
-deriveKeysFromWallet, deriveKeysFromSignature, deriveKeysFromSeed, SPENDING_KEY_DERIVATION_MESSAGE, 
-// Stealth meta-address
-createStealthMetaAddress, serializeStealthMetaAddress, deserializeStealthMetaAddress, parseStealthMetaAddress, encodeStealthMetaAddress, decodeStealthMetaAddress, 
-// Viewing key delegation
-createDelegatedViewKey, serializeDelegatedViewKey, deserializeDelegatedViewKey, isDelegatedKeyValid, hasPermission, ViewPermissions, 
-// Key security
-constantTimeCompare, clearKey, clearZVaultKeys, clearDelegatedViewKey, extractViewOnlyBundle, } from "./keys";
+export { GRUMPKIN_FIELD_PRIME, GRUMPKIN_ORDER, GRUMPKIN_GENERATOR, GRUMPKIN_INFINITY, pointAdd, pointDouble, pointMul, pointNegate, isOnCurve, isInfinity, scalarFromBytes, scalarToBytes, pointToBytes, pointFromBytes, pointToCompressedBytes, pointFromCompressedBytes, pubKeyToBytes, pubKeyFromBytes, generateKeyPair as generateGrumpkinKeyPair, deriveKeyPairFromSeed as deriveGrumpkinKeyPairFromSeed, ecdh as grumpkinEcdh, ecdhSharedSecret as grumpkinEcdhSharedSecret, } from "./grumpkin";
+// RAILGUN-style key derivation (Solana wallet -> spending/viewing keys)
+export { deriveKeysFromWallet, deriveKeysFromSignature, deriveKeysFromSeed, SPENDING_KEY_DERIVATION_MESSAGE, createStealthMetaAddress, serializeStealthMetaAddress, deserializeStealthMetaAddress, parseStealthMetaAddress, encodeStealthMetaAddress, decodeStealthMetaAddress, createDelegatedViewKey, serializeDelegatedViewKey, deserializeDelegatedViewKey, isDelegatedKeyValid, hasPermission, ViewPermissions, constantTimeCompare, clearKey, clearZVaultKeys, clearDelegatedViewKey, extractViewOnlyBundle, } from "./keys";
 // Poseidon2 hash utilities (matches Noir circuits)
 export { poseidon2Hash, deriveNotePubKey, computeCommitmentV2, computeNullifierV2, hashNullifier, computeCommitmentV1, computeNullifierHashV1, BN254_SCALAR_FIELD, } from "./poseidon2";
-// Optional .zkey name registry
-export { 
-// Name utilities
-isValidName, normalizeName, hashName, formatZkeyName, getNameValidationError, 
-// Instruction builders
-buildRegisterNameData, buildUpdateNameData, buildTransferNameData, 
-// PDA derivation
-NAME_REGISTRY_SEED, deriveNameRegistryPDA, 
-// Parsing
-parseNameEntry, entryToStealthAddress, 
-// Constants
-MAX_NAME_LENGTH, NAME_REGEX, } from "./name-registry";
+// ==========================================================================
 // Note (shielded commitment) utilities
+// ==========================================================================
 export { generateNote, createNoteFromSecrets, updateNoteWithHashes, serializeNote, deserializeNote, noteHasComputedHashes, formatBtc, parseBtc, 
 // Deterministic derivation (HD-style)
 deriveNote, deriveNotes, deriveMasterKey, deriveNoteFromMaster, estimateSeedStrength, 
-// Poseidon-based commitment computation (browser compatible)
-computeCommitment, computeNullifierHash, createNote, initPoseidon, isPoseidonReady, prepareWithdrawal, 
+// Simple note creation
+createNote, initPoseidon, isPoseidonReady, prepareWithdrawal, 
 // V2 Note types (dual-key ECDH support)
 createNoteV2, updateNoteV2WithHashes, serializeNoteV2, deserializeNoteV2, noteV2HasComputedHashes, } from "./note";
-// Poseidon hash utilities (browser compatible via circomlibjs)
-export { poseidon, poseidon1, poseidon2, poseidon3, poseidon4, computeZeroHashes, FIELD_MODULUS, } from "./poseidon";
+// ==========================================================================
 // Merkle tree utilities
+// ==========================================================================
 export { createMerkleProof, createMerkleProofFromBigints, proofToNoirFormat, proofToOnChainFormat, createEmptyMerkleProof, leafIndexToPathIndices, pathIndicesToLeafIndex, validateMerkleProofStructure, TREE_DEPTH, ROOT_HISTORY_SIZE, MAX_LEAVES, ZERO_VALUE, } from "./merkle";
+// ==========================================================================
 // Taproot address utilities
+// ==========================================================================
 export { deriveTaprootAddress, verifyTaprootAddress, createP2TRScriptPubkey, parseP2TRScriptPubkey, isValidBitcoinAddress, getInternalKey, createCustomInternalKey, } from "./taproot";
+// ==========================================================================
 // Claim link utilities
-export { createClaimLink, parseClaimLink, isValidClaimLinkFormat, shortenClaimLink, createProtectedClaimLink, extractAmountFromClaimLink, 
-// Simple claim link encoding (frontend compatible)
-encodeClaimLink, decodeClaimLink, generateClaimUrl, parseClaimUrl, } from "./claim-link";
+// ==========================================================================
+export { createClaimLink, parseClaimLink, isValidClaimLinkFormat, shortenClaimLink, createProtectedClaimLink, extractAmountFromClaimLink, encodeClaimLink, decodeClaimLink, generateClaimUrl, parseClaimUrl, } from "./claim-link";
+// ==========================================================================
 // ChadBuffer utilities (for SPV verification)
+// ==========================================================================
 export { uploadTransactionToBuffer, closeBuffer, readBufferData, fetchRawTransaction, fetchMerkleProof, prepareVerifyDeposit, CHADBUFFER_PROGRAM_ID, } from "./chadbuffer";
+// ==========================================================================
 // Verify deposit helpers
+// ==========================================================================
 export { verifyDeposit, derivePoolStatePDA, deriveLightClientPDA, deriveBlockHeaderPDA, deriveCommitmentTreePDA, deriveDepositRecordPDA, buildMerkleProof, } from "./verify-deposit";
-// Stealth address utilities (Dual-key ECDH: X25519 viewing + Grumpkin spending)
-export { 
-// Type guard
-isWalletAdapter, 
-// Core functions (accept wallet adapter OR ZVaultKeys)
-createStealthDeposit, scanAnnouncements, prepareClaimInputs, 
-// On-chain announcement parsing
-parseStealthAnnouncement, announcementToScanFormat, 
-// Constants
-STEALTH_ANNOUNCEMENT_SIZE, STEALTH_ANNOUNCEMENT_DISCRIMINATOR, } from "./stealth";
+// ==========================================================================
+// Stealth address utilities (Dual-key ECDH)
+// ==========================================================================
+export { isWalletAdapter, createStealthDeposit, scanAnnouncements, prepareClaimInputs, parseStealthAnnouncement, announcementToScanFormat, STEALTH_ANNOUNCEMENT_SIZE, STEALTH_ANNOUNCEMENT_DISCRIMINATOR, } from "./stealth";
+// ==========================================================================
 // Direct stealth deposit (combined BTC deposit + stealth announcement)
-export { 
-// Sender functions
-prepareStealthDeposit, buildStealthOpReturn, parseStealthOpReturn, 
-// On-chain verification
-verifyStealthDeposit, deriveStealthAnnouncementPDA, 
-// Constants
-STEALTH_OP_RETURN_MAGIC, STEALTH_OP_RETURN_VERSION, STEALTH_OP_RETURN_SIZE, VERIFY_STEALTH_DEPOSIT_DISCRIMINATOR, } from "./stealth-deposit";
-// History / Audit utilities
-export { HistoryManager, MockRecursiveProver, } from "./history";
+// ==========================================================================
+export { prepareStealthDeposit, buildStealthOpReturn, parseStealthOpReturn, verifyStealthDeposit, deriveStealthAnnouncementPDA, STEALTH_OP_RETURN_MAGIC, STEALTH_OP_RETURN_VERSION, STEALTH_OP_RETURN_SIZE, VERIFY_STEALTH_DEPOSIT_DISCRIMINATOR, } from "./stealth-deposit";
 // ==========================================================================
 // Core utilities (Platform-agnostic)
 // ==========================================================================
@@ -126,13 +92,7 @@ export { EsploraClient, esploraTestnet, esploraMainnet, } from "./core/esplora";
 // ==========================================================================
 // Deposit Watcher (Real-time BTC deposit tracking)
 // ==========================================================================
-export { DEFAULT_WATCHER_CONFIG, serializeDeposit, deserializeDeposit, generateDepositId, 
-// Base class
-BaseDepositWatcher, 
-// Web implementation
-WebDepositWatcher, createWebWatcher, 
-// React Native implementation
-NativeDepositWatcher, createNativeWatcher, setAsyncStorage, } from "./watcher";
+export { DEFAULT_WATCHER_CONFIG, serializeDeposit, deserializeDeposit, generateDepositId, BaseDepositWatcher, WebDepositWatcher, createWebWatcher, NativeDepositWatcher, createNativeWatcher, setAsyncStorage, } from "./watcher";
 // ==========================================================================
 // React Hooks (Web + React Native)
 // ==========================================================================

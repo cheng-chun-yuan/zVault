@@ -13,38 +13,6 @@ export const BN254_FIELD_PRIME =
   21888242871839275222246405745257275088548364400416034343698204186575808495617n;
 
 /**
- * Poseidon2 hash computation placeholder
- *
- * IMPORTANT: For hashes that must match Noir circuit values,
- * use the Noir circuits directly via nargo execute or noir_js.
- *
- * This function is provided for interface compatibility but
- * will throw an error - use executeNoirHash() instead.
- *
- * @deprecated Use executeNoirHash() or pass raw inputs to Noir circuits
- */
-export async function poseidonHash2(a: bigint, b: bigint): Promise<bigint> {
-  throw new Error(
-    "poseidonHash2 is not available in the SDK. " +
-      "Noir uses Poseidon2 which differs from circomlibjs Poseidon. " +
-      "For matching hashes, use the Noir circuits via nargo execute."
-  );
-}
-
-/**
- * Poseidon1 hash computation placeholder
- *
- * @deprecated Use executeNoirHash() or pass raw inputs to Noir circuits
- */
-export async function poseidonHash1(a: bigint): Promise<bigint> {
-  throw new Error(
-    "poseidonHash1 is not available in the SDK. " +
-      "Noir uses Poseidon2 which differs from circomlibjs Poseidon. " +
-      "For matching hashes, use the Noir circuits via nargo execute."
-  );
-}
-
-/**
  * Generate a random field element (< BN254 prime)
  */
 export function randomFieldElement(): bigint {

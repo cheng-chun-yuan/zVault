@@ -278,34 +278,6 @@ export function estimateSeedStrength(seed) {
 // Poseidon initialization state (for API compatibility)
 let poseidonInitialized = false;
 /**
- * Compute commitment from note data
- *
- * NOTE: In Noir mode, commitments are computed INSIDE the Noir circuit.
- * This function is a placeholder that throws an error to guide developers.
- *
- * For Noir: Pass note data directly to your Noir circuit, which will compute:
- *   commitment = poseidon2(nullifier, secret, amount)
- *
- * @deprecated Use Noir circuit for commitment computation
- */
-export function computeCommitment(note) {
-    throw new Error("computeCommitment is not available in Noir mode. " +
-        "Commitments are computed inside the Noir circuit using Poseidon2. " +
-        "Pass note data (nullifier, secret, amount) directly to your Noir circuit.");
-}
-/**
- * Compute nullifier hash (for double-spend prevention)
- *
- * NOTE: In Noir mode, nullifier hashes are computed INSIDE the Noir circuit.
- *
- * @deprecated Use Noir circuit for nullifier hash computation
- */
-export function computeNullifierHash(nullifier) {
-    throw new Error("computeNullifierHash is not available in Noir mode. " +
-        "Nullifier hashes are computed inside the Noir circuit using Poseidon2. " +
-        "Pass nullifier directly to your Noir circuit.");
-}
-/**
  * Create a simple note (alias for generateNote but returns NoteData)
  *
  * Use this to generate note data for Noir circuit inputs.

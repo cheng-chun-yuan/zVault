@@ -14,15 +14,14 @@
  * Note: This SDK uses Noir circuits with Poseidon2 hashing for ZK proofs.
  */
 import { PublicKey } from "@solana/web3.js";
-import { generateNote, formatBtc, } from "./note";
+import { formatBtc, } from "./note";
 import { createEmptyMerkleProof, TREE_DEPTH, ZERO_VALUE, leafIndexToPathIndices, } from "./merkle";
 import { deriveTaprootAddress, isValidBitcoinAddress } from "./taproot";
-import { createClaimLink, parseClaimLink } from "./claim-link";
-import { generateClaimProof, generateTransferProof, generateSplitProof, } from "./proof";
+import { parseClaimLink } from "./claim-link";
 import { bigintToBytes } from "./crypto";
 import { deposit as apiDeposit, withdraw as apiWithdraw, privateClaim as apiPrivateClaim, privateSplit as apiPrivateSplit, sendLink as apiSendLink, sendStealth as apiSendStealth, } from "./api";
 // Program ID (Solana Devnet)
-export const ZVAULT_PROGRAM_ID = new PublicKey("AtztELZfz3GHA8hFQCv7aT9Mt47Xhknv3ZCNb3fmXsgf");
+export const ZVAULT_PROGRAM_ID = new PublicKey("CBzbSQPcUXMYdmSvnA24HPZrDQPuEpq4qq2mcmErrWPR");
 /**
  * ZVault SDK Client
  *
@@ -30,7 +29,7 @@ export const ZVAULT_PROGRAM_ID = new PublicKey("AtztELZfz3GHA8hFQCv7aT9Mt47Xhknv
  *
  * ## Quick Start
  * ```typescript
- * const client = createClient(connection, 'devnet');
+ * const client = createClient(connection);
  * client.setPayer(myKeypair);
  *
  * // Generate deposit credentials
@@ -42,7 +41,7 @@ export const ZVAULT_PROGRAM_ID = new PublicKey("AtztELZfz3GHA8hFQCv7aT9Mt47Xhknv
  * ```
  */
 export class ZVaultClient {
-    constructor(connection, programId = ZVAULT_PROGRAM_ID, historyManager) {
+    constructor(connection, programId = ZVAULT_PROGRAM_ID) {
         this.connection = connection;
         this.programId = programId;
         this.merkleState = {
@@ -50,7 +49,6 @@ export class ZVaultClient {
             filledSubtrees: Array(TREE_DEPTH).fill(null).map(() => new Uint8Array(ZERO_VALUE)),
             root: new Uint8Array(ZERO_VALUE),
         };
-        this.historyManager = historyManager;
     }
     /**
      * Set the payer keypair for transactions
@@ -69,45 +67,30 @@ export class ZVaultClient {
         };
     }
     // ==========================================================================
-    // 6 Main Functions (Simplified API)
+    // 6 Main Functions
     // ==========================================================================
     /**
      * 1. DEPOSIT - Generate deposit credentials
      *
      * Creates new secrets, derives taproot address, and creates claim link.
      * User should send BTC to the taproot address externally.
-     *
-     * @param amountSats - Amount in satoshis
-     * @param network - Bitcoin network
-     * @param baseUrl - Base URL for claim link
      */
     async deposit(amountSats, network = "testnet", baseUrl) {
-        const result = await apiDeposit(amountSats, network, baseUrl);
-        if (this.historyManager) {
-            await this.historyManager.addEvent("deposit", { amount: amountSats }, new Uint8Array(0));
-        }
-        return result;
+        return apiDeposit(amountSats, network, baseUrl);
     }
     /**
      * 2. WITHDRAW - Request BTC withdrawal
      *
      * Burns sbBTC and creates redemption request. Relayer will send BTC.
-     *
-     * @param note - Note to withdraw from
-     * @param btcAddress - Bitcoin address to receive withdrawal
-     * @param withdrawAmount - Amount to withdraw (defaults to full)
      */
     async withdraw(note, btcAddress, withdrawAmount) {
         const merkleProof = this.generateMerkleProofForNote(note);
-        const result = await apiWithdraw(this.getApiConfig(), note, btcAddress, withdrawAmount, merkleProof);
-        return result;
+        return apiWithdraw(this.getApiConfig(), note, btcAddress, withdrawAmount, merkleProof);
     }
     /**
      * 3. PRIVATE_CLAIM - Claim sbBTC with ZK proof
      *
      * Claims sbBTC tokens to wallet using ZK proof of commitment ownership.
-     *
-     * @param claimLinkOrNote - Claim link URL or Note object
      */
     async privateClaim(claimLinkOrNote) {
         let note;
@@ -122,152 +105,64 @@ export class ZVaultClient {
             note = claimLinkOrNote;
         }
         const merkleProof = this.generateMerkleProofForNote(note);
-        const result = await apiPrivateClaim(this.getApiConfig(), note, merkleProof);
-        if (this.historyManager) {
-            await this.historyManager.addEvent("claim", { amount: result.amount }, new Uint8Array(0));
-        }
-        return result;
+        return apiPrivateClaim(this.getApiConfig(), note, merkleProof);
     }
     /**
      * 4. PRIVATE_SPLIT - Split one commitment into two
      *
-     * Splits an input commitment into two outputs. Returns both notes
-     * for the user to distribute via sendLink or sendStealth.
-     *
-     * @param inputNote - Note to split
-     * @param amount1 - Amount for first output
+     * Splits an input commitment into two outputs.
      */
     async privateSplit(inputNote, amount1) {
         const merkleProof = this.generateMerkleProofForNote(inputNote);
-        const result = await apiPrivateSplit(this.getApiConfig(), inputNote, amount1, merkleProof);
-        if (this.historyManager) {
-            await this.historyManager.addEvent("split", { inputAmount: inputNote.amount, amount1, amount2: inputNote.amount - amount1 }, new Uint8Array(0));
-        }
-        return result;
+        return apiPrivateSplit(this.getApiConfig(), inputNote, amount1, merkleProof);
     }
     /**
-     * 5. SEND_LINK - Create global claim link
-     *
-     * Creates a shareable URL that anyone can use to claim.
-     * No on-chain transaction - purely client-side.
-     *
-     * @param note - Note to create link for
-     * @param baseUrl - Base URL for the link
+     * 5. SEND_LINK - Create global claim link (off-chain)
      */
     sendLink(note, baseUrl) {
         return apiSendLink(note, baseUrl);
     }
     /**
      * 6. SEND_STEALTH - Send to specific recipient via dual-key ECDH
-     *
-     * Creates on-chain stealth announcement. Only recipient can claim.
-     *
-     * @param recipientMeta - Recipient's stealth meta-address (spending + viewing public keys)
-     * @param amountSats - Amount in satoshis
-     * @param leafIndex - Leaf index in tree
      */
     async sendStealth(recipientMeta, amountSats, leafIndex = 0) {
-        const result = await apiSendStealth(this.getApiConfig(), recipientMeta, amountSats, leafIndex);
-        return result;
-    }
-    /**
-     * Generate merkle proof for a note (helper)
-     */
-    generateMerkleProofForNote(note) {
-        const leafIndex = this.findLeafIndex(note.commitmentBytes);
-        if (leafIndex !== -1) {
-            return this.generateMerkleProof(leafIndex);
-        }
-        // Return empty proof if not found
-        return createEmptyMerkleProof();
+        return apiSendStealth(this.getApiConfig(), recipientMeta, amountSats, leafIndex);
     }
     // ==========================================================================
     // PDA Derivation
     // ==========================================================================
-    /**
-     * Derive pool state PDA
-     */
     derivePoolStatePDA() {
         return PublicKey.findProgramAddressSync([Buffer.from("pool_state")], this.programId);
     }
-    /**
-     * Derive light client PDA
-     */
     deriveLightClientPDA() {
         return PublicKey.findProgramAddressSync([Buffer.from("btc_light_client")], this.programId);
     }
-    /**
-     * Derive commitment tree PDA
-     */
     deriveCommitmentTreePDA() {
         return PublicKey.findProgramAddressSync([Buffer.from("commitment_tree")], this.programId);
     }
-    /**
-     * Derive block header PDA
-     */
     deriveBlockHeaderPDA(height) {
         const heightBuffer = Buffer.alloc(8);
         heightBuffer.writeBigUInt64LE(BigInt(height));
         return PublicKey.findProgramAddressSync([Buffer.from("block_header"), heightBuffer], this.programId);
     }
-    /**
-     * Derive deposit record PDA
-     */
     deriveDepositRecordPDA(txid) {
         return PublicKey.findProgramAddressSync([Buffer.from("deposit"), txid], this.programId);
     }
-    /**
-     * Derive nullifier record PDA
-     */
     deriveNullifierRecordPDA(nullifierHash) {
         return PublicKey.findProgramAddressSync([Buffer.from("nullifier"), nullifierHash], this.programId);
     }
-    /**
-     * Derive stealth announcement PDA
-     */
     deriveStealthAnnouncementPDA(commitment) {
         const commitmentBuffer = Buffer.from(commitment.toString(16).padStart(64, "0"), "hex");
         return PublicKey.findProgramAddressSync([Buffer.from("stealth"), commitmentBuffer], this.programId);
     }
     // ==========================================================================
-    // Deposit Flow
+    // Helper Methods
     // ==========================================================================
-    /**
-     * Generate deposit credentials
-     *
-     * Creates new secrets for a note. The commitment and nullifier hash
-     * will be computed by the Noir circuit during proof generation.
-     *
-     * @param amountSats - Amount in satoshis
-     * @param network - Bitcoin network
-     * @param baseUrl - Base URL for claim link
-     */
-    async generateDeposit(amountSats, network = "testnet", baseUrl) {
-        // Generate note with random secrets
-        // Note: commitment is 0n until computed by Noir circuit
-        const note = generateNote(amountSats);
-        // For Taproot address, we need a commitment
-        // In practice, compute via helper circuit or use a deterministic derivation
-        // For demo, use a hash of the secrets as placeholder
-        const placeholderCommitment = bigintToBytes((note.nullifier ^ note.secret) % (2n ** 256n));
-        const { address: taprootAddress } = await deriveTaprootAddress(placeholderCommitment, network);
-        // Generate claim link
-        const claimLink = createClaimLink(note, baseUrl);
-        if (this.historyManager) {
-            await this.historyManager.addEvent("deposit", { amount: amountSats, commitment: placeholderCommitment }, new Uint8Array(0));
-        }
-        return {
-            note,
-            taprootAddress,
-            claimLink,
-            displayAmount: formatBtc(amountSats),
-        };
-    }
     /**
      * Restore deposit credentials from a claim link
      */
     async restoreFromClaimLink(link) {
-        const note = deserializeNoteFromClaimLink(link);
+        const note = parseClaimLink(link);
         if (!note)
             return null;
         const placeholderCommitment = bigintToBytes((note.nullifier ^ note.secret) % (2n ** 256n));
@@ -279,36 +174,37 @@ export class ZVaultClient {
             displayAmount: formatBtc(note.amount),
         };
     }
-    // ==========================================================================
-    // Claim Flow
-    // ==========================================================================
-    /**
-     * Generate a claim proof for a note
-     *
-     * Call this after the deposit has been verified on-chain.
-     * The proof can then be submitted to the claim instruction.
-     */
-    async generateClaimProof(note) {
-        // Get Merkle proof for the commitment
-        const leafIndex = this.findLeafIndex(note.commitmentBytes);
-        if (leafIndex === -1) {
-            throw new Error("Commitment not found in tree. Was the deposit verified?");
-        }
-        const merkleProof = this.generateMerkleProof(leafIndex);
-        // Generate ZK proof using Noir circuit
-        const proofResult = await generateClaimProof(note, merkleProof);
-        if (this.historyManager) {
-            await this.historyManager.addEvent("claim", { nullifier: note.nullifierHashBytes, amount: note.amount }, proofResult.proof);
-        }
-        return {
-            proof: proofResult,
-            merkleProof,
-            amount: note.amount,
-        };
+    validateBtcAddress(address) {
+        return isValidBitcoinAddress(address).valid;
     }
-    /**
-     * Find leaf index for a commitment
-     */
+    validateClaimLink(link) {
+        return parseClaimLink(link) !== null;
+    }
+    // ==========================================================================
+    // Merkle State Management (for local testing)
+    // ==========================================================================
+    insertCommitment(commitment) {
+        const index = this.merkleState.leaves.length;
+        this.merkleState.leaves.push(new Uint8Array(commitment));
+        const isLeft = index % 2 === 0;
+        if (isLeft && this.merkleState.filledSubtrees[0]) {
+            this.merkleState.filledSubtrees[0] = new Uint8Array(commitment);
+        }
+        return index;
+    }
+    getMerkleRoot() {
+        return this.merkleState.root;
+    }
+    getLeafCount() {
+        return this.merkleState.leaves.length;
+    }
+    generateMerkleProofForNote(note) {
+        const leafIndex = this.findLeafIndex(note.commitmentBytes);
+        if (leafIndex !== -1) {
+            return this.generateMerkleProof(leafIndex);
+        }
+        return createEmptyMerkleProof();
+    }
     findLeafIndex(commitment) {
         for (let i = 0; i < this.merkleState.leaves.length; i++) {
             if (this.arraysEqual(this.merkleState.leaves[i], commitment)) {
@@ -317,15 +213,9 @@ export class ZVaultClient {
         }
         return -1;
     }
-    /**
-     * Generate a Merkle proof for a leaf index
-     * Note: This is a simplified implementation. In production,
-     * query the on-chain Merkle tree for accurate proofs.
-     */
     generateMerkleProof(leafIndex) {
         const pathIndices = leafIndexToPathIndices(leafIndex);
         const pathElements = [];
-        // Use filled subtrees for proof (simplified)
         for (let i = 0; i < TREE_DEPTH; i++) {
             pathElements.push(new Uint8Array(this.merkleState.filledSubtrees[i]));
         }
@@ -335,128 +225,6 @@ export class ZVaultClient {
             leafIndex,
             root: new Uint8Array(this.merkleState.root),
         };
-    }
-    // ==========================================================================
-    // Split Flow
-    // ==========================================================================
-    /**
-     * Generate a split - divide one note into two
-     *
-     * @param inputNote - Note to split
-     * @param amount1 - Amount for first output
-     * @param amount2 - Amount for second output (auto-calculated if not provided)
-     */
-    async generateSplit(inputNote, amount1, amount2) {
-        const finalAmount2 = amount2 ?? inputNote.amount - amount1;
-        if (amount1 + finalAmount2 !== inputNote.amount) {
-            throw new Error("Split amounts must equal input amount");
-        }
-        if (amount1 <= 0n || finalAmount2 <= 0n) {
-            throw new Error("Both output amounts must be positive");
-        }
-        // Generate output notes
-        const output1 = generateNote(amount1);
-        const output2 = generateNote(finalAmount2);
-        // Get Merkle proof for input
-        const leafIndex = this.findLeafIndex(inputNote.commitmentBytes);
-        if (leafIndex === -1) {
-            throw new Error("Input commitment not found in tree");
-        }
-        const merkleProof = this.generateMerkleProof(leafIndex);
-        // Generate split proof using Noir circuit
-        const proofResult = await generateSplitProof(inputNote, output1, output2, merkleProof);
-        if (this.historyManager) {
-            await this.historyManager.addEvent("split", {
-                inputNullifier: inputNote.nullifierHashBytes,
-                output1Commitment: output1.commitmentBytes,
-                output2Commitment: output2.commitmentBytes,
-            }, proofResult.proof);
-        }
-        return {
-            output1,
-            output2,
-            claimLink1: createClaimLink(output1),
-            claimLink2: createClaimLink(output2),
-            proof: proofResult,
-            inputNullifierHash: inputNote.nullifierHashBytes,
-        };
-    }
-    // ==========================================================================
-    // Transfer Flow
-    // ==========================================================================
-    /**
-     * Generate a transfer (commitment refresh)
-     *
-     * Creates a new note with new secrets but same amount.
-     * Useful for privacy enhancement.
-     */
-    async generateTransfer(inputNote) {
-        const outputNote = generateNote(inputNote.amount);
-        const leafIndex = this.findLeafIndex(inputNote.commitmentBytes);
-        if (leafIndex === -1) {
-            throw new Error("Input commitment not found in tree");
-        }
-        const merkleProof = this.generateMerkleProof(leafIndex);
-        // Generate transfer proof using Noir circuit
-        const proofResult = await generateTransferProof(inputNote, outputNote, merkleProof);
-        if (this.historyManager) {
-            await this.historyManager.addEvent("transfer", {
-                inputNullifier: inputNote.nullifierHashBytes,
-                outputCommitment: outputNote.commitmentBytes,
-            }, proofResult.proof);
-        }
-        return {
-            outputNote,
-            claimLink: createClaimLink(outputNote),
-            proof: proofResult,
-            inputNullifierHash: inputNote.nullifierHashBytes,
-        };
-    }
-    // ==========================================================================
-    // Verification Helpers
-    // ==========================================================================
-    /**
-     * Validate a BTC address
-     */
-    validateBtcAddress(address) {
-        const result = isValidBitcoinAddress(address);
-        return result.valid;
-    }
-    /**
-     * Check if claim link is valid
-     */
-    async validateClaimLink(link) {
-        const note = deserializeNoteFromClaimLink(link);
-        return note !== null;
-    }
-    // ==========================================================================
-    // State Management
-    // ==========================================================================
-    /**
-     * Insert commitment into local Merkle state
-     * (Should be synced with on-chain state)
-     */
-    insertCommitment(commitment) {
-        const index = this.merkleState.leaves.length;
-        this.merkleState.leaves.push(new Uint8Array(commitment));
-        // Update filled subtrees (simplified)
-        const isLeft = index % 2 === 0;
-        if (isLeft && this.merkleState.filledSubtrees[0]) {
-            this.merkleState.filledSubtrees[0] = new Uint8Array(commitment);
-        }
-        return index;
-    }
-    /**
-     * Get current Merkle root
-     */
-    getMerkleRoot() {
-        return this.merkleState.root;
-    }
-    /**
-     * Get leaf count
-     */
-    getLeafCount() {
-        return this.merkleState.leaves.length;
     }
     arraysEqual(a, b) {
         if (a.length !== b.length)
@@ -469,19 +237,8 @@ export class ZVaultClient {
     }
 }
 /**
- * Helper to deserialize note from claim link
- */
-function deserializeNoteFromClaimLink(link) {
-    try {
-        return parseClaimLink(link);
-    }
-    catch {
-        return null;
-    }
-}
-/**
  * Create a new ZVault client (Solana Devnet)
  */
-export function createClient(connection, historyManager) {
-    return new ZVaultClient(connection, ZVAULT_PROGRAM_ID, historyManager);
+export function createClient(connection) {
+    return new ZVaultClient(connection, ZVAULT_PROGRAM_ID);
 }
