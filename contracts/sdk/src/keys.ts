@@ -33,6 +33,7 @@ import {
   GRUMPKIN_GENERATOR,
   pubKeyToBytes,
   pubKeyFromBytes,
+  scalarToBytes,
   type GrumpkinPoint,
 } from "./grumpkin";
 
@@ -162,6 +163,8 @@ export async function deriveKeysFromWallet(
 /**
  * Derive zVault keys from a signature (for testing or custom flows)
  *
+ * SECURITY: Intermediate key material is cleared from memory after use.
+ *
  * @param signature - 64-byte Ed25519 signature
  * @param solanaPublicKey - 32-byte Solana public key
  * @returns Complete zVault key hierarchy
@@ -183,12 +186,18 @@ export function deriveKeysFromSignature(
   const spendingPrivKey = scalarFromBytes(spendingSeed);
   const spendingPubKey = pointMul(spendingPrivKey, GRUMPKIN_GENERATOR);
 
+  // Clear intermediate seed
+  clearKey(spendingSeed);
+
   // Derive viewing key: SHA256(signature || "viewing") → X25519 scalar
   const viewingSeed = sha256(
     concatBytes(signature, new TextEncoder().encode(VIEWING_KEY_DOMAIN))
   );
   // X25519 requires clamping (done by tweetnacl internally)
   const viewingKeyPair = box.keyPair.fromSecretKey(viewingSeed);
+
+  // Clear intermediate seed
+  clearKey(viewingSeed);
 
   return {
     solanaPublicKey,
@@ -318,11 +327,66 @@ export function createDelegatedViewKey(
 }
 
 /**
- * Serialize a delegated viewing key for export
+ * Serialize a delegated viewing key for export (ENCRYPTED)
+ *
+ * SECURITY: The viewing private key is encrypted using a password-derived key.
+ * Never store or transmit the unencrypted JSON.
+ *
+ * @param key - Delegated viewing key to serialize
+ * @param password - Password for encryption (optional, if not provided returns unencrypted - NOT RECOMMENDED)
+ * @returns Encrypted JSON string
  */
-export function serializeDelegatedViewKey(key: DelegatedViewKey): string {
+export function serializeDelegatedViewKey(
+  key: DelegatedViewKey,
+  password?: string
+): string {
+  if (!password) {
+    // WARNING: Unencrypted serialization - for backward compatibility only
+    console.warn(
+      "WARNING: Serializing viewing key without encryption. " +
+      "This is a security risk. Provide a password for encryption."
+    );
+    const obj = {
+      version: 1,
+      encrypted: false,
+      viewingPrivKey: bytesToHex(key.viewingPrivKey),
+      permissions: key.permissions,
+      expiresAt: key.expiresAt,
+      label: key.label,
+    };
+    return JSON.stringify(obj);
+  }
+
+  // Derive encryption key from password using SHA256
+  const passwordBytes = new TextEncoder().encode(password);
+  const salt = new Uint8Array(16);
+  crypto.getRandomValues(salt);
+
+  // Simple PBKDF: key = SHA256(password || salt)
+  const keyMaterial = concatBytes(passwordBytes, salt);
+  const encryptionKey = sha256(keyMaterial);
+
+  // Generate nonce for XOR encryption
+  const nonce = new Uint8Array(32);
+  crypto.getRandomValues(nonce);
+
+  // Encrypt viewing private key: ciphertext = privKey XOR SHA256(encryptionKey || nonce)
+  const xorKey = sha256(concatBytes(encryptionKey, nonce));
+  const encryptedPrivKey = new Uint8Array(32);
+  for (let i = 0; i < 32; i++) {
+    encryptedPrivKey[i] = key.viewingPrivKey[i] ^ xorKey[i];
+  }
+
+  // Compute MAC: SHA256(encryptionKey || encryptedPrivKey)
+  const mac = sha256(concatBytes(encryptionKey, encryptedPrivKey));
+
   const obj = {
-    viewingPrivKey: bytesToHex(key.viewingPrivKey),
+    version: 2,
+    encrypted: true,
+    salt: bytesToHex(salt),
+    nonce: bytesToHex(nonce),
+    ciphertext: bytesToHex(encryptedPrivKey),
+    mac: bytesToHex(mac),
     permissions: key.permissions,
     expiresAt: key.expiresAt,
     label: key.label,
@@ -332,11 +396,57 @@ export function serializeDelegatedViewKey(key: DelegatedViewKey): string {
 
 /**
  * Deserialize a delegated viewing key from JSON
+ *
+ * @param json - Serialized viewing key (encrypted or unencrypted)
+ * @param password - Password for decryption (required if encrypted)
+ * @returns Delegated viewing key
  */
-export function deserializeDelegatedViewKey(json: string): DelegatedViewKey {
+export function deserializeDelegatedViewKey(
+  json: string,
+  password?: string
+): DelegatedViewKey {
   const obj = JSON.parse(json);
+
+  if (!obj.encrypted || obj.version === 1) {
+    // Unencrypted format (legacy or no password provided during serialization)
+    return {
+      viewingPrivKey: hexToBytes(obj.viewingPrivKey),
+      permissions: obj.permissions,
+      expiresAt: obj.expiresAt,
+      label: obj.label,
+    };
+  }
+
+  // Encrypted format (version 2)
+  if (!password) {
+    throw new Error("Password required to decrypt viewing key");
+  }
+
+  const salt = hexToBytes(obj.salt);
+  const nonce = hexToBytes(obj.nonce);
+  const ciphertext = hexToBytes(obj.ciphertext);
+  const storedMac = hexToBytes(obj.mac);
+
+  // Derive encryption key
+  const passwordBytes = new TextEncoder().encode(password);
+  const keyMaterial = concatBytes(passwordBytes, salt);
+  const encryptionKey = sha256(keyMaterial);
+
+  // Verify MAC
+  const computedMac = sha256(concatBytes(encryptionKey, ciphertext));
+  if (!constantTimeCompare(computedMac, storedMac)) {
+    throw new Error("Invalid password or corrupted data");
+  }
+
+  // Decrypt viewing private key
+  const xorKey = sha256(concatBytes(encryptionKey, nonce));
+  const viewingPrivKey = new Uint8Array(32);
+  for (let i = 0; i < 32; i++) {
+    viewingPrivKey[i] = ciphertext[i] ^ xorKey[i];
+  }
+
   return {
-    viewingPrivKey: hexToBytes(obj.viewingPrivKey),
+    viewingPrivKey,
     permissions: obj.permissions,
     expiresAt: obj.expiresAt,
     label: obj.label,
@@ -377,11 +487,37 @@ export function constantTimeCompare(a: Uint8Array, b: Uint8Array): boolean {
 
 /**
  * Securely clear sensitive key material from memory
- * Note: JavaScript doesn't guarantee memory clearing, but this is best effort
+ *
+ * SECURITY: JavaScript doesn't guarantee memory clearing due to GC and JIT,
+ * but this provides best-effort protection by:
+ * 1. Overwriting with random data (defeats simple memory dumps)
+ * 2. Zeroing the buffer (standard practice)
+ *
+ * For maximum security, use WebAssembly or native modules.
  */
 export function clearKey(key: Uint8Array): void {
   crypto.getRandomValues(key);
   key.fill(0);
+}
+
+/**
+ * Securely clear all sensitive keys from a ZVaultKeys object
+ *
+ * Call this when you're done using the keys to minimize exposure window.
+ * Note: The spendingPrivKey is a bigint and cannot be reliably cleared in JS.
+ */
+export function clearZVaultKeys(keys: ZVaultKeys): void {
+  clearKey(keys.viewingPrivKey);
+  // Note: spendingPrivKey is a bigint, we can only set it to 0n
+  // This doesn't guarantee memory clearing but removes the reference
+  (keys as { spendingPrivKey: bigint }).spendingPrivKey = 0n;
+}
+
+/**
+ * Securely clear a delegated viewing key
+ */
+export function clearDelegatedViewKey(key: DelegatedViewKey): void {
+  clearKey(key.viewingPrivKey);
 }
 
 /**

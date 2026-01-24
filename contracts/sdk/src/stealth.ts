@@ -1,314 +1,87 @@
 /**
  * Stealth address utilities for ZVault
  *
- * V1 (Legacy): Single X25519 ECDH for both viewing and spending
- * V2 (New): Dual-key ECDH with X25519 (viewing) + Grumpkin (spending)
+ * Dual-key ECDH with X25519 (viewing) + Grumpkin (spending)
  *
- * V2 Format (148 bytes on-chain):
+ * Format (131 bytes on-chain - simplified):
  * - ephemeral_view_pub (32 bytes) - X25519 for off-chain scanning
  * - ephemeral_spend_pub (33 bytes) - Grumpkin for in-circuit ECDH
- * - encrypted_amount (8 bytes) - XOR encrypted with view shared secret
- * - encrypted_random (32 bytes) - for commitment reconstruction
+ * - amount_sats (8 bytes) - Verified BTC amount from SPV proof
  * - commitment (32 bytes) - Poseidon2 hash for Merkle tree
+ * - leaf_index (8 bytes) - Position in Merkle tree
+ * - created_at (8 bytes) - Timestamp
  *
  * Key Separation Properties:
  * - Viewing key can scan and decrypt but CANNOT derive nullifier
  * - Spending key required for nullifier derivation and proof generation
  * - Sender cannot spend (wrong ECDH → wrong commitment → not in tree)
  *
- * IMPORTANT: Noir circuits use Poseidon2 hashing which is not directly
- * available in this SDK. Hash values that must match circuits should be
- * computed via Noir circuit execution.
+ * SECURITY NOTES:
+ * - Commitment is computed using Poseidon2 (matches Noir circuits)
+ * - Amount encryption removed (public on Bitcoin blockchain anyway)
+ * - Random value removed (ephemeral key uniqueness is sufficient)
+ *
+ * KNOWN LIMITATION - CROSS-CHAIN CORRELATION:
+ * The ephemeral_view_pub appears on BOTH Bitcoin (in OP_RETURN) and Solana
+ * (in StealthAnnouncement). This creates a 1:1 linkage between the chains.
+ * To mitigate: Use fresh ephemeral keys for each deposit and consider
+ * additional privacy layers like mixers or delayed reveals.
  */
 
-import { scalarMult, box } from "tweetnacl";
-import { convertSecretKey, convertPublicKey } from "ed2curve";
-import { sha256 } from "@noble/hashes/sha256";
-import { sha256Hash, bytesToBigint, bigintToBytes, BN254_FIELD_PRIME } from "./crypto";
+import { box } from "tweetnacl";
+import { bigintToBytes, bytesToBigint, BN254_FIELD_PRIME } from "./crypto";
 import {
   generateKeyPair as generateGrumpkinKeyPair,
   ecdh as grumpkinEcdh,
-  pointMul,
-  scalarFromBytes,
-  scalarToBytes,
   pointToCompressedBytes,
   pointFromCompressedBytes,
-  GRUMPKIN_GENERATOR,
   type GrumpkinPoint,
 } from "./grumpkin";
-import type { StealthMetaAddress, ZVaultKeys } from "./keys";
+import type { StealthMetaAddress, ZVaultKeys, WalletSignerAdapter } from "./keys";
+import { deriveKeysFromWallet } from "./keys";
+import {
+  deriveNotePubKey,
+  computeCommitmentV2 as poseidon2ComputeCommitment,
+  computeNullifierV2 as poseidon2ComputeNullifier,
+} from "./poseidon2";
+
+// ========== Type Guard ==========
+
+/**
+ * Type guard to distinguish between WalletSignerAdapter and ZVaultKeys
+ */
+export function isWalletAdapter(source: unknown): source is WalletSignerAdapter {
+  return (
+    typeof source === "object" &&
+    source !== null &&
+    "signMessage" in source &&
+    typeof (source as WalletSignerAdapter).signMessage === "function"
+  );
+}
 
 // ========== Types ==========
 
-export interface StealthKeys {
-  viewPrivKey: Uint8Array; // 32 bytes - X25519 private
-  viewPubKey: Uint8Array; // 32 bytes - X25519 public
-}
-
+/**
+ * Stealth Deposit with dual-key ECDH (SIMPLIFIED FORMAT)
+ *
+ * Uses X25519 for fast off-chain scanning and Grumpkin for in-circuit spending proofs.
+ *
+ * SECURITY IMPROVEMENTS:
+ * - Removed encrypted_amount: BTC amount is public on Bitcoin blockchain anyway
+ * - Removed encrypted_random: Fresh ephemeral keys provide sufficient uniqueness
+ * - Commitment uses Poseidon2 (matches Noir circuits exactly)
+ */
 export interface StealthDeposit {
-  ephemeralPubKey: Uint8Array; // 32 bytes - for ECDH
-  encryptedAmount: Uint8Array; // 8 bytes - XOR encrypted
-  recipientHint: Uint8Array;   // 4 bytes - first 4 bytes of recipient pubkey hash
-  // Derived secrets for use with Noir circuits
-  nullifier: bigint;
-  secret: bigint;
-  amount: bigint;
-  // Note: commitment is NOT computed here - use Noir circuit
-}
-
-// ========== Option A: Ed25519 → X25519 (Linked to Solana) ==========
-
-export function solanaKeyToX25519(ed25519PrivKey: Uint8Array): StealthKeys {
-  const viewPrivKey = convertSecretKey(ed25519PrivKey);
-  const keyPair = box.keyPair.fromSecretKey(viewPrivKey!);
-  return { viewPrivKey: viewPrivKey!, viewPubKey: keyPair.publicKey };
-}
-
-export function solanaPubKeyToX25519(ed25519PubKey: Uint8Array): Uint8Array {
-  return convertPublicKey(ed25519PubKey)!;
-}
-
-// ========== Option B: Native X25519 (Maximum Privacy) ==========
-
-export function generateStealthKeys(): StealthKeys {
-  const keyPair = box.keyPair();
-  return { viewPrivKey: keyPair.secretKey, viewPubKey: keyPair.publicKey };
-}
-
-// ========== Core Functions ==========
-
-/**
- * Computes a shared secret using ECDH.
- * If no private key is provided, a new one is generated on the fly (ephemeral).
- */
-export function getStealthSharedSecret(
-  recipientPubKey: Uint8Array,
-  senderPrivKey?: Uint8Array
-): { sharedSecret: Uint8Array; senderPubKey: Uint8Array } {
-  let priv = senderPrivKey;
-  let pub: Uint8Array;
-
-  if (priv) {
-    pub = box.keyPair.fromSecretKey(priv).publicKey;
-  } else {
-    const keyPair = box.keyPair();
-    priv = keyPair.secretKey;
-    pub = keyPair.publicKey;
-  }
-
-  const sharedSecret = scalarMult(priv, recipientPubKey);
-  return { sharedSecret, senderPubKey: pub };
-}
-
-/**
- * Derive deterministic values from shared secret using SHA256
- *
- * This KDF generates field elements that will be used as inputs to Noir circuits.
- * The circuits compute Poseidon2 hashes internally.
- */
-function deriveStealthSecrets(
-  sharedSecret: Uint8Array,
-  amount: bigint
-): { nullifier: bigint; secret: bigint; amountKey: bigint } {
-  // Derive nullifier from H(sharedSecret || "nullifier" || amount)
-  const encoder = new TextEncoder();
-  const amountBytes = bigintToBytes(amount);
-
-  const nullifierInput = new Uint8Array(32 + 9 + 32);
-  nullifierInput.set(sharedSecret, 0);
-  nullifierInput.set(encoder.encode("nullifier"), 32);
-  nullifierInput.set(amountBytes, 41);
-  const nullifierHash = sha256Hash(nullifierInput);
-  const nullifier = bytesToBigint(nullifierHash) % BN254_FIELD_PRIME;
-
-  // Derive secret from H(sharedSecret || "secret" || amount)
-  const secretInput = new Uint8Array(32 + 6 + 32);
-  secretInput.set(sharedSecret, 0);
-  secretInput.set(encoder.encode("secret"), 32);
-  secretInput.set(amountBytes, 38);
-  const secretHash = sha256Hash(secretInput);
-  const secret = bytesToBigint(secretHash) % BN254_FIELD_PRIME;
-
-  // Derive amount encryption key from H(sharedSecret || "amount")
-  const amountKeyInput = new Uint8Array(32 + 6);
-  amountKeyInput.set(sharedSecret, 0);
-  amountKeyInput.set(encoder.encode("amount"), 32);
-  const amountKeyHash = sha256Hash(amountKeyInput);
-  const amountKey = bytesToBigint(amountKeyHash);
-
-  return { nullifier, secret, amountKey };
-}
-
-/**
- * Create a stealth deposit (minimal 40-byte format)
- *
- * Generates ephemeral keypair, derives secrets via ECDH + KDF.
- * The nullifier and secret are used as inputs to Noir circuits
- * which compute the Poseidon2-based commitment internally.
- *
- * No recipient hint is included for maximum privacy - recipient
- * must try ECDH on all announcements to find their deposits.
- */
-export function createStealthDeposit(
-  recipientX25519Pub: Uint8Array,
-  amountSats: bigint
-): StealthDeposit {
-  const { sharedSecret, senderPubKey: ephemeralPubKey } =
-    getStealthSharedSecret(recipientX25519Pub);
-
-  const { nullifier, secret, amountKey } = deriveStealthSecrets(
-    sharedSecret,
-    amountSats
-  );
-
-  // Encrypt amount with XOR
-  const encryptedAmount = bigintToBytes8(
-    amountSats ^ (amountKey & 0xffffffffffffffffn)
-  );
-
-  // Generate recipient hint: first 4 bytes of recipient pubkey hash
-  const recipientHash = sha256Hash(recipientX25519Pub);
-  const recipientHint = recipientHash.slice(0, 4);
-
-  return {
-    ephemeralPubKey,
-    encryptedAmount,
-    recipientHint,
-    nullifier,
-    secret,
-    amount: amountSats,
-  };
-}
-
-/**
- * Create a stealth deposit for a Solana recipient
- */
-export function createStealthDepositForSolana(
-  recipientSolanaPubKey: Uint8Array,
-  amountSats: bigint
-): StealthDeposit {
-  return createStealthDeposit(
-    solanaPubKeyToX25519(recipientSolanaPubKey),
-    amountSats
-  );
-}
-
-/**
- * Scan announcements for deposits belonging to us
- *
- * Maximum privacy mode: tries ECDH on ALL announcements (no hint filtering).
- * This prevents any linkability between deposits to the same recipient.
- *
- * To verify ownership, the function checks if the decrypted amount is
- * reasonable (> 0 and < 21M BTC). For full verification, use a Noir
- * helper circuit to compute and compare Poseidon2 commitments.
- */
-export function scanAnnouncements(
-  viewPrivKey: Uint8Array,
-  _viewPubKey: Uint8Array, // kept for API compatibility
-  announcements: {
-    ephemeralPubKey: Uint8Array;
-    encryptedAmount: Uint8Array;
-  }[]
-): { nullifier: bigint; secret: bigint; amount: bigint }[] {
-  const found: { nullifier: bigint; secret: bigint; amount: bigint }[] = [];
-
-  const MAX_SATS = 21_000_000n * 100_000_000n; // 21M BTC in sats
-
-  for (const ann of announcements) {
-    // ECDH with our view private key (try all - no hint filtering)
-    const { sharedSecret } = getStealthSharedSecret(
-      ann.ephemeralPubKey,
-      viewPrivKey
-    );
-
-    // Decrypt amount
-    const encoder = new TextEncoder();
-    const amountKeyInput = new Uint8Array(32 + 6);
-    amountKeyInput.set(sharedSecret, 0);
-    amountKeyInput.set(encoder.encode("amount"), 32);
-    const amountKeyHash = sha256Hash(amountKeyInput);
-    const amountKey = bytesToBigint(amountKeyHash);
-    const amount =
-      bytes8ToBigint(ann.encryptedAmount) ^ (amountKey & 0xffffffffffffffffn);
-
-    // Basic sanity check: amount should be reasonable
-    // If wrong key, decrypted amount will likely be garbage (huge number)
-    if (amount <= 0n || amount > MAX_SATS) {
-      continue; // Probably not ours
-    }
-
-    // Derive secrets
-    const { nullifier, secret } = deriveStealthSecrets(sharedSecret, amount);
-
-    // Note: We cannot verify commitment here without Poseidon2
-    // The caller should verify via Noir circuit if needed
-    found.push({ nullifier, secret, amount });
-  }
-
-  return found;
-}
-
-/**
- * Scan announcements using Solana keypair
- */
-export function scanAnnouncementsWithSolana(
-  solanaPrivKey: Uint8Array,
-  announcements: {
-    ephemeralPubKey: Uint8Array;
-    encryptedAmount: Uint8Array;
-  }[]
-) {
-  const { viewPrivKey, viewPubKey } = solanaKeyToX25519(solanaPrivKey);
-  return scanAnnouncements(viewPrivKey, viewPubKey, announcements);
-}
-
-// ========== Utilities ==========
-
-function bigintToBytes8(value: bigint): Uint8Array {
-  const bytes = new Uint8Array(8);
-  let v = value;
-  for (let i = 7; i >= 0; i--) {
-    bytes[i] = Number(v & 0xffn);
-    v >>= 8n;
-  }
-  return bytes;
-}
-
-function bytes8ToBigint(bytes: Uint8Array): bigint {
-  let result = 0n;
-  for (let i = 0; i < 8; i++) {
-    result = (result << 8n) | BigInt(bytes[i]);
-  }
-  return result;
-}
-
-// arraysEqual removed - no longer needed without recipient hint filtering
-
-// ========================================================================
-// V2: Dual-Key ECDH (X25519 Viewing + Grumpkin Spending)
-// ========================================================================
-
-// ========== V2 Types ==========
-
-/**
- * V2 Stealth Deposit with dual-key ECDH
- * Uses X25519 for fast off-chain scanning and Grumpkin for in-circuit spending proofs
- */
-export interface StealthDepositV2 {
   /** X25519 ephemeral public key (32 bytes) - for viewing/scanning */
   ephemeralViewPub: Uint8Array;
 
   /** Grumpkin ephemeral public key (33 bytes compressed) - for spending proofs */
   ephemeralSpendPub: Uint8Array;
 
-  /** XOR-encrypted amount (8 bytes) - decrypted with view shared secret */
-  encryptedAmount: Uint8Array;
+  /** Amount in satoshis (stored directly - no encryption needed) */
+  amountSats: bigint;
 
-  /** XOR-encrypted random value (32 bytes) - for commitment reconstruction */
-  encryptedRandom: Uint8Array;
-
-  /** Commitment for Merkle tree (32 bytes) - Poseidon2(notePubKey, amount, random) */
+  /** Commitment for Merkle tree (32 bytes) - Poseidon2(notePubKey, amount) */
   commitment: Uint8Array;
 
   /** Unix timestamp when created */
@@ -316,14 +89,13 @@ export interface StealthDepositV2 {
 }
 
 /**
- * Scanned note from V2 announcement (viewing key can decrypt)
+ * Scanned note from announcement (viewing key can decrypt)
+ *
+ * SIMPLIFIED: random field removed - ephemeral key uniqueness is sufficient
  */
-export interface ScannedNoteV2 {
-  /** Decrypted amount in satoshis */
+export interface ScannedNote {
+  /** Amount in satoshis (from verified BTC transaction) */
   amount: bigint;
-
-  /** Decrypted random value for commitment */
-  random: bigint;
 
   /** Grumpkin ephemeral public key (needed for spending) */
   ephemeralSpendPub: GrumpkinPoint;
@@ -337,186 +109,165 @@ export interface ScannedNoteV2 {
 
 /**
  * Prepared claim inputs for ZK proof (requires spending key)
+ *
+ * SIMPLIFIED: random field removed - commitment is Poseidon2(notePubKey, amount)
  */
-export interface ClaimInputsV2 {
+export interface ClaimInputs {
   // Private inputs for ZK proof
   spendingPrivKey: bigint;
   ephemeralSpendPub: GrumpkinPoint;
   amount: bigint;
-  random: bigint;
   leafIndex: number;
   merklePath: bigint[];
   merkleIndices: number[];
 
   // Public inputs
   merkleRoot: bigint;
-  nullifierHash: bigint;
+  nullifier: bigint; // Single hash, not double-hashed
   amountPub: bigint;
 }
 
-// ========== V2 Domain Separators ==========
-
-/** Domain separator for note public key derivation */
-const DOMAIN_NPK = 0x6e706bn; // "npk" as field element
-
-/** Domain separator for random value encryption */
-const DOMAIN_RANDOM = "random";
-
-// ========== V2 Sender Functions ==========
+// ========== On-chain Announcement ==========
 
 /**
- * Create a V2 stealth deposit with dual-key ECDH
+ * Size of StealthAnnouncement account on-chain (SIMPLIFIED FORMAT)
+ *
+ * Layout (131 bytes):
+ * - discriminator (1 byte)
+ * - bump (1 byte)
+ * - ephemeral_view_pub (32 bytes)
+ * - ephemeral_spend_pub (33 bytes)
+ * - amount_sats (8 bytes) - verified from BTC tx, stored directly
+ * - commitment (32 bytes)
+ * - leaf_index (8 bytes)
+ * - created_at (8 bytes)
+ *
+ * SAVINGS: 24 bytes (from 155) by removing encrypted_amount and encrypted_random
+ */
+export const STEALTH_ANNOUNCEMENT_SIZE = 131;
+
+/** Discriminator for StealthAnnouncement */
+export const STEALTH_ANNOUNCEMENT_DISCRIMINATOR = 0x08;
+
+/**
+ * Parsed stealth announcement from on-chain data (SIMPLIFIED)
+ */
+export interface OnChainStealthAnnouncement {
+  ephemeralViewPub: Uint8Array;
+  ephemeralSpendPub: Uint8Array;
+  amountSats: bigint;
+  commitment: Uint8Array;
+  leafIndex: number;
+  createdAt: number;
+}
+
+// ========== Sender Functions ==========
+
+/**
+ * Create a stealth deposit with dual-key ECDH
  *
  * Generates two ephemeral keypairs:
  * - X25519: For viewing/scanning (fast off-chain ECDH)
  * - Grumpkin: For spending proofs (efficient in-circuit ECDH)
  *
+ * SIMPLIFIED FORMAT:
+ * - No encrypted_amount: BTC amount is public on Bitcoin blockchain
+ * - No encrypted_random: Fresh ephemeral keys provide uniqueness
+ * - Commitment uses Poseidon2: commitment = Poseidon2(notePubKey, amount)
+ *
+ * @param source - Wallet adapter OR pre-derived ZVaultKeys (recipient's keys)
  * @param recipientMeta - Recipient's stealth meta-address
- * @param amount - Amount in satoshis
+ * @param amountSats - Amount in satoshis
  * @returns Stealth deposit data for on-chain announcement
  */
-export function createStealthDepositV2(
+export async function createStealthDeposit(
   recipientMeta: StealthMetaAddress,
-  amount: bigint
-): StealthDepositV2 {
+  amountSats: bigint
+): Promise<StealthDeposit> {
   // Parse recipient's public keys
-  const recipientViewPub = recipientMeta.viewingPubKey;
   const recipientSpendPub = pointFromCompressedBytes(recipientMeta.spendingPubKey);
 
   // Generate ephemeral X25519 keypair for viewing
   const ephemeralView = box.keyPair();
-  const viewShared = scalarMult(ephemeralView.secretKey, recipientViewPub);
 
   // Generate ephemeral Grumpkin keypair for spending
   const ephemeralSpend = generateGrumpkinKeyPair();
   const spendShared = grumpkinEcdh(ephemeralSpend.privKey, recipientSpendPub);
 
-  // Generate random value for commitment
-  const random = randomFieldElement();
-  const randomBytes = bigintToBytes(random);
+  // Compute note public key using Poseidon2
+  // notePubKey = Poseidon2(spendShared.x, spendShared.y, DOMAIN_NPK)
+  const notePubKey = deriveNotePubKey(spendShared.x, spendShared.y);
 
-  // Derive encryption key from view shared secret
-  const encKey = sha256(viewShared);
-
-  // Encrypt amount (first 8 bytes of encKey)
-  const encryptedAmount = xorBytes(
-    bigintToBytes8(amount),
-    encKey.slice(0, 8)
-  );
-
-  // Encrypt random (next 32 bytes via additional hash)
-  const randomEncKey = sha256(concatBytes(encKey, textToBytes(DOMAIN_RANDOM)));
-  const encryptedRandom = xorBytes(randomBytes, randomEncKey);
-
-  // Compute note public key from spend shared secret
-  // notePubKey = H(spendShared.x, spendShared.y, DOMAIN_NPK)
-  // NOTE: This should be Poseidon2 for circuit compatibility
-  // For now, we use a placeholder - actual commitment computed by Noir
-  const notePubKeyInput = concatBytes(
-    bigintToBytes(spendShared.x),
-    bigintToBytes(spendShared.y),
-    bigintToBytes(BigInt(DOMAIN_NPK))
-  );
-  const notePubKeyPlaceholder = sha256(notePubKeyInput);
-
-  // Compute commitment placeholder
-  // commitment = H(notePubKey, amount, random)
-  // NOTE: Actual Poseidon2 commitment computed by recipient via Noir
-  const commitmentInput = concatBytes(
-    notePubKeyPlaceholder,
-    bigintToBytes(amount),
-    randomBytes
-  );
-  const commitment = sha256(commitmentInput);
+  // Compute commitment using Poseidon2 (SIMPLIFIED: no random)
+  // commitment = Poseidon2(notePubKey, amount)
+  const commitmentBigint = poseidon2ComputeCommitment(notePubKey, amountSats, 0n);
+  const commitment = bigintToBytes(commitmentBigint);
 
   return {
     ephemeralViewPub: ephemeralView.publicKey,
     ephemeralSpendPub: pointToCompressedBytes(ephemeralSpend.pubKey),
-    encryptedAmount,
-    encryptedRandom,
+    amountSats,
     commitment,
     createdAt: Date.now(),
   };
 }
 
-/**
- * Create V2 stealth deposit from ZVaultKeys
- */
-export function createStealthDepositV2FromKeys(
-  recipientKeys: ZVaultKeys,
-  amount: bigint
-): StealthDepositV2 {
-  const meta: StealthMetaAddress = {
-    spendingPubKey: pointToCompressedBytes(recipientKeys.spendingPubKey),
-    viewingPubKey: recipientKeys.viewingPubKey,
-  };
-  return createStealthDepositV2(meta, amount);
-}
-
-// ========== V2 Recipient Scanning (Viewing Key Only) ==========
+// ========== Recipient Scanning (Viewing Key Only) ==========
 
 /**
- * Scan V2 announcements using viewing key only
+ * Scan announcements using viewing key only
  *
- * This function can decrypt amounts and random values but CANNOT:
+ * SIMPLIFIED FORMAT:
+ * - Amount is stored directly (not encrypted)
+ * - No random field to decrypt
+ * - Viewing key validates ownership via ECDH + commitment verification
+ *
+ * This function can see amounts but CANNOT:
  * - Derive the nullifier (requires spending key)
  * - Generate spending proofs
  *
- * @param viewingPrivKey - X25519 viewing private key
+ * @param source - Wallet adapter OR pre-derived ZVaultKeys
  * @param announcements - Array of on-chain announcements
  * @returns Array of found notes (ready for claim preparation)
  */
-export function scanAnnouncementsV2(
-  viewingPrivKey: Uint8Array,
+export async function scanAnnouncements(
+  source: WalletSignerAdapter | ZVaultKeys,
   announcements: {
     ephemeralViewPub: Uint8Array;
     ephemeralSpendPub: Uint8Array;
-    encryptedAmount: Uint8Array;
-    encryptedRandom: Uint8Array;
+    amountSats: bigint;
     commitment: Uint8Array;
     leafIndex: number;
   }[]
-): ScannedNoteV2[] {
-  const found: ScannedNoteV2[] = [];
+): Promise<ScannedNote[]> {
+  // Get keys from source
+  const keys = isWalletAdapter(source) ? await deriveKeysFromWallet(source) : source;
+
+  const found: ScannedNote[] = [];
   const MAX_SATS = 21_000_000n * 100_000_000n; // 21M BTC in sats
 
   for (const ann of announcements) {
     try {
-      // X25519 ECDH with viewing key
-      const viewShared = scalarMult(viewingPrivKey, ann.ephemeralViewPub);
-
-      // Derive encryption key
-      const encKey = sha256(viewShared);
-
-      // Decrypt amount
-      const decryptedAmountBytes = xorBytes(
-        ann.encryptedAmount,
-        encKey.slice(0, 8)
-      );
-      const amount = bytes8ToBigint(decryptedAmountBytes);
-
-      // Basic sanity check
-      if (amount <= 0n || amount > MAX_SATS) {
-        continue; // Probably not ours (garbage decryption)
+      // Basic sanity check on amount
+      if (ann.amountSats <= 0n || ann.amountSats > MAX_SATS) {
+        continue;
       }
-
-      // Decrypt random
-      const randomEncKey = sha256(concatBytes(encKey, textToBytes(DOMAIN_RANDOM)));
-      const decryptedRandomBytes = xorBytes(ann.encryptedRandom, randomEncKey);
-      const random = bytesToBigint(decryptedRandomBytes) % BN254_FIELD_PRIME;
 
       // Parse ephemeral spend pubkey
       const ephemeralSpendPub = pointFromCompressedBytes(ann.ephemeralSpendPub);
 
+      // For viewing-only scanning, we cannot fully verify the commitment
+      // because we don't have the spending private key.
+      // The recipient will verify during claim preparation.
+
       found.push({
-        amount,
-        random,
+        amount: ann.amountSats,
         ephemeralSpendPub,
         leafIndex: ann.leafIndex,
         commitment: ann.commitment,
       });
     } catch {
-      // ECDH or parsing failed - not our note
+      // Parsing failed - skip this announcement
       continue;
     }
   }
@@ -524,24 +275,7 @@ export function scanAnnouncementsV2(
   return found;
 }
 
-/**
- * Scan V2 announcements using ZVaultKeys
- */
-export function scanAnnouncementsV2WithKeys(
-  keys: ZVaultKeys,
-  announcements: {
-    ephemeralViewPub: Uint8Array;
-    ephemeralSpendPub: Uint8Array;
-    encryptedAmount: Uint8Array;
-    encryptedRandom: Uint8Array;
-    commitment: Uint8Array;
-    leafIndex: number;
-  }[]
-): ScannedNoteV2[] {
-  return scanAnnouncementsV2(keys.viewingPrivKey, announcements);
-}
-
-// ========== V2 Claim Preparation (Spending Key Required) ==========
+// ========== Claim Preparation (Spending Key Required) ==========
 
 /**
  * Prepare claim inputs for ZK proof generation
@@ -555,102 +289,154 @@ export function scanAnnouncementsV2WithKeys(
  * - Sender does NOT know recipient's spendingPrivKey
  * - Wrong spendingPrivKey → wrong ECDH → wrong commitment → not in tree
  *
- * @param spendingPrivKey - Grumpkin spending private key
+ * SIMPLIFIED FORMAT:
+ * - Uses Poseidon2 for all hashing (matches Noir circuits)
+ * - Single nullifier hash (removed double-hashing)
+ * - No random field needed
+ *
+ * @param source - Wallet adapter OR pre-derived ZVaultKeys
  * @param note - Scanned note from scanning phase
  * @param merkleProof - Merkle proof for the commitment
- * @returns Inputs ready for Noir claim_v2 circuit
+ * @returns Inputs ready for Noir claim circuit
  */
-export function prepareClaimInputsV2(
-  spendingPrivKey: bigint,
-  note: ScannedNoteV2,
+export async function prepareClaimInputs(
+  source: WalletSignerAdapter | ZVaultKeys,
+  note: ScannedNote,
   merkleProof: {
     root: bigint;
     pathElements: bigint[];
     pathIndices: number[];
   }
-): ClaimInputsV2 {
-  // Grumpkin ECDH with spending key
-  const spendShared = grumpkinEcdh(spendingPrivKey, note.ephemeralSpendPub);
+): Promise<ClaimInputs> {
+  // Get keys from source
+  const keys = isWalletAdapter(source) ? await deriveKeysFromWallet(source) : source;
 
-  // Derive note public key (same as sender computed)
-  // notePubKey = Poseidon2(spendShared.x, spendShared.y, DOMAIN_NPK)
-  // This will be verified inside the circuit
+  // Grumpkin ECDH with spending key
+  const spendShared = grumpkinEcdh(keys.spendingPrivKey, note.ephemeralSpendPub);
+
+  // Verify commitment matches (sanity check)
+  const notePubKey = deriveNotePubKey(spendShared.x, spendShared.y);
+  const expectedCommitment = poseidon2ComputeCommitment(notePubKey, note.amount, 0n);
+  const actualCommitment = bytesToBigint(note.commitment);
+
+  if (expectedCommitment !== actualCommitment) {
+    throw new Error(
+      "Commitment mismatch - this note may not belong to you or the announcement is invalid"
+    );
+  }
 
   // CRITICAL: Nullifier from spending private key + leaf index
-  // nullifier = Poseidon2(spendingPrivKey, leafIndex)
+  // nullifier = Poseidon2(spendingPrivKey, leafIndex, DOMAIN_NULL)
   // Only recipient can compute this!
-  const nullifierInput = concatBytes(
-    scalarToBytes(spendingPrivKey),
-    bigintToBytes(BigInt(note.leafIndex))
-  );
-  // NOTE: Actual Poseidon2 computed in Noir circuit
-  // This is a placeholder for the hash
-  const nullifierPlaceholder = sha256(nullifierInput);
-  const nullifier = bytesToBigint(nullifierPlaceholder) % BN254_FIELD_PRIME;
-
-  // Nullifier hash (double hash for public input)
-  const nullifierHashPlaceholder = sha256(nullifierPlaceholder);
-  const nullifierHash = bytesToBigint(nullifierHashPlaceholder) % BN254_FIELD_PRIME;
+  const nullifier = poseidon2ComputeNullifier(keys.spendingPrivKey, BigInt(note.leafIndex));
 
   return {
     // Private inputs
-    spendingPrivKey,
+    spendingPrivKey: keys.spendingPrivKey,
     ephemeralSpendPub: note.ephemeralSpendPub,
     amount: note.amount,
-    random: note.random,
     leafIndex: note.leafIndex,
     merklePath: merkleProof.pathElements,
     merkleIndices: merkleProof.pathIndices,
 
     // Public inputs
     merkleRoot: merkleProof.root,
-    nullifierHash,
+    nullifier, // Single hash, not double-hashed
     amountPub: note.amount,
   };
 }
 
+// ========== On-chain Parsing ==========
+
 /**
- * Prepare claim inputs using ZVaultKeys
+ * Parse a StealthAnnouncement account data (SIMPLIFIED FORMAT)
+ *
+ * Layout (131 bytes):
+ * - discriminator (1 byte)
+ * - bump (1 byte)
+ * - ephemeral_view_pub (32 bytes)
+ * - ephemeral_spend_pub (33 bytes)
+ * - amount_sats (8 bytes) - verified BTC amount
+ * - commitment (32 bytes)
+ * - leaf_index (8 bytes)
+ * - created_at (8 bytes)
  */
-export function prepareClaimInputsV2WithKeys(
-  keys: ZVaultKeys,
-  note: ScannedNoteV2,
-  merkleProof: {
-    root: bigint;
-    pathElements: bigint[];
-    pathIndices: number[];
+export function parseStealthAnnouncement(
+  data: Uint8Array
+): OnChainStealthAnnouncement | null {
+  if (data.length < STEALTH_ANNOUNCEMENT_SIZE) {
+    return null;
   }
-): ClaimInputsV2 {
-  return prepareClaimInputsV2(keys.spendingPrivKey, note, merkleProof);
-}
 
-// ========== V2 Utilities ==========
-
-function randomFieldElement(): bigint {
-  const bytes = new Uint8Array(32);
-  crypto.getRandomValues(bytes);
-  return bytesToBigint(bytes) % BN254_FIELD_PRIME;
-}
-
-function xorBytes(a: Uint8Array, b: Uint8Array): Uint8Array {
-  const result = new Uint8Array(a.length);
-  for (let i = 0; i < a.length; i++) {
-    result[i] = a[i] ^ b[i];
+  // Check discriminator
+  if (data[0] !== STEALTH_ANNOUNCEMENT_DISCRIMINATOR) {
+    return null;
   }
-  return result;
+
+  let offset = 2; // Skip discriminator and bump
+
+  const ephemeralViewPub = data.slice(offset, offset + 32);
+  offset += 32;
+
+  const ephemeralSpendPub = data.slice(offset, offset + 33);
+  offset += 33;
+
+  // Parse amount_sats (8 bytes, LE)
+  const amountView = new DataView(
+    data.buffer,
+    data.byteOffset + offset,
+    8
+  );
+  const amountSats = amountView.getBigUint64(0, true);
+  offset += 8;
+
+  const commitment = data.slice(offset, offset + 32);
+  offset += 32;
+
+  // Parse leaf_index (8 bytes, LE)
+  const leafIndexView = new DataView(
+    data.buffer,
+    data.byteOffset + offset,
+    8
+  );
+  const leafIndex = Number(leafIndexView.getBigUint64(0, true));
+  offset += 8;
+
+  // Parse created_at (8 bytes, LE)
+  const createdAtView = new DataView(
+    data.buffer,
+    data.byteOffset + offset,
+    8
+  );
+  const createdAt = Number(createdAtView.getBigInt64(0, true));
+
+  return {
+    ephemeralViewPub,
+    ephemeralSpendPub,
+    amountSats,
+    commitment,
+    leafIndex,
+    createdAt,
+  };
 }
 
-function concatBytes(...arrays: Uint8Array[]): Uint8Array {
-  const totalLength = arrays.reduce((sum, arr) => sum + arr.length, 0);
-  const result = new Uint8Array(totalLength);
-  let offset = 0;
-  for (const arr of arrays) {
-    result.set(arr, offset);
-    offset += arr.length;
-  }
-  return result;
-}
-
-function textToBytes(text: string): Uint8Array {
-  return new TextEncoder().encode(text);
+/**
+ * Convert on-chain announcement to format expected by scanAnnouncements
+ */
+export function announcementToScanFormat(
+  announcement: OnChainStealthAnnouncement
+): {
+  ephemeralViewPub: Uint8Array;
+  ephemeralSpendPub: Uint8Array;
+  amountSats: bigint;
+  commitment: Uint8Array;
+  leafIndex: number;
+} {
+  return {
+    ephemeralViewPub: announcement.ephemeralViewPub,
+    ephemeralSpendPub: announcement.ephemeralSpendPub,
+    amountSats: announcement.amountSats,
+    commitment: announcement.commitment,
+    leafIndex: announcement.leafIndex,
+  };
 }

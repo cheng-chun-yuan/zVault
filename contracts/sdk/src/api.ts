@@ -24,9 +24,9 @@ import {
 } from "./proof";
 import {
   createStealthDeposit,
-  createStealthDepositForSolana,
   type StealthDeposit,
 } from "./stealth";
+import { createStealthMetaAddress, type StealthMetaAddress } from "./keys";
 import { createMerkleProof, type MerkleProof, TREE_DEPTH, ZERO_VALUE } from "./merkle";
 import { bigintToBytes } from "./crypto";
 import { prepareVerifyDeposit } from "./chadbuffer";
@@ -568,63 +568,73 @@ export function sendLink(note: Note, baseUrl?: string): string {
 // ============================================================================
 
 /**
- * Send to specific recipient via stealth address (ECDH)
+ * Send to specific recipient via stealth address (dual-key ECDH)
  *
  * Creates an on-chain stealth announcement that only the recipient
  * can discover by scanning with their view key.
  *
  * **Flow:**
- * 1. ECDH key exchange: ephemeral keypair + recipient pubkey
- * 2. Derive note secrets from shared secret
+ * 1. Dual ECDH key exchange: X25519 (viewing) + Grumpkin (spending)
+ * 2. Compute commitment using Poseidon2
  * 3. Create on-chain StealthAnnouncement
  * 4. Recipient scans announcements with view key
- * 5. Recipient claims with recovered note
+ * 5. Recipient prepares claim inputs with spending key
  *
  * @param config - Client configuration
- * @param note - Note to send (commitment should already be in tree)
- * @param recipientPubKey - Recipient's X25519 public key (32 bytes)
+ * @param recipientMeta - Recipient's stealth meta-address (spending + viewing public keys)
+ * @param amountSats - Amount in satoshis
  * @param leafIndex - Leaf index in commitment tree
  * @returns Stealth result
  *
  * @example
  * ```typescript
  * // Send to Alice's stealth address
- * const result = await sendStealth(config, myNote, aliceX25519PubKey);
+ * const result = await sendStealth(config, aliceMetaAddress, 100_000n);
  *
  * // Alice scans and claims
- * const found = scanAnnouncements(aliceViewKey, alicePubKey, announcements);
- * const recovered = createNoteFromSecrets(found[0].nullifier, found[0].secret, found[0].amount);
- * await privateClaim(config, recovered);
+ * const found = await scanAnnouncements(aliceKeys, announcements);
+ * const claimInputs = await prepareClaimInputs(aliceKeys, found[0], merkleProof);
  * ```
  */
 export async function sendStealth(
   config: ApiClientConfig,
-  note: Note,
-  recipientPubKey: Uint8Array,
+  recipientMeta: StealthMetaAddress,
+  amountSats: bigint,
   leafIndex: number = 0
 ): Promise<StealthResult> {
   if (!config.payer) {
     throw new Error("Payer keypair required for stealth send");
   }
 
-  // Create stealth deposit data
-  const stealthDeposit = createStealthDeposit(recipientPubKey, note.amount);
+  // Create stealth deposit data using dual-key ECDH
+  const stealthDeposit = await createStealthDeposit(recipientMeta, amountSats);
 
-  // Build instruction data (84 bytes)
-  // ephemeral_pubkey (32) + commitment (32) + recipient_hint (4) + encrypted_amount (8) + leaf_index (8)
-  const data = new Uint8Array(1 + 84);
+  // Build instruction data (113 bytes)
+  // ephemeral_view_pub (32) + ephemeral_spend_pub (33) + amount_sats (8) + commitment (32) + leaf_index (8)
+  const data = new Uint8Array(1 + 113);
   data[0] = INSTRUCTION.ANNOUNCE_STEALTH;
-  data.set(stealthDeposit.ephemeralPubKey, 1);
-  data.set(note.commitmentBytes, 33);
-  data.set(stealthDeposit.recipientHint, 65);
-  data.set(stealthDeposit.encryptedAmount, 69);
-  const leafIndexView = new DataView(data.buffer, 77, 8);
+
+  let offset = 1;
+  data.set(stealthDeposit.ephemeralViewPub, offset);
+  offset += 32;
+
+  data.set(stealthDeposit.ephemeralSpendPub, offset);
+  offset += 33;
+
+  const amountView = new DataView(data.buffer, offset, 8);
+  amountView.setBigUint64(0, amountSats, true);
+  offset += 8;
+
+  data.set(stealthDeposit.commitment, offset);
+  offset += 32;
+
+  const leafIndexView = new DataView(data.buffer, offset, 8);
   leafIndexView.setBigUint64(0, BigInt(leafIndex), true);
 
   // Derive stealth announcement PDA
   const [stealthAnnouncement] = deriveStealthAnnouncementPDA(
     config.programId,
-    note.commitmentBytes
+    stealthDeposit.commitment
   );
 
   // Build transaction
@@ -644,68 +654,11 @@ export async function sendStealth(
 
   return {
     signature,
-    ephemeralPubKey: stealthDeposit.ephemeralPubKey,
+    ephemeralPubKey: stealthDeposit.ephemeralViewPub,
     leafIndex,
   };
 }
 
-/**
- * Send to Solana recipient via stealth address
- *
- * Convenience function that converts a Solana Ed25519 public key
- * to X25519 before creating the stealth announcement.
- */
-export async function sendStealthToSolana(
-  config: ApiClientConfig,
-  note: Note,
-  recipientSolanaPubKey: Uint8Array,
-  leafIndex: number = 0
-): Promise<StealthResult> {
-  const stealthDeposit = createStealthDepositForSolana(
-    recipientSolanaPubKey,
-    note.amount
-  );
-
-  // Re-use sendStealth logic with converted key
-  // The stealth deposit already uses the converted key internally
-  if (!config.payer) {
-    throw new Error("Payer keypair required for stealth send");
-  }
-
-  const data = new Uint8Array(1 + 84);
-  data[0] = INSTRUCTION.ANNOUNCE_STEALTH;
-  data.set(stealthDeposit.ephemeralPubKey, 1);
-  data.set(note.commitmentBytes, 33);
-  data.set(stealthDeposit.recipientHint, 65);
-  data.set(stealthDeposit.encryptedAmount, 69);
-  const leafIndexView = new DataView(data.buffer, 77, 8);
-  leafIndexView.setBigUint64(0, BigInt(leafIndex), true);
-
-  const [stealthAnnouncement] = deriveStealthAnnouncementPDA(
-    config.programId,
-    note.commitmentBytes
-  );
-
-  const ix = new TransactionInstruction({
-    programId: config.programId,
-    keys: [
-      { pubkey: stealthAnnouncement, isSigner: false, isWritable: true },
-      { pubkey: config.payer.publicKey, isSigner: true, isWritable: true },
-      { pubkey: SystemProgram.programId, isSigner: false, isWritable: false },
-    ],
-    data: Buffer.from(data),
-  });
-
-  const tx = new Transaction().add(ix);
-  const signature = await config.connection.sendTransaction(tx, [config.payer]);
-  await config.connection.confirmTransaction(signature);
-
-  return {
-    signature,
-    ephemeralPubKey: stealthDeposit.ephemeralPubKey,
-    leafIndex,
-  };
-}
 
 // ============================================================================
 // Helper Functions
@@ -807,11 +760,10 @@ export { generateNote, createNoteFromSecrets, deriveNote, deriveNotes, estimateS
 export { parseClaimLink } from "./claim-link";
 export {
   scanAnnouncements,
-  scanAnnouncementsWithSolana,
-  generateStealthKeys,
-  solanaKeyToX25519,
-  solanaPubKeyToX25519,
+  prepareClaimInputs,
+  isWalletAdapter,
 } from "./stealth";
 export type { Note } from "./note";
 export type { MerkleProof } from "./merkle";
-export type { StealthKeys, StealthDeposit } from "./stealth";
+export type { StealthDeposit, ScannedNote, ClaimInputs } from "./stealth";
+export type { StealthMetaAddress, ZVaultKeys } from "./keys";

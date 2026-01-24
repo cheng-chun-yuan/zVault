@@ -45,13 +45,13 @@ import {
   privateSplit as apiPrivateSplit,
   sendLink as apiSendLink,
   sendStealth as apiSendStealth,
-  sendStealthToSolana as apiSendStealthToSolana,
   type DepositResult,
   type WithdrawResult,
   type ClaimResult as ApiClaimResultType,
   type SplitResult as ApiSplitResultType,
   type StealthResult,
   type ApiClientConfig,
+  type StealthMetaAddress,
 } from "./api";
 
 // Program ID (Solana Devnet)
@@ -309,43 +309,27 @@ export class ZVaultClient {
   }
 
   /**
-   * 6. SEND_STEALTH - Send to specific recipient via ECDH
+   * 6. SEND_STEALTH - Send to specific recipient via dual-key ECDH
    *
    * Creates on-chain stealth announcement. Only recipient can claim.
    *
-   * @param note - Note to send
-   * @param recipientPubKey - Recipient's X25519 public key
+   * @param recipientMeta - Recipient's stealth meta-address (spending + viewing public keys)
+   * @param amountSats - Amount in satoshis
    * @param leafIndex - Leaf index in tree
    */
   async sendStealth(
-    note: Note,
-    recipientPubKey: Uint8Array,
+    recipientMeta: StealthMetaAddress,
+    amountSats: bigint,
     leafIndex: number = 0
   ): Promise<StealthResult> {
     const result = await apiSendStealth(
       this.getApiConfig(),
-      note,
-      recipientPubKey,
+      recipientMeta,
+      amountSats,
       leafIndex
     );
 
     return result;
-  }
-
-  /**
-   * Send to Solana recipient via stealth address
-   */
-  async sendStealthToSolana(
-    note: Note,
-    recipientSolanaPubKey: Uint8Array,
-    leafIndex: number = 0
-  ): Promise<StealthResult> {
-    return apiSendStealthToSolana(
-      this.getApiConfig(),
-      note,
-      recipientSolanaPubKey,
-      leafIndex
-    );
   }
 
   /**

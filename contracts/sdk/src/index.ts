@@ -111,6 +111,8 @@ export {
   // Key security
   constantTimeCompare,
   clearKey,
+  clearZVaultKeys,
+  clearDelegatedViewKey,
   extractViewOnlyBundle,
   // Types
   type ZVaultKeys,
@@ -119,6 +121,18 @@ export {
   type DelegatedViewKey,
   type WalletSignerAdapter,
 } from "./keys";
+
+// Poseidon2 hash utilities (matches Noir circuits)
+export {
+  poseidon2Hash,
+  deriveNotePubKey,
+  computeCommitmentV2,
+  computeNullifierV2,
+  hashNullifier,
+  computeCommitmentV1,
+  computeNullifierHashV1,
+  BN254_SCALAR_FIELD,
+} from "./poseidon2";
 
 // Optional .zkey name registry
 export {
@@ -271,30 +285,46 @@ export {
 // Import directly from '@zvault/sdk/dist/zvault.js' if needed in Node.js
 export type { DepositCredentials, ClaimResult, SplitResult } from "./zvault";
 
-// Stealth address utilities (V1 legacy + V2 dual-key ECDH)
+// Stealth address utilities (Dual-key ECDH: X25519 viewing + Grumpkin spending)
 export {
-  // V1 Legacy (X25519 only)
-  solanaKeyToX25519,
-  solanaPubKeyToX25519,
-  generateStealthKeys,
+  // Type guard
+  isWalletAdapter,
+  // Core functions (accept wallet adapter OR ZVaultKeys)
   createStealthDeposit,
-  createStealthDepositForSolana,
-  getStealthSharedSecret,
   scanAnnouncements,
-  scanAnnouncementsWithSolana,
-  type StealthKeys,
+  prepareClaimInputs,
+  // On-chain announcement parsing
+  parseStealthAnnouncement,
+  announcementToScanFormat,
+  // Constants
+  STEALTH_ANNOUNCEMENT_SIZE,
+  STEALTH_ANNOUNCEMENT_DISCRIMINATOR,
+  // Types
   type StealthDeposit,
-  // V2 Dual-Key ECDH (X25519 viewing + Grumpkin spending)
-  createStealthDepositV2,
-  createStealthDepositV2FromKeys,
-  scanAnnouncementsV2,
-  scanAnnouncementsV2WithKeys,
-  prepareClaimInputsV2,
-  prepareClaimInputsV2WithKeys,
-  type StealthDepositV2,
-  type ScannedNoteV2,
-  type ClaimInputsV2,
+  type ScannedNote,
+  type ClaimInputs,
+  type OnChainStealthAnnouncement,
 } from "./stealth";
+
+// Direct stealth deposit (combined BTC deposit + stealth announcement)
+export {
+  // Sender functions
+  prepareStealthDeposit,
+  buildStealthOpReturn,
+  parseStealthOpReturn,
+  // On-chain verification
+  verifyStealthDeposit,
+  deriveStealthAnnouncementPDA,
+  // Constants
+  STEALTH_OP_RETURN_MAGIC,
+  STEALTH_OP_RETURN_VERSION,
+  STEALTH_OP_RETURN_SIZE,
+  VERIFY_STEALTH_DEPOSIT_DISCRIMINATOR,
+  // Types
+  type PreparedStealthDeposit,
+  type StealthDepositData,
+  type ParsedStealthOpReturn,
+} from "./stealth-deposit";
 
 // History / Audit utilities
 export {
