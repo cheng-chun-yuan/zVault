@@ -384,7 +384,7 @@ export function useDepositWatcher(
  *       )}
  *
  *       {isConfirmed && (
- *         <button onClick={handleClaim}>Claim sbBTC!</button>
+ *         <button onClick={handleClaim}>Claim zBTC!</button>
  *       )}
  *     </div>
  *   );

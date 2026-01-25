@@ -1,4 +1,4 @@
-//! sbBTC Backend - Minimal Server-Side Services
+//! zBTC Backend - Minimal Server-Side Services
 //!
 //! This backend only contains the server-side components that cannot run
 //! on the client. All other functionality is handled by the SDK.
@@ -17,7 +17,6 @@
 //! - Merkle tree operations
 //! - Transaction building and signing
 
-// Core modules (kept)
 pub mod api;
 pub mod btc_client;
 pub mod btc_spv;
@@ -25,6 +24,7 @@ pub mod deposit_tracker;
 pub mod esplora;
 pub mod redemption;
 pub mod sol_client;
+pub mod stealth;
 pub mod taproot;
 
 // Re-exports: Bitcoin signer
@@ -54,11 +54,16 @@ pub use taproot::{
     UnlockCriteria,
 };
 
-// Re-exports: Deposit Tracker
 pub use deposit_tracker::{
     create_tracker_service, create_ws_state, DepositRecord, DepositStatus, DepositStatusResponse,
     DepositTrackerService, RegisterDepositRequest, RegisterDepositResponse, SharedTrackerService,
     TrackerConfig, TrackerError, TrackerStats,
+};
+
+pub use stealth::{
+    create_stealth_router, create_stealth_service, start_stealth_server, PrepareStealthRequest,
+    SharedStealthService, StealthData, StealthDepositRecord, StealthDepositService,
+    StealthDepositStatus, StealthError, StealthMode, StealthStatusResponse,
 };
 
 /// Satoshi conversion helpers

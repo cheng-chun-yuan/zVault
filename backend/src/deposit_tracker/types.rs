@@ -23,9 +23,9 @@ pub enum DepositStatus {
     SweepConfirming,
     /// Submitting sweep tx for SPV verification on Solana
     Verifying,
-    /// Verified on Solana, can claim sbBTC
+    /// Verified on Solana, can claim zBTC
     Ready,
-    /// sbBTC minted
+    /// zBTC minted
     Claimed,
     /// Error occurred
     Failed,
@@ -234,7 +234,7 @@ impl DepositRecord {
         self.status == DepositStatus::SweepConfirming && self.sweep_confirmations >= 2
     }
 
-    /// Check if user can claim sbBTC
+    /// Check if user can claim zBTC
     pub fn can_claim(&self) -> bool {
         self.status == DepositStatus::Ready
     }

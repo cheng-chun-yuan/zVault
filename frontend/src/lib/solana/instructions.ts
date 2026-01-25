@@ -122,9 +122,10 @@ export function deriveBlockHeaderPDA(
 }
 
 /**
- * Derive sbBTC Mint PDA
+ * Derive zBTC Mint PDA
+ * Note: Seed string "sbbtc_mint" is kept for deployed contract compatibility
  */
-export function derivesbBTCMintPDA(
+export function derivezBTCMintPDA(
   programId: PublicKey = ZVAULT_PROGRAM_ID
 ): [PublicKey, number] {
   return PublicKey.findProgramAddressSync(
@@ -285,14 +286,14 @@ export interface ClaimParams {
   merkleRoot: Uint8Array;
   /** Amount in satoshis */
   amountSats: bigint;
-  /** User's sbBTC token account */
+  /** User's zBTC token account */
   userTokenAccount: PublicKey;
 }
 
 /**
  * Build CLAIM transaction
  *
- * Claims sbBTC tokens by proving knowledge of nullifier + secret
+ * Claims zBTC tokens by proving knowledge of nullifier + secret
  * for a previously recorded deposit commitment.
  */
 export async function buildClaimTransaction(
@@ -313,7 +314,7 @@ export async function buildClaimTransaction(
   const [poolState] = derivePoolStatePDA();
   const [commitmentTree] = deriveCommitmentTreePDA();
   const [nullifierPDA] = deriveNullifierPDA(nullifierHash);
-  const [sbbtcMint] = derivesbBTCMintPDA();
+  const [zbtcMint] = derivezBTCMintPDA();
 
   // Build instruction data
   const instructionData = buildClaimInstructionData(
@@ -331,7 +332,7 @@ export async function buildClaimTransaction(
       { pubkey: poolState, isSigner: false, isWritable: true },
       { pubkey: commitmentTree, isSigner: false, isWritable: true },
       { pubkey: nullifierPDA, isSigner: false, isWritable: true },
-      { pubkey: sbbtcMint, isSigner: false, isWritable: true },
+      { pubkey: zbtcMint, isSigner: false, isWritable: true },
       { pubkey: userTokenAccount, isSigner: false, isWritable: true },
       { pubkey: userPubkey, isSigner: true, isWritable: true },
       { pubkey: SystemProgram.programId, isSigner: false, isWritable: false },
@@ -423,7 +424,7 @@ export interface RedeemParams {
 /**
  * Build REQUEST_REDEMPTION transaction
  *
- * Burns sbBTC and creates a RedemptionRequest PDA that the
+ * Burns zBTC and creates a RedemptionRequest PDA that the
  * backend redemption processor will pick up.
  */
 export async function buildRedeemTransaction(
@@ -433,7 +434,7 @@ export async function buildRedeemTransaction(
   const { userPubkey, userTokenAccount, amountSats, btcAddress } = params;
 
   const [poolState] = derivePoolStatePDA();
-  const [sbbtcMint] = derivesbBTCMintPDA();
+  const [zbtcMint] = derivezBTCMintPDA();
 
   const instructionData = buildRedemptionRequestData(amountSats, btcAddress);
 
@@ -441,7 +442,7 @@ export async function buildRedeemTransaction(
     programId: ZVAULT_PROGRAM_ID,
     keys: [
       { pubkey: poolState, isSigner: false, isWritable: true },
-      { pubkey: sbbtcMint, isSigner: false, isWritable: true },
+      { pubkey: zbtcMint, isSigner: false, isWritable: true },
       { pubkey: userTokenAccount, isSigner: false, isWritable: true },
       { pubkey: userPubkey, isSigner: true, isWritable: true },
       { pubkey: SystemProgram.programId, isSigner: false, isWritable: false },
@@ -465,18 +466,18 @@ export async function buildRedeemTransaction(
 // =============================================================================
 
 /**
- * Get user's sbBTC token account (creates if needed)
+ * Get user's zBTC token account (creates if needed)
  */
 export async function getOrCreateTokenAccount(
   connection: Connection,
   userPubkey: PublicKey
 ): Promise<PublicKey> {
-  const [sbbtcMint] = derivesbBTCMintPDA();
+  const [zbtcMint] = derivezBTCMintPDA();
 
   // Derive associated token account
   const { getAssociatedTokenAddressSync } = await import("@solana/spl-token");
   const tokenAccount = getAssociatedTokenAddressSync(
-    sbbtcMint,
+    zbtcMint,
     userPubkey,
     false,
     TOKEN_2022_PROGRAM_ID

@@ -10,7 +10,7 @@
 import { type Note, deserializeNote, serializeNote } from "./note";
 
 // Base URL for claim links (configurable)
-const DEFAULT_BASE_URL = "https://sbbtc.app";
+const DEFAULT_BASE_URL = "https://zvault.app";
 
 /**
  * Encoded claim link data

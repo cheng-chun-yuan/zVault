@@ -8,8 +8,8 @@
  *
  * ## 6 Main Functions
  * - **deposit**: Generate deposit credentials (taproot address + claim link)
- * - **withdraw**: Request BTC withdrawal (burn sbBTC)
- * - **privateClaim**: Claim sbBTC tokens with ZK proof
+ * - **withdraw**: Request BTC withdrawal (burn zBTC)
+ * - **privateClaim**: Claim zBTC tokens with ZK proof
  * - **privateSplit**: Split one commitment into two outputs
  * - **sendLink**: Create global claim link (off-chain)
  * - **sendStealth**: Send to specific recipient via stealth ECDH

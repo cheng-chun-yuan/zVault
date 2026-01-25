@@ -1,4 +1,4 @@
-//! sbBTC Backend - Minimal Services
+//! zBTC Backend - Minimal Services
 //!
 //! Server-side services:
 //! 1. Header Relay (TypeScript) - Submits Bitcoin headers to Solana light client
@@ -14,10 +14,11 @@
 //!   cargo run -- tracker         - Start deposit tracker (background)
 //!   cargo run -- demo            - Run interactive demo
 
-use sbbtc::api;
-use sbbtc::deposit_tracker::{self, TrackerConfig};
-use sbbtc::redemption::{RedemptionConfig, RedemptionService, SingleKeySigner};
-use sbbtc::units;
+use zbtc::api;
+use zbtc::deposit_tracker::{self, TrackerConfig};
+use zbtc::redemption::{RedemptionConfig, RedemptionService, SingleKeySigner};
+use zbtc::stealth::StealthDepositService;
+use zbtc::units;
 use std::env;
 
 #[tokio::main]
@@ -40,13 +41,13 @@ async fn main() {
 }
 
 fn print_usage() {
-    println!("sbBTC Backend - Server-Side Services");
+    println!("zBTC Backend - Server-Side Services");
     println!();
     println!("Usage:");
-    println!("  sbbtc-api api [--port <port>]               Start REST API server (default: 3001)");
-    println!("  sbbtc-api redemption [--interval <secs>]    Start redemption processor");
-    println!("  sbbtc-api tracker [--interval <secs>]       Start deposit tracker");
-    println!("  sbbtc-api demo                              Run interactive demo");
+    println!("  zbtc-api api [--port <port>]               Start REST API server (default: 3001)");
+    println!("  zbtc-api redemption [--interval <secs>]    Start redemption processor");
+    println!("  zbtc-api tracker [--interval <secs>]       Start deposit tracker");
+    println!("  zbtc-api demo                              Run interactive demo");
     println!();
     println!("Environment Variables:");
     println!("  POOL_SIGNING_KEY      Hex-encoded private key for BTC signing");
@@ -76,14 +77,12 @@ fn create_service(config: RedemptionConfig) -> RedemptionService {
     }
 }
 
-/// Start REST API server
 async fn run_api_server(args: &[String]) {
     let mut port: u16 = env::var("API_PORT")
         .ok()
         .and_then(|p| p.parse().ok())
         .unwrap_or(3001);
 
-    // Parse arguments
     let mut i = 0;
     while i < args.len() {
         match args[i].as_str() {
@@ -96,9 +95,10 @@ async fn run_api_server(args: &[String]) {
     }
 
     let config = RedemptionConfig::default();
-    let service = create_service(config);
+    let redemption = create_service(config);
+    let stealth = StealthDepositService::new_testnet();
 
-    if let Err(e) = api::start_server(service, port).await {
+    if let Err(e) = api::start_combined_server(redemption, stealth, port).await {
         eprintln!("API server error: {}", e);
     }
 }
@@ -124,7 +124,7 @@ async fn run_redemption_service(args: &[String]) {
 
     let service = create_service(config.clone());
 
-    println!("=== sbBTC Redemption Processor ===");
+    println!("=== zBTC Redemption Processor ===");
     println!();
     println!("Configuration:");
     println!("  Check Interval: {} seconds", config.check_interval_secs);
@@ -193,7 +193,7 @@ async fn run_tracker_service(args: &[String]) {
 
     // Configure verifier if keypair available
     let mut service = if let Ok(keypair_path) = env::var("VERIFIER_KEYPAIR") {
-        match sbbtc::load_keypair_from_file(&keypair_path) {
+        match zbtc::load_keypair_from_file(&keypair_path) {
             Ok(keypair) => {
                 println!("Verifier configured with Solana keypair");
                 service.with_verifier(keypair)
@@ -207,7 +207,7 @@ async fn run_tracker_service(args: &[String]) {
         service
     };
 
-    println!("=== sbBTC Deposit Tracker ===");
+    println!("=== zBTC Deposit Tracker ===");
     println!();
     println!("Configuration:");
     println!("  Poll Interval: {} seconds", config.poll_interval_secs);
@@ -228,10 +228,10 @@ async fn run_tracker_service(args: &[String]) {
 }
 
 async fn run_demo() {
-    use sbbtc::taproot::{generate_deposit_address, PoolKeys};
+    use zbtc::taproot::{generate_deposit_address, PoolKeys};
     use bitcoin::Network;
 
-    println!("\n=== sbBTC Demo ===\n");
+    println!("\n=== zBTC Demo ===\n");
     println!("Note: In production, use the SDK for client-side operations.");
     println!();
 
@@ -262,10 +262,10 @@ async fn run_demo() {
     println!("2. CLAIM (Client-side via SDK):");
     println!("   - SDK generates Noir ZK proof locally");
     println!("   - SDK submits claim transaction to Solana");
-    println!("   - sbBTC minted to user's wallet");
+    println!("   - zBTC minted to user's wallet");
     println!();
     println!("3. WITHDRAW (Server-side redemption processor):");
-    println!("   - User burns sbBTC via SDK (creates RedemptionRequest PDA)");
+    println!("   - User burns zBTC via SDK (creates RedemptionRequest PDA)");
     println!("   - Redemption processor detects request");
     println!("   - Processor signs and broadcasts BTC transaction");
     println!("   - Processor calls complete_redemption after confirms");

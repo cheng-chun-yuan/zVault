@@ -11,6 +11,7 @@ import { cn } from "@/lib/utils";
 import { useNoteStorage } from "@/hooks/use-note-storage";
 import { useCopyToClipboard } from "@/hooks/use-copy-to-clipboard";
 import { useZVaultKeys } from "@/hooks/use-zvault-keys";
+import { notifyDepositConfirmed, notifyDepositDetected } from "@/lib/notifications";
 import {
   createDepositFromSeed,
   serializeNote,
@@ -85,9 +86,15 @@ export function DepositFlow() {
   const trackerStatus = useDepositStatus(trackerId, {
     onStatusChange: (status, prevStatus) => {
       console.log("[Tracker] Status changed:", prevStatus, "→", status);
+      // Show notification when deposit is detected and confirming
+      if (status === "confirming" && prevStatus === "detected") {
+        notifyDepositDetected(1, 6);
+      }
     },
     onClaimable: () => {
       console.log("[Tracker] Deposit is now claimable!");
+      // Show toast notification with claim link
+      notifyDepositConfirmed(claimLink || undefined);
     },
     onError: (err) => {
       console.error("[Tracker] Error:", err);
@@ -427,7 +434,7 @@ export function DepositFlow() {
               {showSecret ? secretNote : "••••••••••••••••"}
             </code>
             <p className="text-caption text-[#8B8A9E]">
-              This secret is your claim link. Remember it or save it to claim your sbBTC later.
+              This secret is your claim link. Remember it or save it to claim your zBTC later.
             </p>
           </div>
 

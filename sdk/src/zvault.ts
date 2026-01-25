@@ -5,8 +5,8 @@
  *
  * ## 6 Main Functions
  * 1. deposit() - Generate deposit credentials (taproot address + claim link)
- * 2. withdraw() - Request BTC withdrawal (burn sbBTC)
- * 3. privateClaim() - Claim sbBTC tokens with ZK proof
+ * 2. withdraw() - Request BTC withdrawal (burn zBTC)
+ * 3. privateClaim() - Claim zBTC tokens with ZK proof
  * 4. privateSplit() - Split one commitment into two outputs
  * 5. sendLink() - Create global claim link (off-chain)
  * 6. sendStealth() - Send to specific recipient via stealth ECDH
@@ -104,7 +104,7 @@ interface LocalMerkleState {
  * const deposit = await client.deposit(100_000n);
  * console.log('Send BTC to:', deposit.taprootAddress);
  *
- * // Later: claim sbBTC
+ * // Later: claim zBTC
  * const result = await client.privateClaim(deposit.claimLink);
  * ```
  */
@@ -166,7 +166,7 @@ export class ZVaultClient {
   /**
    * 2. WITHDRAW - Request BTC withdrawal
    *
-   * Burns sbBTC and creates redemption request. Relayer will send BTC.
+   * Burns zBTC and creates redemption request. Relayer will send BTC.
    */
   async withdraw(
     note: Note,
@@ -184,9 +184,9 @@ export class ZVaultClient {
   }
 
   /**
-   * 3. PRIVATE_CLAIM - Claim sbBTC with ZK proof
+   * 3. PRIVATE_CLAIM - Claim zBTC with ZK proof
    *
-   * Claims sbBTC tokens to wallet using ZK proof of commitment ownership.
+   * Claims zBTC tokens to wallet using ZK proof of commitment ownership.
    */
   async privateClaim(claimLinkOrNote: string | Note): Promise<ApiClaimResultType> {
     let note: Note;

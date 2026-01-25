@@ -4,7 +4,7 @@
 //! Duplicate prevention via PDA seeds (txid-based).
 //!
 //! SHIELDED-ONLY ARCHITECTURE:
-//! - sbBTC is minted to pool vault (not user wallet)
+//! - zBTC is minted to pool vault (not user wallet)
 //! - Users hold shielded commitments, never public tokens
 //! - Amount is only revealed at withdrawal time
 //!
@@ -15,7 +15,7 @@
 //! 4. Contract verifies: SPV merkle proof
 //! 5. Contract parses: OP_RETURN → extracts commitment
 //! 6. Contract stores: commitment in deposit record
-//! 7. Contract mints: sbBTC to pool vault (shielded)
+//! 7. Contract mints: zBTC to pool vault (shielded)
 
 use pinocchio::{
     account_info::AccountInfo,
@@ -38,7 +38,7 @@ use crate::utils::{validate_program_owner, validate_token_2022_owner, validate_t
 
 /// Verify a Bitcoin deposit via SPV proof (PERMISSIONLESS)
 ///
-/// SHIELDED-ONLY: sbBTC is minted to pool vault, not user wallet.
+/// SHIELDED-ONLY: zBTC is minted to pool vault, not user wallet.
 /// Users hold commitments (private), not public tokens.
 ///
 /// # Accounts
@@ -50,7 +50,7 @@ use crate::utils::{validate_program_owner, validate_token_2022_owner, validate_t
 /// 5. `[]` Transaction buffer (ChadBuffer)
 /// 6. `[signer]` Submitter (pays for storage)
 /// 7. `[]` System program
-/// 8. `[writable]` sbBTC mint
+/// 8. `[writable]` zBTC mint
 /// 9. `[writable]` Pool vault (token account owned by pool PDA)
 /// 10. `[]` Token-2022 program
 ///
@@ -77,7 +77,7 @@ pub fn process_verify_deposit(
     let tx_buffer_info = &accounts[5];
     let submitter = &accounts[6];
     let _system_program = &accounts[7];
-    let sbbtc_mint = &accounts[8];
+    let zbtc_mint = &accounts[8];
     let pool_vault = &accounts[9];
     let token_program = &accounts[10];
 
@@ -86,7 +86,7 @@ pub fn process_verify_deposit(
     validate_program_owner(light_client_info, program_id)?;
     validate_program_owner(block_header_info, program_id)?;
     validate_program_owner(commitment_tree_info, program_id)?;
-    validate_token_2022_owner(sbbtc_mint)?;
+    validate_token_2022_owner(zbtc_mint)?;
     validate_token_2022_owner(pool_vault)?;
     validate_token_program_key(token_program)?;
 
@@ -250,14 +250,14 @@ pub fn process_verify_deposit(
         deposit.set_minted(true); // Minted to pool at deposit time
     }
 
-    // Mint sbBTC to pool vault (SHIELDED-ONLY architecture)
-    // Users never hold public sbBTC - they hold commitments in the Merkle tree
+    // Mint zBTC to pool vault (SHIELDED-ONLY architecture)
+    // Users never hold public zBTC - they hold commitments in the Merkle tree
     let bump_bytes = [pool_bump];
     let pool_signer_seeds: &[&[u8]] = &[PoolState::SEED, &bump_bytes];
 
-    crate::utils::mint_sbbtc(
+    crate::utils::mint_zbtc(
         token_program,
-        sbbtc_mint,
+        zbtc_mint,
         pool_vault,
         pool_state_info,
         deposit_output.value,

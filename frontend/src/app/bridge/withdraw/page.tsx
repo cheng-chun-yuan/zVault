@@ -18,7 +18,7 @@ export default function WithdrawPage() {
       ]}
       titleIcon={<ArrowUpFromLine className="w-full h-full" />}
       title="Withdraw to zBTC"
-      description="Convert sbBTC to public zBTC (SPL token)"
+      description="Convert zBTC to public zBTC (SPL token)"
     >
       <WithdrawFlow />
     </FlowPageLayout>

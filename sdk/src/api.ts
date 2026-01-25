@@ -3,8 +3,8 @@
  *
  * 6 main user-facing functions:
  * - deposit: Generate deposit credentials (taproot address + claim link)
- * - withdraw: Request BTC withdrawal (burn sbBTC)
- * - privateClaim: Claim sbBTC tokens with ZK proof
+ * - withdraw: Request BTC withdrawal (burn zBTC)
+ * - privateClaim: Claim zBTC tokens with ZK proof
  * - privateSplit: Split one commitment into two outputs
  * - sendLink: Create global claim link (anyone with URL can claim)
  * - sendStealth: Send to specific recipient via stealth ECDH
@@ -225,15 +225,15 @@ export async function deposit(
 // ============================================================================
 
 /**
- * Request BTC withdrawal (burn sbBTC)
+ * Request BTC withdrawal (burn zBTC)
  *
  * Generates a partial_withdraw ZK proof and submits REQUEST_REDEMPTION instruction.
- * Burns sbBTC tokens and creates a redemption request for the relayer to fulfill.
+ * Burns zBTC tokens and creates a redemption request for the relayer to fulfill.
  *
  * **Flow:**
  * 1. Generate partial_withdraw proof
  * 2. Call REQUEST_REDEMPTION instruction
- * 3. Program verifies proof, burns sbBTC, creates RedemptionRequest PDA
+ * 3. Program verifies proof, burns zBTC, creates RedemptionRequest PDA
  * 4. If partial: adds change commitment to tree
  * 5. Relayer monitors and sends BTC (external)
  *
@@ -350,17 +350,17 @@ export async function withdraw(
 // ============================================================================
 
 /**
- * Claim sbBTC tokens with ZK proof
+ * Claim zBTC tokens with ZK proof
  *
  * Parses claim link (or uses provided note), generates a claim proof,
- * and mints sbBTC tokens to the user's wallet.
+ * and mints zBTC tokens to the user's wallet.
  *
  * **Flow:**
  * 1. Parse claim link to recover note (if link provided)
  * 2. Get merkle proof for commitment
  * 3. Generate claim ZK proof
  * 4. Call CLAIM instruction
- * 5. Program verifies proof, mints sbBTC
+ * 5. Program verifies proof, mints zBTC
  *
  * @param config - Client configuration
  * @param claimLinkOrNote - Claim link URL or Note object

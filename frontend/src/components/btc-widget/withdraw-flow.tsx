@@ -4,7 +4,7 @@ import { useState, useEffect, useMemo, useCallback } from "react";
 import { useWallet } from "@solana/wallet-adapter-react";
 import { CheckCircle2, ArrowUpFromLine, Wallet, Shield, Clock, AlertCircle, Key, Copy, Check } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { sbBTCApi } from "@/lib/api/client";
+import { zBTCApi } from "@/lib/api/client";
 import { parseSats, validateWithdrawalAmount } from "@/lib/utils/validation";
 import { WalletButton } from "@/components/ui";
 import { formatBtc, truncateMiddle } from "@/lib/utils/formatting";
@@ -155,7 +155,7 @@ export function WithdrawFlow() {
       console.log("[Withdraw] Proof size:", proofResult.proofBytes?.length, "bytes");
 
       // Submit to backend with proof (withdraw to zBTC on Solana)
-      const response = await sbBTCApi.redeem(
+      const response = await zBTCApi.redeem(
         amountSats,
         publicKey.toBase58(), // zBTC recipient is the connected wallet
         publicKey.toBase58()
@@ -298,7 +298,7 @@ export function WithdrawFlow() {
             >
               <div className="flex justify-between items-center mb-2">
                 <span className="text-body2-semibold text-[#FFFFFF]">
-                  {formatBtc(note.amountSats)} sbBTC
+                  {formatBtc(note.amountSats)} zBTC
                 </span>
                 <span className="text-caption text-[#8B8A9E]">
                   {note.amountSats.toLocaleString()} sats
@@ -336,7 +336,7 @@ export function WithdrawFlow() {
           <div className="flex-1">
             <div className="flex justify-between items-center">
               <span className="text-body2-semibold text-[#FFFFFF]">
-                Note Balance: {formatBtc(selectedNote.amountSats)} sbBTC
+                Note Balance: {formatBtc(selectedNote.amountSats)} zBTC
               </span>
               <button
                 onClick={() => setStep("select_note")}
@@ -359,10 +359,10 @@ export function WithdrawFlow() {
         {/* Amount Input */}
         <div className="w-full flex flex-col bg-[#0F0F1280] rounded-[12px] text-start mb-4">
           <div className="flex flex-row border border-solid border-[#8B8A9E33] p-[6px] pr-4 rounded-[inherit]">
-            {/* sbBTC Badge */}
+            {/* zBTC Badge */}
             <div className="w-[135px] h-[72px] flex items-center gap-2 border border-solid border-[#8B8A9E26] bg-[#202027] rounded-[8px] text-body1 text-[#F1F0F3] p-3 shrink-0">
               <div className="w-6 h-6 rounded-full bg-gradient-to-r from-violet-500 to-purple-500 flex items-center justify-center text-[10px] font-bold text-white">sb</div>
-              sbBTC
+              zBTC
             </div>
 
             {/* Input */}
@@ -407,7 +407,7 @@ export function WithdrawFlow() {
             </div>
             <div className="flex justify-between text-[#8B8A9E]">
               <span>Change (kept private)</span>
-              <span>{formatBtc(changeAmount)} sbBTC</span>
+              <span>{formatBtc(changeAmount)} zBTC</span>
             </div>
           </div>
         </div>
@@ -441,7 +441,7 @@ export function WithdrawFlow() {
         <div className="flex items-center gap-3 p-3 bg-[#16161B] border border-[#8B8A9E26] rounded-[12px] mb-4">
           <Clock className="w-5 h-5 text-[#8B8A9E] shrink-0" />
           <div className="text-caption text-[#8B8A9E]">
-            <span className="text-[#C7C5D1]">Processing time:</span> Instant • Minimum: {formatBtc(MIN_WITHDRAW_SATS)} sbBTC
+            <span className="text-[#C7C5D1]">Processing time:</span> Instant • Minimum: {formatBtc(MIN_WITHDRAW_SATS)} zBTC
           </div>
         </div>
 
@@ -523,7 +523,7 @@ export function WithdrawFlow() {
           </div>
           <div className="flex justify-between items-center text-body2">
             <span className="text-[#C7C5D1]">Withdrawn</span>
-            <span className="text-[#FFFFFF]">{formatBtc(amountSats ?? 0)} sbBTC</span>
+            <span className="text-[#FFFFFF]">{formatBtc(amountSats ?? 0)} zBTC</span>
           </div>
           <div className="flex justify-between items-center text-body2">
             <span className="text-[#C7C5D1]">Received</span>
@@ -559,7 +559,7 @@ export function WithdrawFlow() {
             <div className="mb-2 p-2 bg-[#0F0F12] rounded-[8px]">
               <div className="flex justify-between items-center text-body2">
                 <span className="text-[#8B8A9E]">Remaining Balance</span>
-                <span className="text-[#14F195] font-semibold">{formatBtc(changeAmountSats)} sbBTC</span>
+                <span className="text-[#14F195] font-semibold">{formatBtc(changeAmountSats)} zBTC</span>
               </div>
             </div>
             <code className="text-caption font-mono text-[#C7C5D1] break-all block mb-2">

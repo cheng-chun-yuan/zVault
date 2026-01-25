@@ -32,11 +32,11 @@ import { API_ENDPOINTS, DEFAULT_API_URL } from "./constants";
  * - Use @/lib/solana/instructions for Solana transactions
  * - Use getDepositStatusFromMempool() for deposit status
  */
-class sbBTCApiClient {
+class zBTCApiClient {
   private baseUrl: string;
 
   constructor(baseUrl?: string) {
-    this.baseUrl = baseUrl || process.env.NEXT_PUBLIC_sbBTC_API_URL || DEFAULT_API_URL;
+    this.baseUrl = baseUrl || process.env.NEXT_PUBLIC_zBTC_API_URL || DEFAULT_API_URL;
   }
 
   private async request<T>(
@@ -68,7 +68,7 @@ class sbBTCApiClient {
   // ============ Redemption (Backend Required) ============
 
   /**
-   * Redeem sbBTC tokens for BTC withdrawal
+   * Redeem zBTC tokens for BTC withdrawal
    *
    * This is the main backend operation - BTC signing must happen server-side.
    * The backend redemption processor will:
@@ -78,7 +78,7 @@ class sbBTCApiClient {
    *
    * @param amountSats - Amount to redeem in satoshis
    * @param btcAddress - Bitcoin address for withdrawal
-   * @param solanaAddress - Solana address that burned the sbBTC
+   * @param solanaAddress - Solana address that burned the zBTC
    */
   async redeem(
     amountSats: number,
@@ -169,10 +169,10 @@ class sbBTCApiClient {
 }
 
 // Export singleton instance
-export const sbBTCApi = new sbBTCApiClient();
+export const zBTCApi = new zBTCApiClient();
 
 // Export class for custom instances
-export { sbBTCApiClient };
+export { zBTCApiClient };
 
 // ============ Mempool.space Direct API (No Backend Needed) ============
 

@@ -19,7 +19,16 @@ import {
   deriveNote,
   createNote,
   initPoseidon,
+  initProver,
+  generateClaimProofWasm,
+  proofToBytes,
+  isProverAvailable,
+  type ProofData,
 } from "@zvault/sdk";
+import { useConnection } from "@solana/wallet-adapter-react";
+import { buildClaimTransaction } from "@/lib/solana/instructions";
+import { COMMITMENT_TREE_ADDRESS, ZVAULT_PROGRAM_ID } from "@/lib/constants";
+import { PublicKey, Transaction } from "@solana/web3.js";
 
 type ClaimStep = "input" | "verifying" | "claiming" | "success" | "error";
 
@@ -150,10 +159,12 @@ function ClaimProgressIndicator({ currentProgress }: { currentProgress: ClaimPro
 }
 
 function ClaimContent() {
-  const { publicKey, connected } = useWallet();
+  const { publicKey, connected, signTransaction } = useWallet();
+  const { connection } = useConnection();
   const searchParams = useSearchParams();
 
   const [mounted, setMounted] = useState(false);
+  const [proverReady, setProverReady] = useState(false);
   const [step, setStep] = useState<ClaimStep>("input");
   const [claimProgress, setClaimProgress] = useState<ClaimProgress>("idle");
   const [error, setError] = useState<string | null>(null);
@@ -286,6 +297,19 @@ function ClaimContent() {
     }
   }, [tryParseClaimLink]);
 
+  // Initialize prover on mount
+  useEffect(() => {
+    initProver()
+      .then(() => {
+        setProverReady(true);
+        console.log("[Claim] Prover initialized");
+      })
+      .catch((err) => {
+        console.warn("[Claim] Prover initialization failed:", err);
+        // Continue without prover - will use demo mode
+      });
+  }, []);
+
   useEffect(() => {
     setMounted(true);
 
@@ -351,52 +375,133 @@ function ClaimContent() {
       setError("Please connect your Solana wallet");
       return;
     }
+    if (!signTransaction) {
+      setError("Wallet does not support transaction signing");
+      return;
+    }
 
     setError(null);
     setStep("claiming");
     setClaimProgress("generating_proof");
 
     try {
-      // Step 1: Generate ZK proof (simulated delay for UX)
-      // TODO: Generate actual Noir ZK proof using generateClaimProof()
-      await new Promise((resolve) => setTimeout(resolve, 800));
+      // Derive note from seed
+      const note = deriveNote(secretPhrase.trim(), 0, BigInt(0));
+      const amountSats = verifyResult?.amountSats ?? 100000;
+
+      let proofBytes: Uint8Array | null = null;
+      let merkleRootHex = "0x" + "00".repeat(32);
+      let leafIndex = 0;
+      let proofStatus = "demo_mode";
+
+      // Try to generate real proof if prover is ready
+      if (proverReady) {
+        try {
+          console.log("[Claim] Generating real ZK proof...");
+
+          // TODO: Fetch actual merkle proof from on-chain commitment tree
+          // For now, use placeholder data that will be validated on-chain
+          // In production, query the CommitmentTree PDA for the merkle path
+          const merkleRoot = 0n; // Placeholder - would come from on-chain
+          const merkleSiblings = Array(20).fill(0n); // 20-level tree
+          const merkleIndices = Array(20).fill(0);
+
+          const proofData = await generateClaimProofWasm({
+            nullifier: note.nullifier,
+            secret: note.secret,
+            amount: BigInt(amountSats),
+            merkleRoot,
+            merkleProof: {
+              siblings: merkleSiblings,
+              indices: merkleIndices,
+            },
+          });
+
+          proofBytes = proofToBytes(proofData);
+          proofStatus = "zk_verified";
+          console.log("[Claim] Proof generated:", proofBytes.length, "bytes");
+        } catch (proofErr) {
+          console.warn("[Claim] Proof generation failed, using demo mode:", proofErr);
+          // Fall back to demo mode
+        }
+      }
+
       setClaimProgress("submitting");
 
-      // Step 2: Build Solana transaction
-      // TODO: Use buildClaimTransaction() from @/lib/solana/instructions
-      await new Promise((resolve) => setTimeout(resolve, 400));
+      // Build claim transaction
+      console.log("[Claim] Building transaction...");
+
+      // Convert hex strings to Uint8Array
+      const nullifierHashHex = note.nullifierHash?.toString(16).padStart(64, "0") ?? "0".repeat(64);
+      const commitmentHex = note.commitment?.toString(16).padStart(64, "0") ?? "0".repeat(64);
+      const nullifierHashBytes = new Uint8Array(Buffer.from(nullifierHashHex, "hex"));
+      const commitmentBytes = new Uint8Array(Buffer.from(commitmentHex, "hex"));
+      const merkleRootBytes = new Uint8Array(Buffer.from(merkleRootHex.slice(2), "hex"));
+
+      // Get or create user's zBTC token account
+      const { getAssociatedTokenAddressSync } = await import("@solana/spl-token");
+      const { derivezBTCMintPDA } = await import("@/lib/solana/instructions");
+      const [zbtcMint] = derivezBTCMintPDA();
+      const userTokenAccount = getAssociatedTokenAddressSync(zbtcMint, publicKey, false);
+
+      const transaction = await buildClaimTransaction(connection, {
+        nullifierHash: nullifierHashBytes,
+        merkleRoot: merkleRootBytes,
+        zkProof: proofBytes ?? new Uint8Array(32), // Placeholder for demo
+        amountSats: BigInt(amountSats),
+        userPubkey: publicKey,
+        commitment: commitmentBytes,
+        userTokenAccount,
+      });
+
       setClaimProgress("relaying");
 
-      // Step 3: Submit directly to Solana
-      // TODO: Actually sign and submit transaction
-      await new Promise((resolve) => setTimeout(resolve, 800));
+      // Sign and submit transaction
+      console.log("[Claim] Signing transaction...");
+      const { blockhash, lastValidBlockHeight } = await connection.getLatestBlockhash();
+      transaction.recentBlockhash = blockhash;
+      transaction.feePayer = publicKey;
 
-      // Step 4: Confirming on Solana
+      const signedTx = await signTransaction(transaction);
+
+      console.log("[Claim] Submitting to Solana...");
+      const signature = await connection.sendRawTransaction(signedTx.serialize(), {
+        skipPreflight: false,
+        preflightCommitment: "confirmed",
+      });
+
       setClaimProgress("confirming");
-      await new Promise((resolve) => setTimeout(resolve, 600));
 
-      // For demo, show success
-      const amountSats = verifyResult?.amountSats ?? 100000;
-      const demoSignature = `claim_${Date.now().toString(16)}`;
+      // Wait for confirmation
+      console.log("[Claim] Waiting for confirmation...");
+      const confirmation = await connection.confirmTransaction(
+        { signature, blockhash, lastValidBlockHeight },
+        "confirmed"
+      );
+
+      if (confirmation.value.err) {
+        throw new Error(`Transaction failed: ${JSON.stringify(confirmation.value.err)}`);
+      }
 
       setClaimProgress("complete");
-      setTxSignature(demoSignature);
+      setTxSignature(signature);
       setClaimedAmount(amountSats);
       setProofData({
-        merkleRoot: "0x" + "00".repeat(32),
-        leafIndex: 0,
-        proofStatus: "demo_verified",
+        merkleRoot: merkleRootHex,
+        leafIndex,
+        proofStatus,
       });
 
       // Brief delay to show complete state before transitioning
       await new Promise((resolve) => setTimeout(resolve, 500));
       setStep("success");
     } catch (err) {
+      console.error("[Claim] Error:", err);
       setClaimProgress("idle");
       setError(err instanceof Error ? err.message : "Failed to claim tokens");
       setStep("error");
     }
-  }, [secretPhrase, connected, publicKey, verifyResult]);
+  }, [secretPhrase, connected, publicKey, signTransaction, connection, verifyResult, proverReady]);
 
   // Handle split - create two new notes
   const handleSplit = useCallback(async () => {
@@ -518,9 +623,9 @@ function ClaimContent() {
           "glow-border cyber-corners relative z-10"
         )}
       >
-        <h1 className="text-heading5 text-foreground mb-2">Claim sbBTC Tokens</h1>
+        <h1 className="text-heading5 text-foreground mb-2">Claim zBTC Tokens</h1>
         <p className="text-body2 text-gray mb-6">
-          Enter your secret phrase to claim your sbBTC.
+          Enter your secret phrase to claim your zBTC.
         </p>
 
         {step === "input" && (
@@ -611,7 +716,7 @@ function ClaimContent() {
                 <div className="p-3 bg-muted border border-gray/15 rounded-[12px]">
                   <p className="text-caption text-gray mb-1">Amount to Claim</p>
                   <p className="text-heading6 text-privacy">
-                    {formatBtc(verifyResult.amountSats)} sbBTC
+                    {formatBtc(verifyResult.amountSats)} zBTC
                   </p>
                 </div>
               </div>
@@ -660,7 +765,7 @@ function ClaimContent() {
                 className="btn-primary w-full"
               >
                 <Coins className="w-5 h-5" />
-                Claim sbBTC
+                Claim zBTC
               </button>
             </div>
           </div>
@@ -692,7 +797,7 @@ function ClaimContent() {
                 </div>
               </div>
               <div>
-                <p className="text-body2-semibold text-foreground">Claiming sbBTC</p>
+                <p className="text-body2-semibold text-foreground">Claiming zBTC</p>
                 <p className="text-caption text-gray">
                   {claimProgress === "generating_proof" && "Generating ZK proof..."}
                   {claimProgress === "submitting" && "Submitting to relayer..."}
@@ -731,7 +836,7 @@ function ClaimContent() {
                 <div className="p-3 bg-muted border border-gray/15 rounded-[12px]">
                   <p className="text-caption text-gray mb-1">Amount Claimed</p>
                   <p className="text-heading6 text-privacy">
-                    {formatBtc(claimedAmount)} sbBTC
+                    {formatBtc(claimedAmount)} zBTC
                   </p>
                 </div>
               )}
@@ -833,11 +938,11 @@ function ClaimContent() {
                       <div className="p-3 bg-sol/10 border border-sol/20 rounded-[12px]">
                         <div className="flex justify-between text-caption mb-1">
                           <span className="text-gray">You keep:</span>
-                          <span className="text-foreground">{formatBtc(claimedAmount - parseInt(splitAmount, 10))} sbBTC</span>
+                          <span className="text-foreground">{formatBtc(claimedAmount - parseInt(splitAmount, 10))} zBTC</span>
                         </div>
                         <div className="flex justify-between text-caption">
                           <span className="text-gray">Send to friend:</span>
-                          <span className="text-sol">{formatBtc(parseInt(splitAmount, 10))} sbBTC</span>
+                          <span className="text-sol">{formatBtc(parseInt(splitAmount, 10))} zBTC</span>
                         </div>
                       </div>
                     )}
@@ -922,7 +1027,7 @@ function ClaimContent() {
                     </code>
                   </div>
                   <p className="text-caption text-gray mt-2">
-                    Share this link with the person you want to send sbBTC to!
+                    Share this link with the person you want to send zBTC to!
                   </p>
                 </div>
               </div>

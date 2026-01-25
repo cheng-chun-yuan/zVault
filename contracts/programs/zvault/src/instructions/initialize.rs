@@ -35,7 +35,7 @@ impl InitializeData {
 pub struct InitializeAccounts<'a> {
     pub pool_state: &'a AccountInfo,
     pub commitment_tree: &'a AccountInfo,
-    pub sbbtc_mint: &'a AccountInfo,
+    pub zbtc_mint: &'a AccountInfo,
     pub pool_vault: &'a AccountInfo,
     pub frost_vault: &'a AccountInfo,
     pub privacy_cash_pool: &'a AccountInfo,
@@ -51,7 +51,7 @@ impl<'a> InitializeAccounts<'a> {
 
         let pool_state = &accounts[0];
         let commitment_tree = &accounts[1];
-        let sbbtc_mint = &accounts[2];
+        let zbtc_mint = &accounts[2];
         let pool_vault = &accounts[3];
         let frost_vault = &accounts[4];
         let privacy_cash_pool = &accounts[5];
@@ -66,7 +66,7 @@ impl<'a> InitializeAccounts<'a> {
         Ok(Self {
             pool_state,
             commitment_tree,
-            sbbtc_mint,
+            zbtc_mint,
             pool_vault,
             frost_vault,
             privacy_cash_pool,
@@ -110,9 +110,9 @@ pub fn process_initialize(
     let accounts = InitializeAccounts::from_accounts(accounts)?;
     let _ix_data = InitializeData::from_bytes(data)?;
 
-    // Validate sbbtc_mint is owned by Token-2022
+    // Validate zbtc_mint is owned by Token-2022
     let token_2022_id = Pubkey::from(TOKEN_2022_PROGRAM_ID);
-    let mint_owner = accounts.sbbtc_mint.owner();
+    let mint_owner = accounts.zbtc_mint.owner();
     if mint_owner != &token_2022_id {
         return Err(ProgramError::InvalidAccountOwner);
     }
@@ -190,7 +190,7 @@ pub fn process_initialize(
 
         pool.bump = pool_bump;
         pool.authority.copy_from_slice(accounts.authority.key().as_ref());
-        pool.sbbtc_mint.copy_from_slice(accounts.sbbtc_mint.key().as_ref());
+        pool.zbtc_mint.copy_from_slice(accounts.zbtc_mint.key().as_ref());
         pool.privacy_cash_pool.copy_from_slice(accounts.privacy_cash_pool.key().as_ref());
         pool.pool_vault.copy_from_slice(accounts.pool_vault.key().as_ref());
         pool.frost_vault.copy_from_slice(accounts.frost_vault.key().as_ref());

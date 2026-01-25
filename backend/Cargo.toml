@@ -1,11 +1,11 @@
 [package]
-name = "sbbtc"
+name = "zbtc"
 version = "0.1.0"
 edition = "2021"
 
 # Main binary - minimal launcher
 [[bin]]
-name = "sbbtc-api"
+name = "zbtc-api"
 path = "src/main.rs"
 
 # Redemption service binary
@@ -14,43 +14,38 @@ name = "redemption"
 path = "src/bin/redemption.rs"
 
 [dependencies]
-# Cryptographic primitives
 sha2 = "0.10"
 
-# Bitcoin / Taproot
 bitcoin = { version = "0.32", features = ["rand-std"] }
 secp256k1 = { version = "0.29", features = ["rand-std", "global-context"] }
 
-# Solana
 solana-sdk = "2.0"
 solana-client = "2.0"
 borsh = "1.5"
 
-# Async runtime
 tokio = { version = "1.0", features = ["full"] }
 
-# Random number generation
 rand = "0.8"
 
-# Serialization
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 hex = "0.4"
 chrono = "0.4"
+base64 = "0.22"
 
-# Error handling
 thiserror = "1.0"
 
-# HTTP client for Esplora
 reqwest = { version = "0.11", features = ["json"] }
 
-# HTTP server (REST API + WebSocket)
 axum = { version = "0.7", features = ["ws"] }
 tower-http = { version = "0.5", features = ["cors"] }
 futures-util = "0.3"
 
-# Environment
+x25519-dalek = { version = "2.0", features = ["static_secrets"] }
+k256 = { version = "0.13", features = ["ecdh"] }
+
 dotenv = "0.15"
 
 [dev-dependencies]
 mockall = "0.13"
+tower = "0.5"

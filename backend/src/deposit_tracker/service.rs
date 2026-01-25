@@ -8,7 +8,7 @@
 //! 2. Service polls Esplora for incoming transactions
 //! 3. Once confirmed (6 blocks), sweeps UTXO to pool wallet
 //! 4. After sweep confirms (2 blocks), submits SPV proof to Solana
-//! 5. User can claim sbBTC once status is "ready"
+//! 5. User can claim zBTC once status is "ready"
 
 use solana_sdk::signature::Keypair;
 use std::collections::HashMap;

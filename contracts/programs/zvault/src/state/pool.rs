@@ -24,25 +24,25 @@ pub struct PoolState {
     /// Authority that can update state (FROST relayer)
     pub authority: [u8; 32],
 
-    /// sbBTC Token-2022 mint address
-    pub sbbtc_mint: [u8; 32],
+    /// zBTC Token-2022 mint address
+    pub zbtc_mint: [u8; 32],
 
     /// Privacy Cash pool address (for reference)
     pub privacy_cash_pool: [u8; 32],
 
-    /// Pool vault that holds sbBTC (PDA-controlled)
+    /// Pool vault that holds zBTC (PDA-controlled)
     pub pool_vault: [u8; 32],
 
-    /// FROST vault that holds sbBTC pending Privacy Cash deposit
+    /// FROST vault that holds zBTC pending Privacy Cash deposit
     pub frost_vault: [u8; 32],
 
     /// Total number of deposits recorded (u64 as bytes)
     deposit_count: [u8; 8],
 
-    /// Total sbBTC minted (in satoshis)
+    /// Total zBTC minted (in satoshis)
     total_minted: [u8; 8],
 
-    /// Total sbBTC burned (in satoshis)
+    /// Total zBTC burned (in satoshis)
     total_burned: [u8; 8],
 
     /// Number of pending redemption requests
@@ -63,7 +63,7 @@ pub struct PoolState {
     /// Maximum deposit amount (satoshis)
     max_deposit: [u8; 8],
 
-    /// Total sbBTC in shielded pool (users hold commitments, not public tokens)
+    /// Total zBTC in shielded pool (users hold commitments, not public tokens)
     total_shielded: [u8; 8],
 
     /// Reserved for future use

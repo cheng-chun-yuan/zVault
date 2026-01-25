@@ -1,9 +1,9 @@
-//! Claim instruction - claims sbBTC with ZK proof commitment
+//! Claim instruction - claims zBTC with ZK proof commitment
 //!
 //! ⚠️  DEPRECATED: This instruction is deprecated in the shielded-only architecture.
 //!
 //! In the new architecture:
-//! - sbBTC is minted to pool vault at deposit time (not to user)
+//! - zBTC is minted to pool vault at deposit time (not to user)
 //! - Users hold shielded commitments, never public tokens
 //! - Use request_redemption to withdraw and reveal amount
 //!
@@ -96,7 +96,7 @@ pub struct ClaimAccounts<'a> {
     pub pool_state: &'a AccountInfo,
     pub commitment_tree: &'a AccountInfo,
     pub nullifier_record: &'a AccountInfo,
-    pub sbbtc_mint: &'a AccountInfo,
+    pub zbtc_mint: &'a AccountInfo,
     pub user_token_account: &'a AccountInfo,
     pub user: &'a AccountInfo,
     pub token_program: &'a AccountInfo,
@@ -112,7 +112,7 @@ impl<'a> ClaimAccounts<'a> {
         let pool_state = &accounts[0];
         let commitment_tree = &accounts[1];
         let nullifier_record = &accounts[2];
-        let sbbtc_mint = &accounts[3];
+        let zbtc_mint = &accounts[3];
         let user_token_account = &accounts[4];
         let user = &accounts[5];
         let token_program = &accounts[6];
@@ -127,7 +127,7 @@ impl<'a> ClaimAccounts<'a> {
             pool_state,
             commitment_tree,
             nullifier_record,
-            sbbtc_mint,
+            zbtc_mint,
             user_token_account,
             user,
             token_program,
@@ -136,7 +136,7 @@ impl<'a> ClaimAccounts<'a> {
     }
 }
 
-/// Claim sbBTC with ZK proof commitment
+/// Claim zBTC with ZK proof commitment
 ///
 /// The proof is verified off-chain; on-chain we validate:
 /// 1. Public inputs match expected values
@@ -153,7 +153,7 @@ pub fn process_claim(
     // SECURITY: Validate account owners BEFORE deserializing any data
     validate_program_owner(accounts.pool_state, program_id)?;
     validate_program_owner(accounts.commitment_tree, program_id)?;
-    validate_token_2022_owner(accounts.sbbtc_mint)?;
+    validate_token_2022_owner(accounts.zbtc_mint)?;
     validate_token_2022_owner(accounts.user_token_account)?;
     validate_token_program_key(accounts.token_program)?;
 
@@ -258,13 +258,13 @@ pub fn process_claim(
         nullifier.set_operation_type(NullifierOperationType::FullWithdrawal);
     }
 
-    // Mint sbBTC to user
+    // Mint zBTC to user
     let bump_bytes = [pool_bump];
     let pool_signer_seeds: &[&[u8]] = &[PoolState::SEED, &bump_bytes];
 
-    crate::utils::mint_sbbtc(
+    crate::utils::mint_zbtc(
         accounts.token_program,
-        accounts.sbbtc_mint,
+        accounts.zbtc_mint,
         accounts.user_token_account,
         accounts.pool_state,
         ix_data.amount,

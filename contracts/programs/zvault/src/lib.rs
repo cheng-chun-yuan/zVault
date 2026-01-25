@@ -1,8 +1,8 @@
 //! zVault - Privacy-Preserving BTC to Solana Bridge (Pinocchio)
 //!
 //! SHIELDED-ONLY ARCHITECTURE:
-//! - sbBTC exists only as commitments in Merkle tree
-//! - Users never hold public sbBTC tokens
+//! - zBTC exists only as commitments in Merkle tree
+//! - Users never hold public zBTC tokens
 //! - Amount revealed ONLY at BTC withdrawal
 //!
 //! ## Privacy Guarantee

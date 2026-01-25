@@ -16,6 +16,7 @@ import {
   Send,
   Tag,
   Loader2,
+  Inbox,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { FeatureCard, type FeatureCardColor } from "@/components/ui";
@@ -39,7 +40,7 @@ const features: FeatureConfig[] = [
   {
     icon: <ArrowDownToLine className="w-full h-full" />,
     title: "Deposit",
-    description: "BTC → sbBTC",
+    description: "BTC → zBTC",
     subtext: "Get claim link",
     href: "/bridge/deposit",
     color: "btc",
@@ -53,17 +54,25 @@ const features: FeatureConfig[] = [
     color: "privacy",
   },
   {
+    icon: <Inbox className="w-full h-full" />,
+    title: "Inbox",
+    description: "Received zBTC",
+    subtext: "Stealth deposits",
+    href: "/bridge/received",
+    color: "privacy",
+  },
+  {
     icon: <Gift className="w-full h-full" />,
     title: "Claim",
     description: "Use claim link",
-    subtext: "Redeem sbBTC",
+    subtext: "Redeem zBTC",
     href: "/claim",
     color: "sol",
   },
   {
     icon: <ArrowUpFromLine className="w-full h-full" />,
     title: "Withdraw",
-    description: "sbBTC → BTC",
+    description: "zBTC → BTC",
     subtext: "Back to Bitcoin",
     href: "/bridge/withdraw",
     color: "btc",
@@ -358,7 +367,7 @@ export default function BridgePage() {
               </p>
               <p className="text-caption text-gray">
                 Your deposits and withdrawals are protected by zero-knowledge proofs.
-                No one can link your Bitcoin deposits to sbBTC claims.
+                No one can link your Bitcoin deposits to zBTC claims.
               </p>
             </div>
           </div>

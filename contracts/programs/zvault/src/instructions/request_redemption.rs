@@ -1,8 +1,8 @@
-//! Request redemption instruction - burns sbBTC from pool with ZK proof, queues BTC withdrawal
+//! Request redemption instruction - burns zBTC from pool with ZK proof, queues BTC withdrawal
 //!
 //! SHIELDED-ONLY ARCHITECTURE:
 //! - User proves ownership of commitment via ZK proof
-//! - sbBTC is burned from pool vault (not user wallet)
+//! - zBTC is burned from pool vault (not user wallet)
 //! - Amount is revealed here (unavoidable for BTC withdrawal)
 //! - This is the ONLY operation where amount becomes public
 
@@ -102,7 +102,7 @@ pub struct RequestRedemptionAccounts<'a> {
     pub commitment_tree: &'a AccountInfo,
     pub nullifier_record: &'a AccountInfo,
     pub redemption_request: &'a AccountInfo,
-    pub sbbtc_mint: &'a AccountInfo,
+    pub zbtc_mint: &'a AccountInfo,
     pub pool_vault: &'a AccountInfo,
     pub user: &'a AccountInfo,
     pub token_program: &'a AccountInfo,
@@ -119,7 +119,7 @@ impl<'a> RequestRedemptionAccounts<'a> {
         let commitment_tree = &accounts[1];
         let nullifier_record = &accounts[2];
         let redemption_request = &accounts[3];
-        let sbbtc_mint = &accounts[4];
+        let zbtc_mint = &accounts[4];
         let pool_vault = &accounts[5];
         let user = &accounts[6];
         let token_program = &accounts[7];
@@ -135,7 +135,7 @@ impl<'a> RequestRedemptionAccounts<'a> {
             commitment_tree,
             nullifier_record,
             redemption_request,
-            sbbtc_mint,
+            zbtc_mint,
             pool_vault,
             user,
             token_program,
@@ -147,7 +147,7 @@ impl<'a> RequestRedemptionAccounts<'a> {
 /// Process redemption request (shielded-only architecture)
 ///
 /// This is the ONLY operation where amount is revealed (unavoidable for BTC withdrawal).
-/// User proves ownership via ZK proof, sbBTC is burned from pool vault.
+/// User proves ownership via ZK proof, zBTC is burned from pool vault.
 pub fn process_request_redemption(
     program_id: &Pubkey,
     accounts: &[AccountInfo],
@@ -160,7 +160,7 @@ pub fn process_request_redemption(
     validate_program_owner(accounts.pool_state, program_id)?;
     validate_program_owner(accounts.commitment_tree, program_id)?;
     // Note: nullifier_record and redemption_request may not exist yet (will be created)
-    validate_token_2022_owner(accounts.sbbtc_mint)?;
+    validate_token_2022_owner(accounts.zbtc_mint)?;
     validate_token_2022_owner(accounts.pool_vault)?;
     validate_token_program_key(accounts.token_program)?;
 
@@ -278,14 +278,14 @@ pub fn process_request_redemption(
         nullifier.set_operation_type(NullifierOperationType::FullWithdrawal);
     }
 
-    // Burn sbBTC from pool vault (not user wallet - shielded-only architecture)
+    // Burn zBTC from pool vault (not user wallet - shielded-only architecture)
     // Pool PDA is the authority for the pool vault
     let bump_bytes = [pool_bump];
     let pool_signer_seeds: &[&[u8]] = &[PoolState::SEED, &bump_bytes];
 
-    crate::utils::burn_sbbtc_signed(
+    crate::utils::burn_zbtc_signed(
         accounts.token_program,
-        accounts.sbbtc_mint,
+        accounts.zbtc_mint,
         accounts.pool_vault,
         accounts.pool_state,
         ix_data.amount_sats,

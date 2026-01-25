@@ -1,6 +1,6 @@
 //! Redemption Service
 //!
-//! Processes sbBTC burns on Solana and triggers BTC withdrawals.
+//! Processes zBTC burns on Solana and triggers BTC withdrawals.
 //!
 //! # Flow
 //!
@@ -9,7 +9,7 @@
 //! │                    REDEMPTION FLOW                              │
 //! ├─────────────────────────────────────────────────────────────────┤
 //! │                                                                 │
-//! │  1. User burns sbBTC on Solana                                 │
+//! │  1. User burns zBTC on Solana                                 │
 //! │     └── Calls: request_redemption(amount, btc_address)         │
 //! │                                                                 │
 //! │  2. Service detects burn event                                  │

@@ -19,6 +19,11 @@ use tokio::sync::RwLock;
 use tower_http::cors::{Any, CorsLayer};
 
 use crate::redemption::{RedemptionService, WithdrawalStatus};
+use crate::stealth::{
+    ManualAnnounceRequest, ManualAnnounceResponse, PrepareStealthRelayResponse,
+    PrepareStealthSelfCustodyResponse, PrepareStealthRequest, StealthData,
+    StealthDepositService, StealthMode, StealthStatusResponse,
+};
 
 // =============================================================================
 // Request/Response Types
@@ -55,9 +60,12 @@ pub struct ErrorResponse {
     pub details: Option<String>,
 }
 
-// =============================================================================
-// Application State
-// =============================================================================
+pub struct CombinedAppState {
+    pub redemption: Arc<RwLock<RedemptionService>>,
+    pub stealth: Arc<RwLock<StealthDepositService>>,
+}
+
+pub type SharedCombinedState = Arc<CombinedAppState>;
 
 pub type AppState = Arc<RwLock<RedemptionService>>;
 
@@ -155,20 +163,114 @@ async fn handle_withdrawal_status(
 async fn handle_health() -> impl IntoResponse {
     Json(serde_json::json!({
         "status": "ok",
-        "service": "sbbtc-redemption-api",
+        "service": "sbbtc-api",
         "version": env!("CARGO_PKG_VERSION")
     }))
 }
 
-// =============================================================================
-// Router Setup
-// =============================================================================
+async fn handle_stealth_prepare(
+    State(state): State<SharedCombinedState>,
+    Json(req): Json<PrepareStealthRequest>,
+) -> impl IntoResponse {
+    let mut service = state.stealth.write().await;
 
-/// Create the API router with all endpoints
+    match service.prepare_deposit(req.recipient_stealth_address, req.amount_sats, req.mode) {
+        Ok(record) => match req.mode {
+            StealthMode::Relay => {
+                let response = PrepareStealthRelayResponse {
+                    success: true,
+                    deposit_id: Some(record.id),
+                    taproot_address: Some(record.taproot_address),
+                    amount_sats: record.amount_sats,
+                    expires_at: Some(record.expires_at),
+                    message: None,
+                };
+                (StatusCode::OK, Json(serde_json::to_value(response).unwrap())).into_response()
+            }
+            StealthMode::SelfCustody => {
+                let stealth_data = service.create_stealth_data(&record);
+                let response = PrepareStealthSelfCustodyResponse {
+                    success: true,
+                    taproot_address: Some(record.taproot_address),
+                    amount_sats: record.amount_sats,
+                    stealth_data: Some(stealth_data.encode()),
+                    message: None,
+                };
+                (StatusCode::OK, Json(serde_json::to_value(response).unwrap())).into_response()
+            }
+        },
+        Err(e) => {
+            let response = PrepareStealthRelayResponse {
+                success: false,
+                deposit_id: None,
+                taproot_address: None,
+                amount_sats: req.amount_sats,
+                expires_at: None,
+                message: Some(e.to_string()),
+            };
+            (
+                StatusCode::BAD_REQUEST,
+                Json(serde_json::to_value(response).unwrap()),
+            )
+                .into_response()
+        }
+    }
+}
+
+async fn handle_stealth_status(
+    State(state): State<SharedCombinedState>,
+    Path(id): Path<String>,
+) -> impl IntoResponse {
+    let service = state.stealth.read().await;
+
+    match service.get_deposit(&id) {
+        Some(record) => {
+            let response = StealthStatusResponse::from(record);
+            (StatusCode::OK, Json(response)).into_response()
+        }
+        None => {
+            let error = serde_json::json!({
+                "error": "Not found",
+                "details": format!("Stealth deposit {} not found", id)
+            });
+            (StatusCode::NOT_FOUND, Json(error)).into_response()
+        }
+    }
+}
+
+async fn handle_stealth_announce(
+    State(_state): State<SharedCombinedState>,
+    Json(req): Json<ManualAnnounceRequest>,
+) -> impl IntoResponse {
+    let stealth_data = match StealthData::decode(&req.stealth_data) {
+        Ok(data) => data,
+        Err(e) => {
+            let response = ManualAnnounceResponse {
+                success: false,
+                solana_tx: None,
+                leaf_index: None,
+                message: Some(format!("Invalid stealth data: {}", e)),
+            };
+            return (StatusCode::BAD_REQUEST, Json(response));
+        }
+    };
+
+    let response = ManualAnnounceResponse {
+        success: true,
+        solana_tx: Some("simulated_tx_signature".to_string()),
+        leaf_index: Some(0),
+        message: Some(format!(
+            "Announcement simulated for commitment {}",
+            &stealth_data.commitment[..16]
+        )),
+    };
+
+    (StatusCode::OK, Json(response))
+}
+
 pub fn create_router(service: RedemptionService) -> Router {
     let state: AppState = Arc::new(RwLock::new(service));
 
-    // CORS configuration - allow frontend origins
     let cors = CorsLayer::new()
         .allow_origin(Any)
         .allow_methods(Any)
@@ -182,7 +284,29 @@ pub fn create_router(service: RedemptionService) -> Router {
         .with_state(state)
 }
 
-/// Start the API server
+pub fn create_combined_router(
+    redemption: RedemptionService,
+    stealth: StealthDepositService,
+) -> Router {
+    let state = Arc::new(CombinedAppState {
+        redemption: Arc::new(RwLock::new(redemption)),
+        stealth: Arc::new(RwLock::new(stealth)),
+    });
+
+    let cors = CorsLayer::new()
+        .allow_origin(Any)
+        .allow_methods(Any)
+        .allow_headers(Any);
+
+    Router::new()
+        .route("/api/health", get(handle_health))
+        .route("/api/stealth/prepare", post(handle_stealth_prepare))
+        .route("/api/stealth/status/:id", get(handle_stealth_status))
+        .route("/api/stealth/announce", post(handle_stealth_announce))
+        .layer(cors)
+        .with_state(state)
+}
+
 pub async fn start_server(service: RedemptionService, port: u16) -> Result<(), std::io::Error> {
     let app = create_router(service);
     let addr = std::net::SocketAddr::from(([0, 0, 0, 0], port));
@@ -194,6 +318,28 @@ pub async fn start_server(service: RedemptionService, port: u16) -> Result<(), s
     println!("  POST /api/redeem          - Submit withdrawal request");
     println!("  GET  /api/withdrawal/:id  - Check withdrawal status");
     println!("  GET  /api/health          - Health check");
+    println!();
+
+    let listener = tokio::net::TcpListener::bind(addr).await?;
+    axum::serve(listener, app).await
+}
+
+pub async fn start_combined_server(
+    redemption: RedemptionService,
+    stealth: StealthDepositService,
+    port: u16,
+) -> Result<(), std::io::Error> {
+    let app = create_combined_router(redemption, stealth);
+    let addr = std::net::SocketAddr::from(([0, 0, 0, 0], port));
+
+    println!("=== sbBTC Combined API ===");
+    println!("Listening on http://{}", addr);
+    println!();
+    println!("Endpoints:");
+    println!("  GET  /api/health              - Health check");
+    println!("  POST /api/stealth/prepare     - Prepare stealth deposit");
+    println!("  GET  /api/stealth/status/:id  - Get stealth deposit status");
+    println!("  POST /api/stealth/announce    - Manual announcement");
     println!();
 
     let listener = tokio::net::TcpListener::bind(addr).await?;

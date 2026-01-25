@@ -21,4 +21,4 @@ export const ZVAULT_PROGRAM_ID = process.env.NEXT_PUBLIC_PROGRAM_ID || "BDH9iTYp
 export const BTC_LIGHT_CLIENT_ID = process.env.NEXT_PUBLIC_BTC_LIGHT_CLIENT || "8qntLj65faXiqMKcQypyJ389Yq6MBU5X7AB5qsLnvKgy";
 export const POOL_STATE_ADDRESS = process.env.NEXT_PUBLIC_POOL_STATE || "9oEs3fjvP7xg3xhcwBhrS7Q5LNv53oTVViKuJauWqLT5";
 export const COMMITMENT_TREE_ADDRESS = process.env.NEXT_PUBLIC_COMMITMENT_TREE || "oyKoCdXQ2Jh3FuV15KK4Ar9g7m57XF2L4edmYnLFXRb";
-export const SBBTC_MINT_ADDRESS = process.env.NEXT_PUBLIC_SBBTC_MINT || "6dzRonQCS3xdtKPdf4eBnrjzQBFEHQH4Amh7TuedUyy3";
+export const ZBTC_MINT_ADDRESS = process.env.NEXT_PUBLIC_ZBTC_MINT || "6dzRonQCS3xdtKPdf4eBnrjzQBFEHQH4Amh7TuedUyy3";

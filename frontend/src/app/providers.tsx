@@ -5,6 +5,7 @@ import { ConnectionProvider, WalletProvider } from "@solana/wallet-adapter-react
 import { WalletModalProvider } from "@solana/wallet-adapter-react-ui";
 import { PhantomWalletAdapter } from "@solana/wallet-adapter-wallets";
 import { clusterApiUrl } from "@solana/web3.js";
+import { Toaster } from "sonner";
 import { BitcoinWalletProvider } from "@/contexts/bitcoin-wallet-context";
 import { NoteStorageProvider } from "@/hooks/use-note-storage";
 import { ZVaultKeysProvider } from "@/hooks/use-zvault-keys";
@@ -37,6 +38,21 @@ export function Providers({ children }: { children: React.ReactNode }) {
             <BitcoinWalletProvider>
               <NoteStorageProvider>
                 {children}
+                <Toaster
+                  position="top-right"
+                  toastOptions={{
+                    style: {
+                      background: "#16161B",
+                      border: "1px solid rgba(139, 138, 158, 0.15)",
+                      color: "#C7C5D1",
+                    },
+                    classNames: {
+                      success: "!border-[#14F195]/30 !bg-[#14F195]/10",
+                      error: "!border-red-500/30 !bg-red-500/10",
+                      warning: "!border-[#FFA726]/30 !bg-[#FFA726]/10",
+                    },
+                  }}
+                />
               </NoteStorageProvider>
             </BitcoinWalletProvider>
           </ZVaultKeysProvider>
