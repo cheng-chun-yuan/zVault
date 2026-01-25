@@ -1,32 +1,49 @@
 /**
- * RAILGUN-style Key Derivation for zVault
+ * EIP-5564/DKSAP-style Key Derivation for zVault
  *
  * Implements a dual-key system derived from Solana wallet signature:
- * - Spending Key (Grumpkin): Used for in-circuit ECDH (~2k constraints)
- * - Viewing Key (X25519): Used for off-chain scanning (fast)
+ * - Spending Key (Grumpkin): Used for stealth key derivation and nullifier
+ * - Viewing Key (Grumpkin): Used for off-chain scanning with ECDH
  *
- * Key Architecture:
+ * Key Architecture (Grumpkin-Only, Single Ephemeral Pattern):
  * ```
  * Solana Wallet (Ed25519)
  *         │
- *         │ signs message: "zVault spending key v1"
+ *         │ signs message: "zVault key derivation v1"
  *         ▼
  *    Signature (64 bytes)
  *         │
- *         ├──► SHA256 ──► Grumpkin Spending Key (for ZK proofs)
+ *         ├──► hash(sig || "spend") ──► Grumpkin Spending Key (for nullifier)
  *         │
- *         └──► SHA256(sig || "view") ──► X25519 Viewing Key (for scanning)
+ *         └──► hash(sig || "view") ──► Grumpkin Viewing Key (for scanning)
+ * ```
+ *
+ * Stealth Address Flow (EIP-5564/DKSAP Pattern):
+ * ```
+ * Sender:
+ *   1. ephemeral = random Grumpkin keypair
+ *   2. sharedSecret = ECDH(ephemeral.priv, recipientViewingPub)
+ *   3. stealthPub = spendingPub + hash(sharedSecret) * G
+ *   4. commitment = Poseidon2(stealthPub, amount)
+ *
+ * Recipient (viewing key - can detect):
+ *   1. sharedSecret = ECDH(viewingPriv, ephemeralPub)
+ *   2. stealthPub = spendingPub + hash(sharedSecret) * G
+ *   3. Verify commitment matches
+ *
+ * Recipient (spending key - can claim):
+ *   1. stealthPriv = spendingPriv + hash(sharedSecret)
+ *   2. nullifier = Poseidon2(stealthPriv, leafIndex)
  * ```
  *
  * Security Properties:
- * - Spending Key: Required for nullifier derivation and proof generation
- * - Viewing Key: Can scan/decrypt but CANNOT spend (no nullifier derivation)
+ * - Spending Key: Required for stealthPriv and nullifier derivation
+ * - Viewing Key: Can scan but CANNOT derive stealthPriv (ECDLP protection)
  * - Both derived from Solana wallet - no separate backup needed
- * - Delegation: Viewing key can be shared with auditors for read-only access
+ * - Single ephemeral key per deposit (standard EIP-5564/Umbra pattern)
  */
 
 import { sha256 } from "@noble/hashes/sha256";
-import { box } from "tweetnacl";
 import {
   scalarFromBytes,
   pointMul,
@@ -41,33 +58,41 @@ import {
 
 /**
  * Complete zVault key hierarchy derived from Solana wallet
+ *
+ * Uses dual Grumpkin keys (EIP-5564/DKSAP pattern):
+ * - Spending key: For stealthPriv derivation and nullifier generation
+ * - Viewing key: For ECDH-based scanning (can detect but cannot spend)
  */
 export interface ZVaultKeys {
   /** Solana public key (32 bytes) - user identity */
   solanaPublicKey: Uint8Array;
 
-  /** Grumpkin spending private key (scalar) - for ZK proofs */
+  /** Grumpkin spending private key (scalar) - for stealthPriv and nullifier */
   spendingPrivKey: bigint;
 
   /** Grumpkin spending public key (point) - share publicly */
   spendingPubKey: GrumpkinPoint;
 
-  /** X25519 viewing private key (32 bytes) - for scanning */
-  viewingPrivKey: Uint8Array;
+  /** Grumpkin viewing private key (scalar) - for ECDH scanning */
+  viewingPrivKey: bigint;
 
-  /** X25519 viewing public key (32 bytes) - share publicly */
-  viewingPubKey: Uint8Array;
+  /** Grumpkin viewing public key (point) - share publicly */
+  viewingPubKey: GrumpkinPoint;
 }
 
 /**
- * Stealth meta-address for receiving funds
- * This is what users share publicly to receive private payments
+ * Stealth meta-address for receiving funds (EIP-5564/DKSAP pattern)
+ *
+ * This is what users share publicly to receive private payments.
+ * Both keys are Grumpkin points for consistent cryptography.
+ *
+ * Total size: 66 bytes (33 + 33 compressed)
  */
 export interface StealthMetaAddress {
   /** Grumpkin spending public key (33 bytes compressed) */
   spendingPubKey: Uint8Array;
 
-  /** X25519 viewing public key (32 bytes) */
+  /** Grumpkin viewing public key (33 bytes compressed) */
   viewingPubKey: Uint8Array;
 }
 
@@ -101,10 +126,12 @@ export enum ViewPermissions {
 
 /**
  * Delegated viewing key for auditors/compliance
+ *
+ * Uses Grumpkin scalar for viewing key (matches EIP-5564/DKSAP pattern)
  */
 export interface DelegatedViewKey {
-  /** X25519 viewing private key */
-  viewingPrivKey: Uint8Array;
+  /** Grumpkin viewing private key (scalar) */
+  viewingPrivKey: bigint;
 
   /** Permission flags */
   permissions: ViewPermissions;
@@ -120,10 +147,13 @@ export interface DelegatedViewKey {
 
 /** Message to sign for key derivation */
 export const SPENDING_KEY_DERIVATION_MESSAGE =
-  "zVault spending key derivation v1";
+  "zVault key derivation v1";
+
+/** Domain separator for spending key derivation */
+const SPENDING_KEY_DOMAIN = "spend";
 
 /** Domain separator for viewing key derivation */
-const VIEWING_KEY_DOMAIN = "viewing";
+const VIEWING_KEY_DOMAIN = "view";
 
 // ========== Wallet Adapter Interface ==========
 
@@ -163,6 +193,8 @@ export async function deriveKeysFromWallet(
 /**
  * Derive zVault keys from a signature (for testing or custom flows)
  *
+ * Uses Grumpkin for both spending and viewing keys (EIP-5564/DKSAP pattern).
+ *
  * SECURITY: Intermediate key material is cleared from memory after use.
  *
  * @param signature - 64-byte Ed25519 signature
@@ -181,20 +213,22 @@ export function deriveKeysFromSignature(
     throw new Error("Solana public key must be 32 bytes");
   }
 
-  // Derive spending key: SHA256(signature) → Grumpkin scalar
-  const spendingSeed = sha256(signature);
+  // Derive spending key: SHA256(signature || "spend") → Grumpkin scalar
+  const spendingSeed = sha256(
+    concatBytes(signature, new TextEncoder().encode(SPENDING_KEY_DOMAIN))
+  );
   const spendingPrivKey = scalarFromBytes(spendingSeed);
   const spendingPubKey = pointMul(spendingPrivKey, GRUMPKIN_GENERATOR);
 
   // Clear intermediate seed
   clearKey(spendingSeed);
 
-  // Derive viewing key: SHA256(signature || "viewing") → X25519 scalar
+  // Derive viewing key: SHA256(signature || "view") → Grumpkin scalar
   const viewingSeed = sha256(
     concatBytes(signature, new TextEncoder().encode(VIEWING_KEY_DOMAIN))
   );
-  // X25519 requires clamping (done by tweetnacl internally)
-  const viewingKeyPair = box.keyPair.fromSecretKey(viewingSeed);
+  const viewingPrivKey = scalarFromBytes(viewingSeed);
+  const viewingPubKey = pointMul(viewingPrivKey, GRUMPKIN_GENERATOR);
 
   // Clear intermediate seed
   clearKey(viewingSeed);
@@ -203,8 +237,8 @@ export function deriveKeysFromSignature(
     solanaPublicKey,
     spendingPrivKey,
     spendingPubKey,
-    viewingPrivKey: viewingKeyPair.secretKey,
-    viewingPubKey: viewingKeyPair.publicKey,
+    viewingPrivKey,
+    viewingPubKey,
   };
 }
 
@@ -231,12 +265,14 @@ export function deriveKeysFromSeed(seed: Uint8Array): ZVaultKeys {
  * Create a stealth meta-address from zVault keys
  *
  * This is the public address that users share to receive funds.
- * It contains the spending and viewing public keys.
+ * It contains both spending and viewing public keys (both Grumpkin).
+ *
+ * Size: 66 bytes (33 + 33 compressed)
  */
 export function createStealthMetaAddress(keys: ZVaultKeys): StealthMetaAddress {
   return {
     spendingPubKey: pubKeyToBytes(keys.spendingPubKey),
-    viewingPubKey: keys.viewingPubKey,
+    viewingPubKey: pubKeyToBytes(keys.viewingPubKey),
   };
 }
 
@@ -265,21 +301,21 @@ export function deserializeStealthMetaAddress(
 }
 
 /**
- * Parse a stealth meta-address and extract the Grumpkin public key
+ * Parse a stealth meta-address and extract both Grumpkin public keys
  */
 export function parseStealthMetaAddress(meta: StealthMetaAddress): {
   spendingPubKey: GrumpkinPoint;
-  viewingPubKey: Uint8Array;
+  viewingPubKey: GrumpkinPoint;
 } {
   return {
     spendingPubKey: pubKeyFromBytes(meta.spendingPubKey),
-    viewingPubKey: meta.viewingPubKey,
+    viewingPubKey: pubKeyFromBytes(meta.viewingPubKey),
   };
 }
 
 /**
- * Encode stealth meta-address as a single string (65 bytes → hex)
- * Format: spendingPubKey (33 bytes) || viewingPubKey (32 bytes)
+ * Encode stealth meta-address as a single string (66 bytes → hex)
+ * Format: spendingPubKey (33 bytes) || viewingPubKey (33 bytes)
  */
 export function encodeStealthMetaAddress(meta: StealthMetaAddress): string {
   const combined = concatBytes(meta.spendingPubKey, meta.viewingPubKey);
@@ -291,12 +327,12 @@ export function encodeStealthMetaAddress(meta: StealthMetaAddress): string {
  */
 export function decodeStealthMetaAddress(encoded: string): StealthMetaAddress {
   const bytes = hexToBytes(encoded);
-  if (bytes.length !== 65) {
-    throw new Error("Invalid stealth meta-address length (expected 65 bytes)");
+  if (bytes.length !== 66) {
+    throw new Error("Invalid stealth meta-address length (expected 66 bytes)");
   }
   return {
     spendingPubKey: bytes.slice(0, 33),
-    viewingPubKey: bytes.slice(33, 65),
+    viewingPubKey: bytes.slice(33, 66),
   };
 }
 
@@ -340,6 +376,9 @@ export function serializeDelegatedViewKey(
   key: DelegatedViewKey,
   password?: string
 ): string {
+  // Convert bigint to bytes for serialization
+  const viewingPrivKeyBytes = scalarToBytes(key.viewingPrivKey);
+
   if (!password) {
     // WARNING: Unencrypted serialization - for backward compatibility only
     console.warn(
@@ -347,9 +386,9 @@ export function serializeDelegatedViewKey(
       "This is a security risk. Provide a password for encryption."
     );
     const obj = {
-      version: 1,
+      version: 3,
       encrypted: false,
-      viewingPrivKey: bytesToHex(key.viewingPrivKey),
+      viewingPrivKey: bytesToHex(viewingPrivKeyBytes),
       permissions: key.permissions,
       expiresAt: key.expiresAt,
       label: key.label,
@@ -374,14 +413,14 @@ export function serializeDelegatedViewKey(
   const xorKey = sha256(concatBytes(encryptionKey, nonce));
   const encryptedPrivKey = new Uint8Array(32);
   for (let i = 0; i < 32; i++) {
-    encryptedPrivKey[i] = key.viewingPrivKey[i] ^ xorKey[i];
+    encryptedPrivKey[i] = viewingPrivKeyBytes[i] ^ xorKey[i];
   }
 
   // Compute MAC: SHA256(encryptionKey || encryptedPrivKey)
   const mac = sha256(concatBytes(encryptionKey, encryptedPrivKey));
 
   const obj = {
-    version: 2,
+    version: 3,
     encrypted: true,
     salt: bytesToHex(salt),
     nonce: bytesToHex(nonce),
@@ -407,17 +446,18 @@ export function deserializeDelegatedViewKey(
 ): DelegatedViewKey {
   const obj = JSON.parse(json);
 
-  if (!obj.encrypted || obj.version === 1) {
-    // Unencrypted format (legacy or no password provided during serialization)
+  if (!obj.encrypted) {
+    // Unencrypted format
+    const privKeyBytes = hexToBytes(obj.viewingPrivKey);
     return {
-      viewingPrivKey: hexToBytes(obj.viewingPrivKey),
+      viewingPrivKey: scalarFromBytes(privKeyBytes),
       permissions: obj.permissions,
       expiresAt: obj.expiresAt,
       label: obj.label,
     };
   }
 
-  // Encrypted format (version 2)
+  // Encrypted format (version 2 or 3)
   if (!password) {
     throw new Error("Password required to decrypt viewing key");
   }
@@ -440,13 +480,13 @@ export function deserializeDelegatedViewKey(
 
   // Decrypt viewing private key
   const xorKey = sha256(concatBytes(encryptionKey, nonce));
-  const viewingPrivKey = new Uint8Array(32);
+  const viewingPrivKeyBytes = new Uint8Array(32);
   for (let i = 0; i < 32; i++) {
-    viewingPrivKey[i] = ciphertext[i] ^ xorKey[i];
+    viewingPrivKeyBytes[i] = ciphertext[i] ^ xorKey[i];
   }
 
   return {
-    viewingPrivKey,
+    viewingPrivKey: scalarFromBytes(viewingPrivKeyBytes),
     permissions: obj.permissions,
     expiresAt: obj.expiresAt,
     label: obj.label,
@@ -504,20 +544,21 @@ export function clearKey(key: Uint8Array): void {
  * Securely clear all sensitive keys from a ZVaultKeys object
  *
  * Call this when you're done using the keys to minimize exposure window.
- * Note: The spendingPrivKey is a bigint and cannot be reliably cleared in JS.
+ * Note: BigInt values cannot be reliably cleared in JS.
  */
 export function clearZVaultKeys(keys: ZVaultKeys): void {
-  clearKey(keys.viewingPrivKey);
-  // Note: spendingPrivKey is a bigint, we can only set it to 0n
+  // Note: bigints cannot be reliably cleared in JS, we can only set to 0n
   // This doesn't guarantee memory clearing but removes the reference
   (keys as { spendingPrivKey: bigint }).spendingPrivKey = 0n;
+  (keys as { viewingPrivKey: bigint }).viewingPrivKey = 0n;
 }
 
 /**
  * Securely clear a delegated viewing key
  */
 export function clearDelegatedViewKey(key: DelegatedViewKey): void {
-  clearKey(key.viewingPrivKey);
+  // Note: bigints cannot be reliably cleared in JS
+  (key as { viewingPrivKey: bigint }).viewingPrivKey = 0n;
 }
 
 /**
@@ -527,14 +568,14 @@ export function clearDelegatedViewKey(key: DelegatedViewKey): void {
 export function extractViewOnlyBundle(keys: ZVaultKeys): {
   solanaPublicKey: Uint8Array;
   spendingPubKey: Uint8Array;
-  viewingPrivKey: Uint8Array;
+  viewingPrivKey: bigint;
   viewingPubKey: Uint8Array;
 } {
   return {
     solanaPublicKey: keys.solanaPublicKey,
     spendingPubKey: pubKeyToBytes(keys.spendingPubKey),
     viewingPrivKey: keys.viewingPrivKey,
-    viewingPubKey: keys.viewingPubKey,
+    viewingPubKey: pubKeyToBytes(keys.viewingPubKey),
   };
 }
 

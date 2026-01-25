@@ -1,53 +1,79 @@
 /**
- * RAILGUN-style Key Derivation for zVault
+ * EIP-5564/DKSAP-style Key Derivation for zVault
  *
  * Implements a dual-key system derived from Solana wallet signature:
- * - Spending Key (Grumpkin): Used for in-circuit ECDH (~2k constraints)
- * - Viewing Key (X25519): Used for off-chain scanning (fast)
+ * - Spending Key (Grumpkin): Used for stealth key derivation and nullifier
+ * - Viewing Key (Grumpkin): Used for off-chain scanning with ECDH
  *
- * Key Architecture:
+ * Key Architecture (Grumpkin-Only, Single Ephemeral Pattern):
  * ```
  * Solana Wallet (Ed25519)
  *         │
- *         │ signs message: "zVault spending key v1"
+ *         │ signs message: "zVault key derivation v1"
  *         ▼
  *    Signature (64 bytes)
  *         │
- *         ├──► SHA256 ──► Grumpkin Spending Key (for ZK proofs)
+ *         ├──► hash(sig || "spend") ──► Grumpkin Spending Key (for nullifier)
  *         │
- *         └──► SHA256(sig || "view") ──► X25519 Viewing Key (for scanning)
+ *         └──► hash(sig || "view") ──► Grumpkin Viewing Key (for scanning)
+ * ```
+ *
+ * Stealth Address Flow (EIP-5564/DKSAP Pattern):
+ * ```
+ * Sender:
+ *   1. ephemeral = random Grumpkin keypair
+ *   2. sharedSecret = ECDH(ephemeral.priv, recipientViewingPub)
+ *   3. stealthPub = spendingPub + hash(sharedSecret) * G
+ *   4. commitment = Poseidon2(stealthPub, amount)
+ *
+ * Recipient (viewing key - can detect):
+ *   1. sharedSecret = ECDH(viewingPriv, ephemeralPub)
+ *   2. stealthPub = spendingPub + hash(sharedSecret) * G
+ *   3. Verify commitment matches
+ *
+ * Recipient (spending key - can claim):
+ *   1. stealthPriv = spendingPriv + hash(sharedSecret)
+ *   2. nullifier = Poseidon2(stealthPriv, leafIndex)
  * ```
  *
  * Security Properties:
- * - Spending Key: Required for nullifier derivation and proof generation
- * - Viewing Key: Can scan/decrypt but CANNOT spend (no nullifier derivation)
+ * - Spending Key: Required for stealthPriv and nullifier derivation
+ * - Viewing Key: Can scan but CANNOT derive stealthPriv (ECDLP protection)
  * - Both derived from Solana wallet - no separate backup needed
- * - Delegation: Viewing key can be shared with auditors for read-only access
+ * - Single ephemeral key per deposit (standard EIP-5564/Umbra pattern)
  */
 import { type GrumpkinPoint } from "./grumpkin";
 /**
  * Complete zVault key hierarchy derived from Solana wallet
+ *
+ * Uses dual Grumpkin keys (EIP-5564/DKSAP pattern):
+ * - Spending key: For stealthPriv derivation and nullifier generation
+ * - Viewing key: For ECDH-based scanning (can detect but cannot spend)
  */
 export interface ZVaultKeys {
     /** Solana public key (32 bytes) - user identity */
     solanaPublicKey: Uint8Array;
-    /** Grumpkin spending private key (scalar) - for ZK proofs */
+    /** Grumpkin spending private key (scalar) - for stealthPriv and nullifier */
     spendingPrivKey: bigint;
     /** Grumpkin spending public key (point) - share publicly */
     spendingPubKey: GrumpkinPoint;
-    /** X25519 viewing private key (32 bytes) - for scanning */
-    viewingPrivKey: Uint8Array;
-    /** X25519 viewing public key (32 bytes) - share publicly */
-    viewingPubKey: Uint8Array;
+    /** Grumpkin viewing private key (scalar) - for ECDH scanning */
+    viewingPrivKey: bigint;
+    /** Grumpkin viewing public key (point) - share publicly */
+    viewingPubKey: GrumpkinPoint;
 }
 /**
- * Stealth meta-address for receiving funds
- * This is what users share publicly to receive private payments
+ * Stealth meta-address for receiving funds (EIP-5564/DKSAP pattern)
+ *
+ * This is what users share publicly to receive private payments.
+ * Both keys are Grumpkin points for consistent cryptography.
+ *
+ * Total size: 66 bytes (33 + 33 compressed)
  */
 export interface StealthMetaAddress {
     /** Grumpkin spending public key (33 bytes compressed) */
     spendingPubKey: Uint8Array;
-    /** X25519 viewing public key (32 bytes) */
+    /** Grumpkin viewing public key (33 bytes compressed) */
     viewingPubKey: Uint8Array;
 }
 /**
@@ -74,10 +100,12 @@ export declare enum ViewPermissions {
 }
 /**
  * Delegated viewing key for auditors/compliance
+ *
+ * Uses Grumpkin scalar for viewing key (matches EIP-5564/DKSAP pattern)
  */
 export interface DelegatedViewKey {
-    /** X25519 viewing private key */
-    viewingPrivKey: Uint8Array;
+    /** Grumpkin viewing private key (scalar) */
+    viewingPrivKey: bigint;
     /** Permission flags */
     permissions: ViewPermissions;
     /** Optional expiration timestamp (Unix ms) */
@@ -86,7 +114,7 @@ export interface DelegatedViewKey {
     label?: string;
 }
 /** Message to sign for key derivation */
-export declare const SPENDING_KEY_DERIVATION_MESSAGE = "zVault spending key derivation v1";
+export declare const SPENDING_KEY_DERIVATION_MESSAGE = "zVault key derivation v1";
 /**
  * Minimal wallet adapter interface for signing
  * Compatible with @solana/wallet-adapter-base
@@ -110,6 +138,8 @@ export declare function deriveKeysFromWallet(wallet: WalletSignerAdapter): Promi
 /**
  * Derive zVault keys from a signature (for testing or custom flows)
  *
+ * Uses Grumpkin for both spending and viewing keys (EIP-5564/DKSAP pattern).
+ *
  * SECURITY: Intermediate key material is cleared from memory after use.
  *
  * @param signature - 64-byte Ed25519 signature
@@ -128,7 +158,9 @@ export declare function deriveKeysFromSeed(seed: Uint8Array): ZVaultKeys;
  * Create a stealth meta-address from zVault keys
  *
  * This is the public address that users share to receive funds.
- * It contains the spending and viewing public keys.
+ * It contains both spending and viewing public keys (both Grumpkin).
+ *
+ * Size: 66 bytes (33 + 33 compressed)
  */
 export declare function createStealthMetaAddress(keys: ZVaultKeys): StealthMetaAddress;
 /**
@@ -140,15 +172,15 @@ export declare function serializeStealthMetaAddress(meta: StealthMetaAddress): S
  */
 export declare function deserializeStealthMetaAddress(serialized: SerializedStealthMetaAddress): StealthMetaAddress;
 /**
- * Parse a stealth meta-address and extract the Grumpkin public key
+ * Parse a stealth meta-address and extract both Grumpkin public keys
  */
 export declare function parseStealthMetaAddress(meta: StealthMetaAddress): {
     spendingPubKey: GrumpkinPoint;
-    viewingPubKey: Uint8Array;
+    viewingPubKey: GrumpkinPoint;
 };
 /**
- * Encode stealth meta-address as a single string (65 bytes → hex)
- * Format: spendingPubKey (33 bytes) || viewingPubKey (32 bytes)
+ * Encode stealth meta-address as a single string (66 bytes → hex)
+ * Format: spendingPubKey (33 bytes) || viewingPubKey (33 bytes)
  */
 export declare function encodeStealthMetaAddress(meta: StealthMetaAddress): string;
 /**
@@ -216,7 +248,7 @@ export declare function clearKey(key: Uint8Array): void;
  * Securely clear all sensitive keys from a ZVaultKeys object
  *
  * Call this when you're done using the keys to minimize exposure window.
- * Note: The spendingPrivKey is a bigint and cannot be reliably cleared in JS.
+ * Note: BigInt values cannot be reliably cleared in JS.
  */
 export declare function clearZVaultKeys(keys: ZVaultKeys): void;
 /**
@@ -230,6 +262,6 @@ export declare function clearDelegatedViewKey(key: DelegatedViewKey): void;
 export declare function extractViewOnlyBundle(keys: ZVaultKeys): {
     solanaPublicKey: Uint8Array;
     spendingPubKey: Uint8Array;
-    viewingPrivKey: Uint8Array;
+    viewingPrivKey: bigint;
     viewingPubKey: Uint8Array;
 };

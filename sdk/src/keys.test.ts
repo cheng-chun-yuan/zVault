@@ -124,7 +124,7 @@ describe("Key Derivation from Solana Wallet", () => {
 
     // Same signature → same keys
     expect(keys1.spendingPrivKey).toBe(keys2.spendingPrivKey);
-    expect(keys1.viewingPrivKey).toEqual(keys2.viewingPrivKey);
+    expect(keys1.viewingPrivKey).toBe(keys2.viewingPrivKey); // Now bigint
   });
 
   test("spending and viewing keys are different", () => {
@@ -136,9 +136,8 @@ describe("Key Derivation from Solana Wallet", () => {
 
     const keys = deriveKeysFromSignature(signature, solanaPublicKey);
 
-    // Keys should be different
-    const spendingBytes = scalarToBytes(keys.spendingPrivKey);
-    expect(spendingBytes).not.toEqual(keys.viewingPrivKey);
+    // Keys should be different (both are now bigints)
+    expect(keys.spendingPrivKey).not.toBe(keys.viewingPrivKey);
   });
 
   test("derives keys from seed", () => {
@@ -149,8 +148,8 @@ describe("Key Derivation from Solana Wallet", () => {
 
     expect(keys.spendingPrivKey).toBeGreaterThan(0n);
     expect(isOnCurve(keys.spendingPubKey)).toBe(true);
-    expect(keys.viewingPrivKey.length).toBe(32);
-    expect(keys.viewingPubKey.length).toBe(32);
+    expect(keys.viewingPrivKey).toBeGreaterThan(0n); // Now a bigint (Grumpkin scalar)
+    expect(isOnCurve(keys.viewingPubKey)).toBe(true); // Now a GrumpkinPoint
   });
 });
 
@@ -163,11 +162,11 @@ describe("Stealth Meta-Address", () => {
     const meta = createStealthMetaAddress(keys);
 
     expect(meta.spendingPubKey.length).toBe(33); // Compressed Grumpkin
-    expect(meta.viewingPubKey.length).toBe(32); // X25519
+    expect(meta.viewingPubKey.length).toBe(33); // Compressed Grumpkin (was 32 X25519)
 
     // Encode/decode roundtrip
     const encoded = encodeStealthMetaAddress(meta);
-    expect(encoded.length).toBe(130); // 65 bytes * 2 (hex)
+    expect(encoded.length).toBe(132); // 66 bytes * 2 (hex)
 
     const decoded = decodeStealthMetaAddress(encoded);
     expect(decoded.spendingPubKey).toEqual(meta.spendingPubKey);
@@ -183,7 +182,7 @@ describe("Viewing Key Delegation", () => {
     const keys = deriveKeysFromSeed(seed);
     const delegated = createDelegatedViewKey(keys, ViewPermissions.FULL);
 
-    expect(delegated.viewingPrivKey).toEqual(keys.viewingPrivKey);
+    expect(delegated.viewingPrivKey).toBe(keys.viewingPrivKey); // Now bigint
     expect(delegated.permissions).toBe(ViewPermissions.FULL);
   });
 
@@ -232,8 +231,7 @@ describe("Stealth Deposit Flow", () => {
     const amount = 100_000n;
     const deposit = await createStealthDeposit(meta, amount);
 
-    expect(deposit.ephemeralViewPub.length).toBe(32);
-    expect(deposit.ephemeralSpendPub.length).toBe(33);
+    expect(deposit.ephemeralPub.length).toBe(33); // Single Grumpkin key
     expect(deposit.amountSats).toBe(amount);
     expect(deposit.commitment.length).toBe(32);
   });
@@ -247,11 +245,10 @@ describe("Stealth Deposit Flow", () => {
     const amount = 50_000n;
     const deposit = await createStealthDeposit(meta, amount);
 
-    // Simulate on-chain announcement
+    // Simulate on-chain announcement (single ephemeral key)
     const announcements = [
       {
-        ephemeralViewPub: deposit.ephemeralViewPub,
-        ephemeralSpendPub: deposit.ephemeralSpendPub,
+        ephemeralPub: deposit.ephemeralPub,
         amountSats: deposit.amountSats,
         commitment: deposit.commitment,
         leafIndex: 0,
@@ -281,28 +278,16 @@ describe("Stealth Deposit Flow", () => {
 
     const announcements = [
       {
-        ephemeralViewPub: deposit.ephemeralViewPub,
-        ephemeralSpendPub: deposit.ephemeralSpendPub,
+        ephemeralPub: deposit.ephemeralPub,
         amountSats: deposit.amountSats,
         commitment: deposit.commitment,
         leafIndex: 0,
       },
     ];
 
-    // Scan still works (amount is public)
+    // Wrong keys won't find anything (commitment mismatch during scan)
     const found = await scanAnnouncements(wrongKeys, announcements);
-    expect(found.length).toBe(1);
-
-    // But claim preparation fails (commitment mismatch)
-    const merkleProof = {
-      root: 12345n,
-      pathElements: Array(20).fill(0n),
-      pathIndices: Array(20).fill(0),
-    };
-
-    await expect(
-      prepareClaimInputs(wrongKeys, found[0], merkleProof)
-    ).rejects.toThrow("Commitment mismatch");
+    expect(found.length).toBe(0);
   });
 });
 
@@ -318,8 +303,7 @@ describe("Claim Preparation", () => {
 
     const announcements = [
       {
-        ephemeralViewPub: deposit.ephemeralViewPub,
-        ephemeralSpendPub: deposit.ephemeralSpendPub,
+        ephemeralPub: deposit.ephemeralPub,
         amountSats: deposit.amountSats,
         commitment: deposit.commitment,
         leafIndex: 5,
@@ -338,7 +322,7 @@ describe("Claim Preparation", () => {
 
     const claimInputs = await prepareClaimInputs(recipientKeys, found[0], merkleProof);
 
-    expect(claimInputs.spendingPrivKey).toBe(recipientKeys.spendingPrivKey);
+    expect(claimInputs.stealthPrivKey).toBeGreaterThan(0n); // Derived stealth key
     expect(claimInputs.amount).toBe(amount);
     expect(claimInputs.leafIndex).toBe(5);
     expect(claimInputs.nullifier).toBeGreaterThan(0n);
@@ -375,16 +359,14 @@ describe("Key Separation Security", () => {
 
     const keys = deriveKeysFromSeed(seed);
 
-    // Viewing key is X25519, spending key is Grumpkin scalar
+    // Both keys are now Grumpkin scalars (bigint)
     // They are derived via different paths from the signature
     // There's no way to derive one from the other
 
     // This test just documents the property - the separation is
     // enforced by the derivation algorithm using different domain
     // separators ("spending" vs "viewing")
-    expect(keys.viewingPrivKey).not.toEqual(
-      scalarToBytes(keys.spendingPrivKey)
-    );
+    expect(keys.viewingPrivKey).not.toBe(keys.spendingPrivKey);
   });
 
   test("different nullifiers for different leaf indices", async () => {
@@ -397,8 +379,7 @@ describe("Key Separation Security", () => {
     const deposit = await createStealthDeposit(meta, amount);
 
     const baseAnn = {
-      ephemeralViewPub: deposit.ephemeralViewPub,
-      ephemeralSpendPub: deposit.ephemeralSpendPub,
+      ephemeralPub: deposit.ephemeralPub,
       amountSats: deposit.amountSats,
       commitment: deposit.commitment,
     };
