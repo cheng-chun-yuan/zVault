@@ -9,7 +9,7 @@
  * The on-chain program maintains the Merkle tree. This SDK provides
  * proof structures for interaction with the program.
  */
-export declare const TREE_DEPTH = 10;
+export declare const TREE_DEPTH = 20;
 export declare const ROOT_HISTORY_SIZE = 30;
 export declare const MAX_LEAVES: number;
 export declare const ZERO_VALUE: Uint8Array<ArrayBufferLike>;

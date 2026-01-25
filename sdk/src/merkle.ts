@@ -13,9 +13,10 @@
 import { bigintToBytes, bytesToBigint } from "./crypto";
 
 // Tree configuration - matches on-chain constants
-export const TREE_DEPTH = 10;
+// Updated to depth 20 for ~1M leaves capacity
+export const TREE_DEPTH = 20;
 export const ROOT_HISTORY_SIZE = 30;
-export const MAX_LEAVES = 1 << TREE_DEPTH; // 1024
+export const MAX_LEAVES = 1 << TREE_DEPTH; // ~1M (1,048,576)
 
 // Zero value for empty nodes (matches on-chain)
 export const ZERO_VALUE = bigintToBytes(
@@ -26,7 +27,7 @@ export const ZERO_VALUE = bigintToBytes(
  * Merkle proof structure
  */
 export interface MerkleProof {
-  // Sibling nodes along the path (10 elements for depth 10)
+  // Sibling nodes along the path (20 elements for depth 20)
   pathElements: Uint8Array[];
   // Path indices (0 = left, 1 = right)
   pathIndices: number[];

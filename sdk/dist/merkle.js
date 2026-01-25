@@ -11,9 +11,10 @@
  */
 import { bigintToBytes } from "./crypto";
 // Tree configuration - matches on-chain constants
-export const TREE_DEPTH = 10;
+// Updated to depth 20 for ~1M leaves capacity
+export const TREE_DEPTH = 20;
 export const ROOT_HISTORY_SIZE = 30;
-export const MAX_LEAVES = 1 << TREE_DEPTH; // 1024
+export const MAX_LEAVES = 1 << TREE_DEPTH; // ~1M (1,048,576)
 // Zero value for empty nodes (matches on-chain)
 export const ZERO_VALUE = bigintToBytes(0x2fe54c60d3ada40e0000000000000000000000000000000000000000n);
 /**
