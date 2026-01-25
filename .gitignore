@@ -22,5 +22,8 @@ target/
 # IDE artifacts (flycheck, etc.)
 **/flycheck*/
 
+# SDK build output
+sdk/dist/
+
 # Subdirectories have their own .gitignore files
 # See backend/.gitignore, contracts/.gitignore, and frontend/.gitignore
