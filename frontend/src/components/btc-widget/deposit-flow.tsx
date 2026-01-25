@@ -102,7 +102,6 @@ export function DepositFlow() {
   const [resolvedMeta, setResolvedMeta] = useState<StealthMetaAddress | null>(null);
   const [stealthDeposit, setStealthDeposit] = useState<PreparedStealthDeposit | null>(null);
   const [resolvingRecipient, setResolvingRecipient] = useState(false);
-  const [amountSats, setAmountSats] = useState("");
 
   // Backend deposit tracker hook
   const trackerStatus = useDepositStatus(trackerId, {
@@ -260,7 +259,6 @@ export function DepositFlow() {
     setRecipient("");
     setResolvedMeta(null);
     setStealthDeposit(null);
-    setAmountSats("");
   };
 
   // Resolve recipient (zkey name or stealth address)
@@ -309,16 +307,10 @@ export function DepositFlow() {
     }
   };
 
-  // Generate stealth deposit
+  // Generate stealth deposit (amount-independent - address works for any amount)
   const generateStealthDeposit = async () => {
     if (!resolvedMeta) {
       setError("Please resolve recipient first");
-      return;
-    }
-
-    const amount = BigInt(amountSats || "0");
-    if (amount <= 0n) {
-      setError("Please enter a valid amount in satoshis");
       return;
     }
 
@@ -328,14 +320,12 @@ export function DepositFlow() {
     try {
       const prepared = await prepareStealthDeposit({
         recipientMeta: resolvedMeta,
-        amountSats: amount,
         network: BITCOIN_NETWORK,
       });
 
       setStealthDeposit(prepared);
       console.log("[Stealth Deposit] Prepared:", {
         address: prepared.btcDepositAddress,
-        amount: prepared.amountSats.toString(),
         opReturnSize: prepared.opReturnData.length,
       });
     } catch (err) {
@@ -349,16 +339,16 @@ export function DepositFlow() {
   const getStatusDisplay = () => {
     if (trackerStatus.status) {
       const statusMap: Record<string, { label: string; color: string }> = {
-        pending: { label: "Waiting for deposit...", color: "text-[#8B8A9E]" },
-        detected: { label: "Deposit detected!", color: "text-[#F7931A]" },
-        confirming: { label: `Confirming (${trackerStatus.confirmations} conf)`, color: "text-[#F7931A]" },
-        confirmed: { label: "Deposit confirmed!", color: "text-[#4ADE80]" },
-        ready: { label: "Ready to claim!", color: "text-[#14F195]" },
-        claimed: { label: "Already claimed", color: "text-[#4ADE80]" },
+        pending: { label: "Waiting for deposit...", color: "text-gray" },
+        detected: { label: "Deposit detected!", color: "text-btc" },
+        confirming: { label: `Confirming (${trackerStatus.confirmations} conf)`, color: "text-btc" },
+        confirmed: { label: "Deposit confirmed!", color: "text-success" },
+        ready: { label: "Ready to claim!", color: "text-privacy" },
+        claimed: { label: "Already claimed", color: "text-success" },
       };
-      return statusMap[trackerStatus.status] || { label: trackerStatus.status, color: "text-[#8B8A9E]" };
+      return statusMap[trackerStatus.status] || { label: trackerStatus.status, color: "text-gray" };
     }
-    return { label: "Waiting for deposit...", color: "text-[#8B8A9E]" };
+    return { label: "Waiting for deposit...", color: "text-gray" };
   };
 
   const isSecretValid = secretNote.trim().length >= 8;
@@ -366,14 +356,14 @@ export function DepositFlow() {
   return (
     <div className="flex flex-col">
       {/* Mode Toggle */}
-      <div className="flex gap-2 mb-4 p-1 bg-[#16161B] rounded-[10px] border border-[#8B8A9E26]">
+      <div className="flex gap-2 mb-4 p-1 bg-muted rounded-[10px] border border-gray/15">
         <button
           onClick={() => { setMode("note"); resetFlow(); }}
           className={cn(
             "flex-1 flex items-center justify-center gap-2 py-2 px-3 rounded-[8px] text-body2 transition-colors",
             mode === "note"
-              ? "bg-[#14F19520] text-[#14F195] border border-[#14F19540]"
-              : "text-[#8B8A9E] hover:text-[#C7C5D1]"
+              ? "bg-privacy/12 text-privacy border border-privacy/25"
+              : "text-gray hover:text-gray-light"
           )}
         >
           <User className="w-4 h-4" />
@@ -384,8 +374,8 @@ export function DepositFlow() {
           className={cn(
             "flex-1 flex items-center justify-center gap-2 py-2 px-3 rounded-[8px] text-body2 transition-colors",
             mode === "stealth"
-              ? "bg-[#9945FF20] text-[#9945FF] border border-[#9945FF40]"
-              : "text-[#8B8A9E] hover:text-[#C7C5D1]"
+              ? "bg-sol/12 text-sol border border-sol/25"
+              : "text-gray hover:text-gray-light"
           )}
         >
           <Send className="w-4 h-4" />
@@ -395,43 +385,43 @@ export function DepositFlow() {
 
       {/* Stealth Address Section - for receiving from others (only in note mode) */}
       {mode === "note" && (
-        <div className="mb-4 p-3 bg-[#14F1950D] border border-[#14F19526] rounded-[12px]">
+        <div className="mb-4 p-3 bg-privacy/5 border border-privacy/15 rounded-[12px]">
           <div className="flex items-center gap-2 mb-2">
-            <Shield className="w-4 h-4 text-[#14F195]" />
-            <span className="text-caption text-[#14F195]">Your Stealth Address</span>
+            <Shield className="w-4 h-4 text-privacy" />
+            <span className="text-caption text-privacy">Your Stealth Address</span>
           </div>
           {!keys ? (
             <div className="flex items-center justify-between">
-              <span className="text-caption text-[#8B8A9E]">
+              <span className="text-caption text-gray">
                 Sign to derive your private address
               </span>
               <button
                 onClick={deriveKeys}
                 disabled={keysLoading}
-                className="px-3 py-1 text-caption bg-[#14F19526] hover:bg-[#14F19533] text-[#14F195] rounded-[6px] transition-colors disabled:opacity-50"
+                className="px-3 py-1 text-caption bg-privacy/15 hover:bg-privacy/20 text-privacy rounded-[6px] transition-colors disabled:opacity-50"
               >
                 {keysLoading ? "..." : "Derive"}
               </button>
             </div>
           ) : (
             <div className="flex items-center gap-2">
-              <code className="flex-1 text-caption font-mono text-[#C7C5D1] truncate">
+              <code className="flex-1 text-caption font-mono text-gray-light truncate">
                 {stealthAddressEncoded?.slice(0, 20)}...{stealthAddressEncoded?.slice(-20)}
               </code>
               <button
                 onClick={copyStealthAddress}
-                className="p-1.5 rounded-[6px] bg-[#14F1951A] hover:bg-[#14F19533] transition-colors"
+                className="p-1.5 rounded-[6px] bg-privacy/10 hover:bg-privacy/20 transition-colors"
                 title="Copy to share with others"
               >
                 {stealthCopied ? (
-                  <Check className="w-3.5 h-3.5 text-[#4ADE80]" />
+                  <Check className="w-3.5 h-3.5 text-success" />
                 ) : (
-                  <Copy className="w-3.5 h-3.5 text-[#14F195]" />
+                  <Copy className="w-3.5 h-3.5 text-privacy" />
                 )}
               </button>
             </div>
           )}
-          <p className="text-caption text-[#8B8A9E] mt-1">
+          <p className="text-caption text-gray mt-1">
             Share this to receive private payments from others
           </p>
         </div>
@@ -447,8 +437,8 @@ export function DepositFlow() {
               className={cn(
                 "flex-1 flex items-center justify-center gap-2 py-2 px-3 rounded-[8px] text-caption transition-colors",
                 recipientType === "zkey"
-                  ? "bg-[#9945FF20] text-[#9945FF] border border-[#9945FF40]"
-                  : "bg-[#16161B] text-[#8B8A9E] border border-[#8B8A9E26] hover:text-[#C7C5D1]"
+                  ? "bg-sol/12 text-sol border border-sol/25"
+                  : "bg-muted text-gray border border-gray/15 hover:text-gray-light"
               )}
             >
               <Tag className="w-3.5 h-3.5" />
@@ -459,8 +449,8 @@ export function DepositFlow() {
               className={cn(
                 "flex-1 flex items-center justify-center gap-2 py-2 px-3 rounded-[8px] text-caption transition-colors",
                 recipientType === "address"
-                  ? "bg-[#9945FF20] text-[#9945FF] border border-[#9945FF40]"
-                  : "bg-[#16161B] text-[#8B8A9E] border border-[#8B8A9E26] hover:text-[#C7C5D1]"
+                  ? "bg-sol/12 text-sol border border-sol/25"
+                  : "bg-muted text-gray border border-gray/15 hover:text-gray-light"
               )}
             >
               <Key className="w-3.5 h-3.5" />
@@ -470,7 +460,7 @@ export function DepositFlow() {
 
           {/* Recipient Input */}
           <div className="mb-4">
-            <label className="text-body2 text-[#C7C5D1] pl-2 mb-2 block">
+            <label className="text-body2 text-gray-light pl-2 mb-2 block">
               {recipientType === "zkey" ? "Recipient .zkey Name" : "Recipient Stealth Address"}
             </label>
             <div className="flex gap-2">
@@ -481,14 +471,14 @@ export function DepositFlow() {
                   onChange={(e) => { setRecipient(e.target.value); setResolvedMeta(null); setStealthDeposit(null); }}
                   placeholder={recipientType === "zkey" ? "alice" : "Paste stealth meta-address (132 hex chars)"}
                   className={cn(
-                    "w-full p-3 bg-[#16161B] border border-[#8B8A9E26] rounded-[12px]",
-                    "text-body2 font-mono text-[#F1F0F3] placeholder:text-[#8B8A9E]",
-                    "outline-none focus:border-[#9945FF66] transition-colors",
+                    "w-full p-3 bg-muted border border-gray/15 rounded-[12px]",
+                    "text-body2 font-mono text-foreground placeholder:text-gray",
+                    "outline-none focus:border-sol/40 transition-colors",
                     recipientType === "zkey" ? "pr-16" : ""
                   )}
                 />
                 {recipientType === "zkey" && (
-                  <span className="absolute right-3 top-1/2 -translate-y-1/2 text-body2 text-[#8B8A9E]">.zkey</span>
+                  <span className="absolute right-3 top-1/2 -translate-y-1/2 text-body2 text-gray">.zkey</span>
                 )}
               </div>
               <button
@@ -496,8 +486,8 @@ export function DepositFlow() {
                 disabled={!recipient.trim() || resolvingRecipient}
                 className={cn(
                   "px-4 py-2 rounded-[10px] text-body2 transition-colors",
-                  "bg-[#9945FF] hover:bg-[#8B3DE8] text-white",
-                  "disabled:bg-[#8B8A9E33] disabled:text-[#8B8A9E] disabled:cursor-not-allowed"
+                  "bg-sol hover:bg-sol-dark text-white",
+                  "disabled:bg-gray/20 disabled:text-gray disabled:cursor-not-allowed"
                 )}
               >
                 {resolvingRecipient ? "..." : "Resolve"}
@@ -507,46 +497,25 @@ export function DepositFlow() {
 
           {/* Resolved recipient info */}
           {resolvedMeta && (
-            <div className="mb-4 p-3 bg-[#9945FF0D] border border-[#9945FF26] rounded-[12px]">
+            <div className="mb-4 p-3 bg-sol/5 border border-sol/15 rounded-[12px]">
               <div className="flex items-center gap-2 mb-1">
-                <Check className="w-4 h-4 text-[#4ADE80]" />
-                <span className="text-caption text-[#4ADE80]">Recipient resolved</span>
+                <Check className="w-4 h-4 text-success" />
+                <span className="text-caption text-success">Recipient resolved</span>
               </div>
-              <p className="text-caption text-[#8B8A9E]">
+              <p className="text-caption text-gray">
                 Stealth keys found. Enter amount to generate deposit address.
               </p>
             </div>
           )}
 
-          {/* Amount Input (only after resolving) */}
-          {resolvedMeta && !stealthDeposit && (
-            <div className="mb-4">
-              <label className="text-body2 text-[#C7C5D1] pl-2 mb-2 block">Amount (satoshis)</label>
-              <input
-                type="number"
-                value={amountSats}
-                onChange={(e) => setAmountSats(e.target.value)}
-                placeholder="e.g., 100000 (= 0.001 BTC)"
-                className={cn(
-                  "w-full p-3 bg-[#16161B] border border-[#8B8A9E26] rounded-[12px]",
-                  "text-body2 font-mono text-[#F1F0F3] placeholder:text-[#8B8A9E]",
-                  "outline-none focus:border-[#9945FF66] transition-colors"
-                )}
-              />
-              <p className="text-caption text-[#8B8A9E] mt-1 pl-2">
-                {amountSats ? `= ${(Number(amountSats) / 100_000_000).toFixed(8)} BTC` : "Enter exact amount to deposit"}
-              </p>
-            </div>
-          )}
-
-          {/* Generate Stealth Deposit Button */}
+          {/* Generate Stealth Deposit Button - amount is determined by actual BTC sent */}
           {resolvedMeta && !stealthDeposit && (
             <button
               onClick={generateStealthDeposit}
-              disabled={loading || !amountSats || BigInt(amountSats || "0") <= 0n}
+              disabled={loading}
               className={cn(
                 "btn-primary w-full mb-4",
-                "disabled:bg-[#8B8A9E33] disabled:text-[#8B8A9E] disabled:cursor-not-allowed"
+                "disabled:bg-gray/20 disabled:text-gray disabled:cursor-not-allowed"
               )}
             >
               {loading ? (
@@ -557,7 +526,7 @@ export function DepositFlow() {
               ) : (
                 <>
                   <Send className="w-4 h-4" />
-                  Generate Stealth Deposit
+                  Generate Deposit Address
                 </>
               )}
             </button>
@@ -569,26 +538,26 @@ export function DepositFlow() {
               {/* Deposit Address */}
               <div className="gradient-bg-bitcoin p-4 rounded-[12px] mb-4">
                 <div className="flex items-center justify-between mb-2">
-                  <p className="text-caption text-[#8B8A9E]">Send BTC to this address</p>
+                  <p className="text-caption text-gray">Send BTC to this address</p>
                   <div className="flex items-center gap-1">
                     <button
                       onClick={() => setShowQR(!showQR)}
                       className={cn(
                         "p-1.5 rounded-[6px] transition-colors",
-                        showQR ? "bg-[#F7931A33] text-[#F7931A]" : "bg-[#F7931A1A] text-[#F7931A] hover:bg-[#F7931A33]"
+                        showQR ? "bg-btc/20 text-btc" : "bg-btc/10 text-btc hover:bg-btc/20"
                       )}
                     >
                       <QrCode className="w-4 h-4" />
                     </button>
                     <button
                       onClick={() => { navigator.clipboard.writeText(stealthDeposit.btcDepositAddress); setAddressCopied(true); setTimeout(() => setAddressCopied(false), 2000); }}
-                      className="p-1.5 rounded-[6px] bg-[#F7931A1A] hover:bg-[#F7931A33] transition-colors"
+                      className="p-1.5 rounded-[6px] bg-btc/10 hover:bg-btc/20 transition-colors"
                     >
-                      {addressCopied ? <Check className="w-4 h-4 text-[#4ADE80]" /> : <Copy className="w-4 h-4 text-[#F7931A]" />}
+                      {addressCopied ? <Check className="w-4 h-4 text-success" /> : <Copy className="w-4 h-4 text-btc" />}
                     </button>
                   </div>
                 </div>
-                <code className="text-body2 font-mono text-[#F7931A] break-all block">
+                <code className="text-body2 font-mono text-btc break-all block">
                   {stealthDeposit.btcDepositAddress}
                 </code>
               </div>
@@ -606,26 +575,20 @@ export function DepositFlow() {
                 </div>
               )}
 
-              {/* Amount Info */}
-              <div className="gradient-bg-card p-4 rounded-[12px] mb-4 border border-[#9945FF33]">
-                <div className="flex items-center justify-between mb-2">
-                  <span className="text-body2 text-[#C7C5D1]">Amount</span>
-                  <span className="text-body2-semibold text-[#F7931A]">
-                    {stealthDeposit.amountSats.toString()} sats
-                  </span>
-                </div>
-                <p className="text-caption text-[#8B8A9E]">
-                  Send exactly this amount. Recipient will be able to scan and claim.
+              {/* Info */}
+              <div className="gradient-bg-card p-4 rounded-[12px] mb-4 border border-sol/20">
+                <p className="text-caption text-gray">
+                  Send any amount of BTC to this address. Recipient will be able to scan and claim.
                 </p>
               </div>
 
               {/* Important Note */}
-              <div className="p-3 bg-[#F7931A1A] border border-[#F7931A33] rounded-[12px] mb-4">
+              <div className="p-3 bg-btc/10 border border-btc/20 rounded-[12px] mb-4">
                 <div className="flex items-start gap-2">
-                  <AlertCircle className="w-4 h-4 text-[#F7931A] shrink-0 mt-0.5" />
+                  <AlertCircle className="w-4 h-4 text-btc shrink-0 mt-0.5" />
                   <div>
-                    <p className="text-caption text-[#F7931A] font-medium">Important</p>
-                    <p className="text-caption text-[#8B8A9E]">
+                    <p className="text-caption text-btc font-medium">Important</p>
+                    <p className="text-caption text-gray">
                       The recipient must scan for this deposit using their stealth keys.
                       Only they can see and claim this deposit.
                     </p>
@@ -659,7 +622,7 @@ export function DepositFlow() {
         <>
       {/* Secret note input */}
       <div className="mb-4">
-        <label className="text-body2 text-[#C7C5D1] pl-2 mb-2 block">Secret Note</label>
+        <label className="text-body2 text-gray-light pl-2 mb-2 block">Secret Note</label>
         <div className="relative">
           <input
             type={showSecret ? "text" : "password"}
@@ -676,16 +639,16 @@ export function DepositFlow() {
             }}
             placeholder="Enter or generate a secret note (8+ chars)"
             className={cn(
-              "w-full p-3 pr-24 bg-[#16161B] border border-[#8B8A9E26] rounded-[12px]",
-              "text-body2 font-mono text-[#F1F0F3] placeholder:text-[#8B8A9E]",
-              "outline-none focus:border-[#14F19566] transition-colors"
+              "w-full p-3 pr-24 bg-muted border border-gray/15 rounded-[12px]",
+              "text-body2 font-mono text-foreground placeholder:text-gray",
+              "outline-none focus:border-privacy/40 transition-colors"
             )}
           />
           <div className="absolute right-2 top-1/2 -translate-y-1/2 flex items-center gap-1">
             <button
               type="button"
               onClick={() => setShowSecret(!showSecret)}
-              className="p-2 text-[#8B8A9E] hover:text-[#C7C5D1] transition-colors"
+              className="p-2 text-gray hover:text-gray-light transition-colors"
               title={showSecret ? "Hide secret" : "Show secret"}
             >
               {showSecret ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
@@ -693,21 +656,21 @@ export function DepositFlow() {
             <button
               type="button"
               onClick={handleGenerateSecret}
-              className="p-2 text-[#14F195] hover:text-[#4ADE80] transition-colors"
+              className="p-2 text-privacy hover:text-success transition-colors"
               title="Generate random secret"
             >
               <RefreshCw className="w-4 h-4" />
             </button>
           </div>
         </div>
-        <p className="text-caption text-[#8B8A9E] mt-1 pl-2">
+        <p className="text-caption text-gray mt-1 pl-2">
           {isSecretValid ? "Your secret is valid. Address generated below." : "Enter at least 8 characters to generate deposit address."}
         </p>
       </div>
 
       {/* Loading state */}
       {loading && (
-        <div className="flex items-center justify-center gap-2 py-4 text-[#8B8A9E]">
+        <div className="flex items-center justify-center gap-2 py-4 text-gray">
           <RefreshCw className="w-4 h-4 animate-spin" />
           <span className="text-body2">Generating deposit address...</span>
         </div>
@@ -727,13 +690,13 @@ export function DepositFlow() {
           {/* Deposit Address */}
           <div className="gradient-bg-bitcoin p-4 rounded-[12px] mb-4">
             <div className="flex items-center justify-between mb-2">
-              <p className="text-caption text-[#8B8A9E]">Deposit Address</p>
+              <p className="text-caption text-gray">Deposit Address</p>
               <div className="flex items-center gap-1">
                 <button
                   onClick={() => setShowQR(!showQR)}
                   className={cn(
                     "p-1.5 rounded-[6px] transition-colors",
-                    showQR ? "bg-[#F7931A33] text-[#F7931A]" : "bg-[#F7931A1A] text-[#F7931A] hover:bg-[#F7931A33]"
+                    showQR ? "bg-btc/20 text-btc" : "bg-btc/10 text-btc hover:bg-btc/20"
                   )}
                   title={showQR ? "Hide QR code" : "Show QR code"}
                 >
@@ -741,18 +704,18 @@ export function DepositFlow() {
                 </button>
                 <button
                   onClick={copyAddress}
-                  className="p-1.5 rounded-[6px] bg-[#F7931A1A] hover:bg-[#F7931A33] transition-colors"
+                  className="p-1.5 rounded-[6px] bg-btc/10 hover:bg-btc/20 transition-colors"
                   title="Copy address"
                 >
                   {addressCopied ? (
-                    <Check className="w-4 h-4 text-[#4ADE80]" />
+                    <Check className="w-4 h-4 text-success" />
                   ) : (
-                    <Copy className="w-4 h-4 text-[#F7931A]" />
+                    <Copy className="w-4 h-4 text-btc" />
                   )}
                 </button>
               </div>
             </div>
-            <code className="text-body2 font-mono text-[#F7931A] break-all block">
+            <code className="text-body2 font-mono text-btc break-all block">
               {depositData.taproot_address}
             </code>
           </div>
@@ -772,28 +735,28 @@ export function DepositFlow() {
 
           {/* Claim Link */}
           {/* Secret = Claim Link (simplified!) */}
-          <div className="gradient-bg-card p-4 rounded-[12px] mb-4 border border-[#14F19533]">
+          <div className="gradient-bg-card p-4 rounded-[12px] mb-4 border border-privacy/20">
             <div className="flex items-center justify-between mb-2">
               <div className="flex items-center gap-2">
-                <Key className="w-4 h-4 text-[#14F195]" />
-                <span className="text-caption text-[#14F195]">Your Secret (Save This!)</span>
+                <Key className="w-4 h-4 text-privacy" />
+                <span className="text-caption text-privacy">Your Secret (Save This!)</span>
               </div>
               <button
                 onClick={() => copy(secretNote)}
-                className="p-1.5 rounded-[6px] bg-[#14F1951A] hover:bg-[#14F19533] transition-colors"
+                className="p-1.5 rounded-[6px] bg-privacy/10 hover:bg-privacy/20 transition-colors"
                 title="Copy secret"
               >
                 {copied ? (
-                  <Check className="w-3.5 h-3.5 text-[#4ADE80]" />
+                  <Check className="w-3.5 h-3.5 text-success" />
                 ) : (
-                  <Copy className="w-3.5 h-3.5 text-[#14F195]" />
+                  <Copy className="w-3.5 h-3.5 text-privacy" />
                 )}
               </button>
             </div>
-            <code className="text-body2 font-mono text-[#F1F0F3] block mb-2">
+            <code className="text-body2 font-mono text-foreground block mb-2">
               {showSecret ? secretNote : "••••••••••••••••"}
             </code>
-            <p className="text-caption text-[#8B8A9E]">
+            <p className="text-caption text-gray">
               This secret is your claim link. Remember it or save it to claim your zBTC later.
             </p>
           </div>
@@ -801,7 +764,7 @@ export function DepositFlow() {
           {/* Deposit Status */}
           <div className="gradient-bg-card p-4 rounded-[12px] mb-4">
             <div className="flex items-center justify-between">
-              <span className="text-body2 text-[#C7C5D1]">Status</span>
+              <span className="text-body2 text-gray-light">Status</span>
               <span className={cn("text-body2-semibold", getStatusDisplay().color)}>
                 {getStatusDisplay().label}
               </span>
@@ -809,7 +772,7 @@ export function DepositFlow() {
 
             {/* Backend Tracker Progress */}
             {trackerId && trackerStatus.status && !["pending"].includes(trackerStatus.status) && (
-              <div className="mt-3 pt-3 border-t border-[#8B8A9E26]">
+              <div className="mt-3 pt-3 border-t border-gray/15">
                 <DepositProgress
                   status={trackerStatus.status}
                   confirmations={trackerStatus.confirmations}
@@ -820,13 +783,13 @@ export function DepositFlow() {
           </div>
 
           {/* Testnet faucet link */}
-          <div className="flex items-center justify-between p-3 bg-[#16161B] border border-[#8B8A9E26] rounded-[12px] mb-4">
-            <span className="text-caption text-[#8B8A9E]">Need testnet BTC?</span>
+          <div className="flex items-center justify-between p-3 bg-muted border border-gray/15 rounded-[12px] mb-4">
+            <span className="text-caption text-gray">Need testnet BTC?</span>
             <a
               href="https://coinfaucet.eu/en/btc-testnet/"
               target="_blank"
               rel="noopener noreferrer"
-              className="text-caption text-[#F7931A] hover:text-[#FFA940] transition-colors flex items-center gap-1"
+              className="text-caption text-btc hover:text-btc-light transition-colors flex items-center gap-1"
             >
               Get from faucet
               <ExternalLink className="w-3 h-3" />

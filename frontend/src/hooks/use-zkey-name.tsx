@@ -13,14 +13,13 @@ import {
   parseNameRegistry,
   buildRegisterNameData,
   NAME_REGISTRY_SEED,
+  ZVAULT_PROGRAM_ID,
   type NameRegistryEntry,
 } from "@zvault/sdk";
 import { useZVaultKeys } from "./use-zvault-keys";
 
-// Program ID for zVault (from env)
-const PROGRAM_ID = new PublicKey(
-  process.env.NEXT_PUBLIC_PROGRAM_ID || "BDH9iTYp2nBptboCcSmTn7GTkzYTzaMr7MMG5D5sXXRp"
-);
+// Program ID for zVault (from SDK - single source of truth)
+const PROGRAM_ID = new PublicKey(ZVAULT_PROGRAM_ID);
 
 interface UseZkeyNameReturn {
   // State

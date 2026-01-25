@@ -78,12 +78,17 @@
   /* Privacy/Solana colors - use text-privacy, text-sol, etc. */
   --color-privacy: #14f195;
   --color-sol: #9945ff;
+  --color-sol-dark: #8b3de8;
   --color-purple: #ffabfe;
 
   /* Status colors */
   --color-success: #4ade80;
   --color-warning: #ffb546;
   --color-error: #ef4444;
+
+  /* Disabled state colors - use disabled:bg-disabled, disabled:text-disabled */
+  --color-disabled: #8b8a9e;
+  --color-disabled-bg: rgb(139 138 158 / 0.2);
 }
 
 body {

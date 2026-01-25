@@ -14,15 +14,14 @@ import {
   Transaction,
   SystemProgram,
 } from "@solana/web3.js";
+import { ZVAULT_PROGRAM_ID as SDK_PROGRAM_ID } from "@zvault/sdk";
 
 // =============================================================================
 // Constants
 // =============================================================================
 
-/** zVault Program ID (Solana Devnet) */
-export const ZVAULT_PROGRAM_ID = new PublicKey(
-  process.env.NEXT_PUBLIC_PROGRAM_ID || "BDH9iTYp2nBptboCcSmTn7GTkzYTzaMr7MMG5D5sXXRp"
-);
+/** zVault Program ID (from SDK - single source of truth) */
+export const ZVAULT_PROGRAM_ID = new PublicKey(SDK_PROGRAM_ID);
 
 /** BTC Light Client Program ID */
 export const BTC_LIGHT_CLIENT_PROGRAM_ID = new PublicKey(
