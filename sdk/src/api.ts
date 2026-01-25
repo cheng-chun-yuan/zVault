@@ -609,16 +609,13 @@ export async function sendStealth(
   // Create stealth deposit data using dual-key ECDH
   const stealthDeposit = await createStealthDeposit(recipientMeta, amountSats);
 
-  // Build instruction data (113 bytes)
-  // ephemeral_view_pub (32) + ephemeral_spend_pub (33) + amount_sats (8) + commitment (32) + leaf_index (8)
-  const data = new Uint8Array(1 + 113);
+  // Build instruction data (73 bytes - single ephemeral key format)
+  // ephemeral_pub (33) + amount_sats (8) + commitment (32)
+  const data = new Uint8Array(1 + 73);
   data[0] = INSTRUCTION.ANNOUNCE_STEALTH;
 
   let offset = 1;
-  data.set(stealthDeposit.ephemeralViewPub, offset);
-  offset += 32;
-
-  data.set(stealthDeposit.ephemeralSpendPub, offset);
+  data.set(stealthDeposit.ephemeralPub, offset);
   offset += 33;
 
   const amountView = new DataView(data.buffer, offset, 8);
@@ -626,15 +623,11 @@ export async function sendStealth(
   offset += 8;
 
   data.set(stealthDeposit.commitment, offset);
-  offset += 32;
-
-  const leafIndexView = new DataView(data.buffer, offset, 8);
-  leafIndexView.setBigUint64(0, BigInt(leafIndex), true);
 
   // Derive stealth announcement PDA
   const [stealthAnnouncement] = deriveStealthAnnouncementPDA(
     config.programId,
-    stealthDeposit.commitment
+    stealthDeposit.ephemeralPub
   );
 
   // Build transaction
@@ -654,7 +647,7 @@ export async function sendStealth(
 
   return {
     signature,
-    ephemeralPubKey: stealthDeposit.ephemeralViewPub,
+    ephemeralPubKey: stealthDeposit.ephemeralPub,
     leafIndex,
   };
 }

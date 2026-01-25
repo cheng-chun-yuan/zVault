@@ -80,38 +80,12 @@ export async function verifyDeposit(connection, payer, txid, expectedValue, netw
         expectedPubkey: new Array(32).fill(0), // Not used for OP_RETURN verification
         vout: 0,
     };
-    // Build instruction data
-    // Note: This would use the Anchor program interface
-    // For now, showing the structure
     console.log("\nInstruction parameters:");
     console.log(`  txid: ${bytesToHex(txidBytes)}`);
     console.log(`  merkle_proof: ${merkleProofData.siblings.length} siblings`);
     console.log(`  block_height: ${blockHeight}`);
     console.log(`  transaction_size: ${transactionSize}`);
-    // TODO: Call actual program instruction using Anchor
-    // const program = new Program(IDL, programId, provider);
-    // const tx = await program.methods
-    //   .verifyDeposit(
-    //     Array.from(txidBytes),
-    //     merkleProofData,
-    //     new BN(blockHeight),
-    //     txOutput,
-    //     new BN(transactionSize)
-    //   )
-    //   .accounts({
-    //     poolState,
-    //     lightClient,
-    //     blockHeader,
-    //     commitmentTree,
-    //     depositRecord,
-    //     txBuffer: bufferPubkey,
-    //     submitter: payer.publicKey,
-    //     systemProgram: SystemProgram.programId,
-    //   })
-    //   .signers([payer])
-    //   .rpc();
     console.log("\n=== Ready to call verify_deposit ===");
-    console.log("Use the Anchor program interface to submit the instruction");
     return depositRecord.toBase58();
 }
 /**
