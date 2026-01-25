@@ -7,7 +7,6 @@ import {
   ArrowDownToLine,
   ArrowUpFromLine,
   Gift,
-  Scissors,
   Wallet,
   Shield,
   Key,
@@ -37,29 +36,14 @@ interface FeatureConfig {
 }
 
 const features: FeatureConfig[] = [
+  // Row 1 - Receive zBTC (Inbound)
   {
     icon: <ArrowDownToLine className="w-full h-full" />,
     title: "Deposit",
     description: "BTC → zBTC",
-    subtext: "Get claim link",
+    subtext: "Bridge Bitcoin",
     href: "/bridge/deposit",
     color: "btc",
-  },
-  {
-    icon: <Send className="w-full h-full" />,
-    title: "Stealth Send",
-    description: "Private transfer",
-    subtext: "To stealth address",
-    href: "/bridge/stealth-send",
-    color: "privacy",
-  },
-  {
-    icon: <Inbox className="w-full h-full" />,
-    title: "Inbox",
-    description: "Received zBTC",
-    subtext: "Stealth deposits",
-    href: "/bridge/received",
-    color: "privacy",
   },
   {
     icon: <Gift className="w-full h-full" />,
@@ -70,6 +54,23 @@ const features: FeatureConfig[] = [
     color: "sol",
   },
   {
+    icon: <Inbox className="w-full h-full" />,
+    title: "Inbox",
+    description: "Received zBTC",
+    subtext: "Stealth payments",
+    href: "/bridge/received",
+    color: "privacy",
+  },
+  // Row 2 - Spend zBTC (Outbound)
+  {
+    icon: <Send className="w-full h-full" />,
+    title: "Pay",
+    description: "Private payment",
+    subtext: "Stealth or Link",
+    href: "/bridge/stealth-send",
+    color: "privacy",
+  },
+  {
     icon: <ArrowUpFromLine className="w-full h-full" />,
     title: "Withdraw",
     description: "zBTC → BTC",
@@ -78,18 +79,10 @@ const features: FeatureConfig[] = [
     color: "btc",
   },
   {
-    icon: <Scissors className="w-full h-full" />,
-    title: "Split",
-    description: "Divide note",
-    subtext: "Multiple outputs",
-    href: "/claim?action=split",
-    color: "purple",
-  },
-  {
     icon: <Wallet className="w-full h-full" />,
-    title: "Balance",
-    description: "View notes",
-    subtext: "Activity history",
+    title: "Notes",
+    description: "View & Split",
+    subtext: "Manage notes",
     href: "/bridge/activity",
     color: "gray",
   },

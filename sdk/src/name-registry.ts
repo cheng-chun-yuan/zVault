@@ -32,7 +32,7 @@ export const NAME_REGISTRY_SEED = "zkey";
 export const NAME_REGISTRY_DISCRIMINATOR = 0x09;
 
 /** Account size in bytes */
-export const NAME_REGISTRY_SIZE = 179;
+export const NAME_REGISTRY_SIZE = 180;
 
 /** Default program ID (devnet) */
 export const ZVAULT_PROGRAM_ID = "CBzbSQPcUXMYdmSvnA24HPZrDQPuEpq4qq2mcmErrWPR";
@@ -55,7 +55,7 @@ export interface NameRegistryEntry {
   /** Grumpkin spending public key (33 bytes compressed) */
   spendingPubKey: Uint8Array;
 
-  /** X25519 viewing public key (32 bytes) */
+  /** Grumpkin viewing public key (33 bytes compressed) */
   viewingPubKey: Uint8Array;
 
   /** Registration timestamp */
@@ -75,7 +75,7 @@ export interface ZkeyStealthAddress {
   /** Grumpkin spending public key (33 bytes) */
   spendingPubKey: Uint8Array;
 
-  /** X25519 viewing public key (32 bytes) */
+  /** Grumpkin viewing public key (33 bytes compressed) */
   viewingPubKey: Uint8Array;
 
   /** Combined stealth meta-address (65 bytes = spending + viewing) */
@@ -177,13 +177,13 @@ export function deriveNameRegistryPDA(
 /**
  * Parse a NameRegistry account data
  *
- * Layout (179 bytes):
+ * Layout (180 bytes):
  * - discriminator (1 byte) = 0x09
  * - bump (1 byte)
  * - name_hash (32 bytes)
  * - owner (32 bytes)
  * - spending_pubkey (33 bytes)
- * - viewing_pubkey (32 bytes)
+ * - viewing_pubkey (33 bytes)
  * - created_at (8 bytes, i64 LE)
  * - updated_at (8 bytes, i64 LE)
  * - _reserved (32 bytes)
@@ -216,8 +216,8 @@ export function parseNameRegistry(
   const spendingPubKey = data.slice(offset, offset + 33);
   offset += 33;
 
-  const viewingPubKey = data.slice(offset, offset + 32);
-  offset += 32;
+  const viewingPubKey = data.slice(offset, offset + 33);
+  offset += 33;
 
   // Parse timestamps (i64 LE)
   const createdAtBytes = data.slice(offset, offset + 8);
@@ -366,7 +366,7 @@ export async function lookupZkeyNameWithPDA(
  * - name (name_len bytes)
  * - name_hash (32 bytes)
  * - spending_pubkey (33 bytes)
- * - viewing_pubkey (32 bytes)
+ * - viewing_pubkey (33 bytes)
  */
 export function buildRegisterNameData(
   name: string,
@@ -382,15 +382,15 @@ export function buildRegisterNameData(
   if (spendingPubKey.length !== 33) {
     throw new Error("Spending public key must be 33 bytes (compressed Grumpkin)");
   }
-  if (viewingPubKey.length !== 32) {
-    throw new Error("Viewing public key must be 32 bytes (X25519)");
+  if (viewingPubKey.length !== 33) {
+    throw new Error("Viewing public key must be 33 bytes (compressed Grumpkin)");
   }
 
   const nameBytes = new TextEncoder().encode(normalized);
   const nameHash = hashName(normalized);
 
-  // Total size: 1 + 1 + nameLen + 32 + 33 + 32
-  const data = new Uint8Array(1 + 1 + nameBytes.length + 32 + 33 + 32);
+  // Total size: 1 + 1 + nameLen + 32 + 33 + 33
+  const data = new Uint8Array(1 + 1 + nameBytes.length + 32 + 33 + 33);
   let offset = 0;
 
   // Discriminator
@@ -422,7 +422,7 @@ export function buildRegisterNameData(
  * - discriminator (1 byte) = 18
  * - name_hash (32 bytes)
  * - spending_pubkey (33 bytes)
- * - viewing_pubkey (32 bytes)
+ * - viewing_pubkey (33 bytes)
  */
 export function buildUpdateNameData(
   name: string,
@@ -434,11 +434,11 @@ export function buildUpdateNameData(
   if (spendingPubKey.length !== 33) {
     throw new Error("Spending public key must be 33 bytes");
   }
-  if (viewingPubKey.length !== 32) {
-    throw new Error("Viewing public key must be 32 bytes");
+  if (viewingPubKey.length !== 33) {
+    throw new Error("Viewing public key must be 33 bytes");
   }
 
-  const data = new Uint8Array(1 + 32 + 33 + 32);
+  const data = new Uint8Array(1 + 32 + 33 + 33);
   let offset = 0;
 
   data[offset++] = 18; // UPDATE_NAME

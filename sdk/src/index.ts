@@ -320,6 +320,7 @@ export {
   type PreparedStealthDeposit,
   type StealthDepositData,
   type ParsedStealthOpReturn,
+  type GrumpkinKeyPair,
 } from "./stealth-deposit";
 
 // ==========================================================================

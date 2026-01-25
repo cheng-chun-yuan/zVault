@@ -13,7 +13,9 @@ import {
   STEALTH_ANNOUNCEMENT_SIZE,
   STEALTH_ANNOUNCEMENT_DISCRIMINATOR,
 } from "./stealth";
-import { deriveKeysFromSeed } from "./keys";
+import { prepareStealthDeposit } from "./stealth-deposit";
+import { deriveKeysFromSeed, createStealthMetaAddress } from "./keys";
+import { deriveKeyPairFromSeed as deriveGrumpkinKeyPairFromSeed } from "./grumpkin";
 
 describe("Stealth Utilities", () => {
   test("isWalletAdapter type guard works correctly", () => {
@@ -81,5 +83,97 @@ describe("Stealth Utilities", () => {
     expect(scanFormat.amountSats).toBe(announcement.amountSats);
     expect(scanFormat.commitment).toBe(announcement.commitment);
     expect(scanFormat.leafIndex).toBe(announcement.leafIndex);
+  });
+});
+
+describe("Stealth Deposit with Optional Ephemeral Key", () => {
+  test("prepareStealthDeposit with custom ephemeralKeyPair produces same output", async () => {
+    // Create recipient keys
+    const recipientKeys = deriveKeysFromSeed(new Uint8Array(32).fill(0x42));
+    const recipientMeta = createStealthMetaAddress(recipientKeys);
+
+    // Create deterministic ephemeral keypair from seed
+    const seed = new Uint8Array(32).fill(0xAB);
+    const ephemeralKeyPair = deriveGrumpkinKeyPairFromSeed(seed);
+    const amount = 100_000n;
+
+    // Generate two deposits with same ephemeral key
+    const deposit1 = await prepareStealthDeposit({
+      recipientMeta,
+      amountSats: amount,
+      network: "testnet",
+      ephemeralKeyPair,
+    });
+
+    const deposit2 = await prepareStealthDeposit({
+      recipientMeta,
+      amountSats: amount,
+      network: "testnet",
+      ephemeralKeyPair,
+    });
+
+    // Should be deterministic - same outputs
+    expect(deposit1.btcDepositAddress).toBe(deposit2.btcDepositAddress);
+    expect(deposit1.amountSats).toBe(deposit2.amountSats);
+    expect(Buffer.from(deposit1.opReturnData).toString("hex"))
+      .toBe(Buffer.from(deposit2.opReturnData).toString("hex"));
+    expect(Buffer.from(deposit1.stealthData.ephemeralPub).toString("hex"))
+      .toBe(Buffer.from(deposit2.stealthData.ephemeralPub).toString("hex"));
+  });
+
+  test("different ephemeral keys produce different deposits", async () => {
+    const recipientKeys = deriveKeysFromSeed(new Uint8Array(32).fill(0x42));
+    const recipientMeta = createStealthMetaAddress(recipientKeys);
+
+    const ephemeral1 = deriveGrumpkinKeyPairFromSeed(new Uint8Array(32).fill(0x11));
+    const ephemeral2 = deriveGrumpkinKeyPairFromSeed(new Uint8Array(32).fill(0x22));
+
+    const deposit1 = await prepareStealthDeposit({
+      recipientMeta,
+      amountSats: 100_000n,
+      network: "testnet",
+      ephemeralKeyPair: ephemeral1,
+    });
+
+    const deposit2 = await prepareStealthDeposit({
+      recipientMeta,
+      amountSats: 100_000n,
+      network: "testnet",
+      ephemeralKeyPair: ephemeral2,
+    });
+
+    // Different ephemeral keys = different addresses
+    expect(deposit1.btcDepositAddress).not.toBe(deposit2.btcDepositAddress);
+    expect(Buffer.from(deposit1.stealthData.ephemeralPub).toString("hex"))
+      .not.toBe(Buffer.from(deposit2.stealthData.ephemeralPub).toString("hex"));
+  });
+
+  test("random vs custom ephemeral key stealth deposit", async () => {
+    const recipientKeys = deriveKeysFromSeed(new Uint8Array(32).fill(0x42));
+    const recipientMeta = createStealthMetaAddress(recipientKeys);
+
+    // Random ephemeral key (default)
+    const randomDeposit = await prepareStealthDeposit({
+      recipientMeta,
+      amountSats: 100_000n,
+      network: "testnet",
+    });
+
+    // Custom ephemeral key
+    const customEphemeral = deriveGrumpkinKeyPairFromSeed(new Uint8Array(32).fill(0xAB));
+    const customDeposit = await prepareStealthDeposit({
+      recipientMeta,
+      amountSats: 100_000n,
+      network: "testnet",
+      ephemeralKeyPair: customEphemeral,
+    });
+
+    // Both should have valid structure
+    expect(randomDeposit.btcDepositAddress).toMatch(/^tb1p/);
+    expect(customDeposit.btcDepositAddress).toMatch(/^tb1p/);
+    expect(randomDeposit.opReturnData.length).toBe(32);
+    expect(customDeposit.opReturnData.length).toBe(32);
+    expect(randomDeposit.stealthData.ephemeralPub.length).toBe(33);
+    expect(customDeposit.stealthData.ephemeralPub.length).toBe(33);
   });
 });

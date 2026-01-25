@@ -133,13 +133,21 @@ function deriveStealthScalar(sharedSecretBytes: Uint8Array): bigint {
 // ========== Sender Functions ==========
 
 /**
+ * Grumpkin keypair type for optional ephemeral key injection
+ */
+export interface GrumpkinKeyPair {
+  privKey: bigint;
+  pubKey: { x: bigint; y: bigint };
+}
+
+/**
  * Prepare a stealth deposit for a recipient (MINIMAL FORMAT)
  *
  * Uses EIP-5564/DKSAP pattern with single Grumpkin ephemeral key.
  *
  * BTC transaction outputs:
  * - Output 1: amount to btcDepositAddress (Taproot)
- * - Output 2: OP_RETURN with commitment only (34 bytes)
+ * - Output 2: OP_RETURN with commitment only (32 bytes)
  *
  * Stealth derivation:
  * 1. sharedSecret = ECDH(ephemeral.priv, viewingPub)
@@ -147,20 +155,41 @@ function deriveStealthScalar(sharedSecretBytes: Uint8Array): bigint {
  * 3. commitment = Poseidon2(stealthPub.x, amount)
  *
  * @param params - Deposit parameters
+ * @param params.ephemeralKeyPair - Optional: provide your own ephemeral keypair
+ *   for deterministic deposits. If not provided, a random keypair is generated.
+ *   Use `generateGrumpkinKeyPair()` or `deriveGrumpkinKeyPairFromSeed()` to create.
+ *
+ * @example
+ * ```typescript
+ * // Random ephemeral key (default)
+ * const deposit = await prepareStealthDeposit({
+ *   recipientMeta, amountSats, network
+ * });
+ *
+ * // Deterministic ephemeral key (for recovery/reproducibility)
+ * const seed = sha256(mySecret + recipientMeta + amount);
+ * const ephemeral = deriveGrumpkinKeyPairFromSeed(seed);
+ * const deposit = await prepareStealthDeposit({
+ *   recipientMeta, amountSats, network, ephemeralKeyPair: ephemeral
+ * });
+ * ```
+ *
  * @returns Prepared deposit data
  */
 export async function prepareStealthDeposit(params: {
   recipientMeta: StealthMetaAddress;
   amountSats: bigint;
   network: "testnet" | "mainnet";
+  /** Optional: provide your own ephemeral keypair for deterministic deposits */
+  ephemeralKeyPair?: GrumpkinKeyPair;
 }): Promise<PreparedStealthDeposit> {
-  const { recipientMeta, amountSats, network } = params;
+  const { recipientMeta, amountSats, network, ephemeralKeyPair } = params;
 
   // Parse recipient's public keys (both Grumpkin now)
   const { spendingPubKey, viewingPubKey } = parseStealthMetaAddress(recipientMeta);
 
-  // Generate single Grumpkin ephemeral keypair
-  const ephemeral = generateGrumpkinKeyPair();
+  // Use provided ephemeral keypair or generate a random one
+  const ephemeral = ephemeralKeyPair ?? generateGrumpkinKeyPair();
 
   // Compute shared secret with viewing key
   const sharedSecret = grumpkinEcdh(ephemeral.privKey, viewingPubKey);

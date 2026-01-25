@@ -574,7 +574,7 @@ export function sendLink(note: Note, baseUrl?: string): string {
  * can discover by scanning with their view key.
  *
  * **Flow:**
- * 1. Dual ECDH key exchange: X25519 (viewing) + Grumpkin (spending)
+ * 1. Dual ECDH key exchange: Grumpkin (viewing) + Grumpkin (spending)
  * 2. Compute commitment using Poseidon2
  * 3. Create on-chain StealthAnnouncement
  * 4. Recipient scans announcements with view key

@@ -17,10 +17,10 @@ use thiserror::Error;
 use super::watcher::{AddressWatcher, MerkleProofData, WatcherError};
 
 /// zVault program ID (devnet)
-pub const ZVAULT_PROGRAM_ID: &str = "3Df8Xv9hMtVVLRxagnbCsofvgn18yPzfCqTmbUEnx9KF";
+pub const ZVAULT_PROGRAM_ID: &str = "BDH9iTYp2nBptboCcSmTn7GTkzYTzaMr7MMG5D5sXXRp";
 
 /// BTC Light Client program ID (devnet)
-pub const BTC_LIGHT_CLIENT_PROGRAM_ID: &str = "8GCjjPpzRP1DhWa9PLcRhSV7aT9Mt47Xhknv3ZCNb3fmXsgf";
+pub const BTC_LIGHT_CLIENT_PROGRAM_ID: &str = "8qntLj65faXiqMKcQypyJ389Yq6MBU5X7AB5qsLnvKgy";
 
 /// Verifier errors
 #[derive(Debug, Error)]

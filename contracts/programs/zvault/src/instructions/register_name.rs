@@ -22,12 +22,12 @@ use crate::state::{NameRegistry, NAME_REGISTRY_DISCRIMINATOR, validate_name};
 /// - name_len: u8 (length of name)
 /// - name: [u8; name_len] (the name without .zkey suffix)
 /// - spending_pubkey: [u8; 33] (Grumpkin compressed)
-/// - viewing_pubkey: [u8; 32] (X25519)
+/// - viewing_pubkey: [u8; 33] (Grumpkin compressed)
 pub struct RegisterNameData {
     pub name: Vec<u8>,
     pub name_hash: [u8; 32],
     pub spending_pubkey: [u8; 33],
-    pub viewing_pubkey: [u8; 32],
+    pub viewing_pubkey: [u8; 33],
 }
 
 impl RegisterNameData {
@@ -37,7 +37,7 @@ impl RegisterNameData {
         }
 
         let name_len = data[0] as usize;
-        if data.len() < 1 + name_len + 32 + 33 + 32 {
+        if data.len() < 1 + name_len + 32 + 33 + 33 {
             return Err(ProgramError::InvalidInstructionData);
         }
 
@@ -52,8 +52,8 @@ impl RegisterNameData {
         let mut spending_pubkey = [0u8; 33];
         spending_pubkey.copy_from_slice(&data[1 + name_len + 32..1 + name_len + 32 + 33]);
 
-        let mut viewing_pubkey = [0u8; 32];
-        viewing_pubkey.copy_from_slice(&data[1 + name_len + 32 + 33..1 + name_len + 32 + 33 + 32]);
+        let mut viewing_pubkey = [0u8; 33];
+        viewing_pubkey.copy_from_slice(&data[1 + name_len + 32 + 33..1 + name_len + 32 + 33 + 33]);
 
         Ok(Self {
             name,
@@ -68,16 +68,16 @@ impl RegisterNameData {
 /// Layout:
 /// - name_hash: [u8; 32] (to identify the registry)
 /// - spending_pubkey: [u8; 33] (new Grumpkin key)
-/// - viewing_pubkey: [u8; 32] (new X25519 key)
+/// - viewing_pubkey: [u8; 33] (new Grumpkin key)
 pub struct UpdateNameData {
     pub name_hash: [u8; 32],
     pub spending_pubkey: [u8; 33],
-    pub viewing_pubkey: [u8; 32],
+    pub viewing_pubkey: [u8; 33],
 }
 
 impl UpdateNameData {
     pub fn from_bytes(data: &[u8]) -> Result<Self, ProgramError> {
-        if data.len() < 32 + 33 + 32 {
+        if data.len() < 32 + 33 + 33 {
             return Err(ProgramError::InvalidInstructionData);
         }
 
@@ -87,8 +87,8 @@ impl UpdateNameData {
         let mut spending_pubkey = [0u8; 33];
         spending_pubkey.copy_from_slice(&data[32..65]);
 
-        let mut viewing_pubkey = [0u8; 32];
-        viewing_pubkey.copy_from_slice(&data[65..97]);
+        let mut viewing_pubkey = [0u8; 33];
+        viewing_pubkey.copy_from_slice(&data[65..98]);
 
         Ok(Self {
             name_hash,

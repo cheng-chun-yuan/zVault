@@ -22,10 +22,10 @@ pub const NAME_REGISTRY_SIZE: usize = 1 +  // discriminator
     32 +  // name_hash (SHA256 of lowercase name)
     32 +  // owner (Solana pubkey that can update)
     33 +  // spending_pubkey (Grumpkin compressed)
-    32 +  // viewing_pubkey (X25519)
+    33 +  // viewing_pubkey (Grumpkin compressed)
     8 +   // created_at
     8 +   // updated_at
-    32;   // _reserved = 179 bytes
+    32;   // _reserved = 180 bytes
 
 /// Name registry for human-readable stealth addresses
 ///
@@ -51,8 +51,8 @@ pub struct NameRegistry {
     /// Grumpkin spending public key (33 bytes compressed)
     pub spending_pubkey: [u8; 33],
 
-    /// X25519 viewing public key (32 bytes)
-    pub viewing_pubkey: [u8; 32],
+    /// Grumpkin viewing public key (33 bytes compressed)
+    pub viewing_pubkey: [u8; 33],
 
     /// Registration timestamp (stored as bytes for alignment)
     created_at_bytes: [u8; 8],

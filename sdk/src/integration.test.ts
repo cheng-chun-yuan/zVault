@@ -59,7 +59,7 @@ describe("SDK Integration Tests", () => {
       const note = generateNote(50_000n);
       const link = createClaimLink(note);
 
-      expect(link).toContain("https://sbbtc.app/claim");
+      expect(link).toContain("https://zvault.app/claim");
       expect(link).toContain("note=");
 
       const parsed = parseClaimLink(link);
@@ -179,7 +179,7 @@ describe("SDK Integration Tests", () => {
 
       expect(result.note.amount).toBe(amount);
       expect(result.taprootAddress).toMatch(/^tb1p/);
-      expect(result.claimLink).toContain("sbbtc.app/claim");
+      expect(result.claimLink).toContain("zvault.app/claim");
       expect(result.displayAmount).toBe("0.00100000 BTC");
     });
 
