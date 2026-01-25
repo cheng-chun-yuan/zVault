@@ -5,13 +5,15 @@
 //! public key so user can find their balance with viewing key and spend
 //! with spending key.
 //!
-//! Demo flow:
-//! 1. SDK generates ephemeral keypair and computes ECDH shared secret
-//! 2. SDK derives note public key and commitment
-//! 3. This instruction adds commitment to Merkle tree
-//! 4. This instruction creates stealth announcement with ephemeral pubkey
-//! 5. User scans announcements with viewing key to find deposits
-//! 6. User generates ZK proof with spending key to claim
+//! Demo flow (EIP-5564/DKSAP pattern):
+//! 1. SDK generates single ephemeral Grumpkin keypair
+//! 2. SDK computes sharedSecret = ECDH(ephemeral.priv, viewingPub)
+//! 3. SDK derives stealthPub = spendingPub + hash(sharedSecret) * G
+//! 4. SDK computes commitment = Poseidon2(stealthPub.x, amount)
+//! 5. This instruction adds commitment to Merkle tree
+//! 6. This instruction creates stealth announcement with ephemeral pubkey
+//! 7. User scans announcements with viewing key to detect deposits
+//! 8. User generates ZK proof with spending key to claim
 
 use pinocchio::{
     account_info::AccountInfo,
@@ -26,40 +28,34 @@ use crate::error::ZVaultError;
 use crate::state::{CommitmentTree, PoolState, StealthAnnouncement, STEALTH_ANNOUNCEMENT_DISCRIMINATOR};
 use crate::utils::validate_program_owner;
 
-/// Add demo stealth instruction data
+/// Add demo stealth instruction data (single ephemeral key)
 /// Layout:
-/// - ephemeral_view_pub: [u8; 32] (X25519 for scanning)
-/// - ephemeral_spend_pub: [u8; 33] (Grumpkin for spending proofs)
+/// - ephemeral_pub: [u8; 33] (Grumpkin compressed)
 /// - commitment: [u8; 32] (pre-computed by SDK)
 /// - amount: u64 (8 bytes)
-/// Total: 105 bytes
+/// Total: 73 bytes (was 105 with dual keys)
 pub struct AddDemoStealthData {
-    pub ephemeral_view_pub: [u8; 32],
-    pub ephemeral_spend_pub: [u8; 33],
+    pub ephemeral_pub: [u8; 33],
     pub commitment: [u8; 32],
     pub amount: u64,
 }
 
 impl AddDemoStealthData {
     pub fn from_bytes(data: &[u8]) -> Result<Self, ProgramError> {
-        if data.len() < 105 {
+        if data.len() < 73 {
             return Err(ProgramError::InvalidInstructionData);
         }
 
-        let mut ephemeral_view_pub = [0u8; 32];
-        ephemeral_view_pub.copy_from_slice(&data[0..32]);
-
-        let mut ephemeral_spend_pub = [0u8; 33];
-        ephemeral_spend_pub.copy_from_slice(&data[32..65]);
+        let mut ephemeral_pub = [0u8; 33];
+        ephemeral_pub.copy_from_slice(&data[0..33]);
 
         let mut commitment = [0u8; 32];
-        commitment.copy_from_slice(&data[65..97]);
+        commitment.copy_from_slice(&data[33..65]);
 
-        let amount = u64::from_le_bytes(data[97..105].try_into().unwrap());
+        let amount = u64::from_le_bytes(data[65..73].try_into().unwrap());
 
         Ok(Self {
-            ephemeral_view_pub,
-            ephemeral_spend_pub,
+            ephemeral_pub,
             commitment,
             amount,
         })
@@ -143,7 +139,7 @@ pub fn process_add_demo_stealth(
     }
 
     // Verify stealth announcement PDA
-    let seeds: &[&[u8]] = &[StealthAnnouncement::SEED, &ix_data.ephemeral_view_pub];
+    let seeds: &[&[u8]] = &[StealthAnnouncement::SEED, &ix_data.ephemeral_pub];
     let (expected_pda, bump) = find_program_address(seeds, program_id);
     if stealth_announcement.key() != &expected_pda {
         return Err(ProgramError::InvalidSeeds);
@@ -177,7 +173,7 @@ pub fn process_add_demo_stealth(
         let bump_bytes = [bump];
         let signer_seeds: &[&[u8]] = &[
             StealthAnnouncement::SEED,
-            &ix_data.ephemeral_view_pub,
+            &ix_data.ephemeral_pub,
             &bump_bytes,
         ];
 
@@ -198,8 +194,7 @@ pub fn process_add_demo_stealth(
         let announcement = StealthAnnouncement::init(&mut ann_data)?;
 
         announcement.bump = bump;
-        announcement.ephemeral_view_pub = ix_data.ephemeral_view_pub;
-        announcement.ephemeral_spend_pub = ix_data.ephemeral_spend_pub;
+        announcement.ephemeral_pub = ix_data.ephemeral_pub;
         announcement.set_amount_sats(ix_data.amount);
         announcement.commitment = ix_data.commitment;
         announcement.set_leaf_index(leaf_index);

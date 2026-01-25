@@ -1,54 +1,57 @@
 //! Stealth announcement account state (zero-copy)
 //!
-//! Dual-Key ECDH Format:
-//! - X25519 ephemeral key for fast off-chain scanning (viewing key)
-//! - Grumpkin ephemeral key for efficient in-circuit spending proofs
+//! EIP-5564/DKSAP Single Ephemeral Key Pattern:
+//! - Single Grumpkin ephemeral key for ECDH stealth derivation
+//! - Recipient uses viewing key to detect, spending key to claim
 //!
 //! Privacy Properties:
 //! - No recipient hint (prevents linking deposits to same recipient)
-//! - Dual ephemeral pubkeys: X25519 for scanning, Grumpkin for spending proofs
-//! - Viewing key can decrypt but CANNOT derive nullifier (no spending)
+//! - Single ephemeral pubkey: Grumpkin for stealth address derivation
+//! - Viewing key can detect but CANNOT derive stealth private key
+//!
+//! Stealth Address Flow:
+//! - Sender: stealthPub = spendingPub + hash(ECDH(ephemeral, viewingPub)) * G
+//! - Recipient: stealthPriv = spendingPriv + hash(ECDH(viewingPriv, ephemeralPub))
 
 use pinocchio::program_error::ProgramError;
 
 /// Account discriminator for StealthAnnouncement
 pub const STEALTH_ANNOUNCEMENT_DISCRIMINATOR: u8 = 0x08;
 
-/// Stealth announcement account size (dual-key ECDH format)
+/// Stealth announcement account size (single ephemeral key)
 ///
-/// Layout (131 bytes):
+/// Layout (98 bytes):
 /// - discriminator (1 byte)
 /// - bump (1 byte)
-/// - ephemeral_view_pub (32 bytes, X25519 for scanning)
-/// - ephemeral_spend_pub (33 bytes, Grumpkin compressed for spending)
+/// - ephemeral_pub (33 bytes, Grumpkin compressed)
 /// - amount_sats (8 bytes, verified from BTC tx)
 /// - commitment (32 bytes)
 /// - leaf_index (8 bytes, position in Merkle tree)
 /// - created_at (8 bytes)
 pub const STEALTH_ANNOUNCEMENT_SIZE: usize = 1 + // discriminator
     1 + // bump
-    32 + // ephemeral_view_pub (X25519 for scanning)
-    33 + // ephemeral_spend_pub (Grumpkin compressed for spending)
+    33 + // ephemeral_pub (single Grumpkin key)
     8 + // amount_sats (verified from BTC tx, stored directly)
     32 + // commitment
     8 + // leaf_index (position in Merkle tree)
-    8; // created_at = 131 bytes
+    8; // created_at = 98 bytes (saved 33 bytes from dual-key format)
 
-/// Stealth address announcement for dual-key ECDH
+/// Stealth address announcement with single ephemeral key
 ///
-/// Contains two ephemeral public keys:
-/// - X25519 for fast off-chain scanning (viewing key)
-/// - Grumpkin for efficient in-circuit spending proofs
+/// Uses EIP-5564/DKSAP pattern with single Grumpkin ephemeral key:
+/// - sharedSecret = ECDH(ephemeralPriv, viewingPub) [sender]
+/// - sharedSecret = ECDH(viewingPriv, ephemeralPub) [recipient]
+/// - stealthPub = spendingPub + hash(sharedSecret) * G
 ///
 /// Key Separation:
-/// - Viewing key can see amounts but CANNOT derive nullifier
-/// - Spending key required for nullifier and proof generation
+/// - Viewing key can detect deposits but CANNOT derive stealthPriv
+/// - Spending key required for stealthPriv and nullifier derivation
 ///
 /// Security Properties:
 /// - Amount stored directly (BTC amount is public on Bitcoin blockchain)
-/// - Commitment uses Poseidon2(notePubKey, amount)
+/// - Commitment = Poseidon2(stealthPub.x, amount)
 ///
-/// PDA: [b"stealth", ephemeral_view_pub]
+/// PDA: [b"stealth", ephemeral_pub]
 #[repr(C)]
 pub struct StealthAnnouncement {
     /// Discriminator (0x08)
@@ -57,20 +60,17 @@ pub struct StealthAnnouncement {
     /// Bump seed
     pub bump: u8,
 
-    /// Ephemeral X25519 public key (32 bytes) - for off-chain scanning
-    /// Recipient scans: view_shared = ECDH(viewing_priv, ephemeral_view_pub)
-    pub ephemeral_view_pub: [u8; 32],
-
-    /// Ephemeral Grumpkin public key (33 bytes compressed) - for spending proofs
-    /// Recipient proves: spend_shared = ECDH(spending_priv, ephemeral_spend_pub)
-    pub ephemeral_spend_pub: [u8; 33],
+    /// Single Grumpkin ephemeral public key (33 bytes compressed)
+    /// Recipient: sharedSecret = ECDH(viewingPriv, ephemeral_pub)
+    /// Then: stealthPub = spendingPub + hash(sharedSecret) * G
+    pub ephemeral_pub: [u8; 33],
 
     /// Amount in satoshis (verified from BTC transaction, stored directly)
     /// No encryption needed - BTC amount is public on Bitcoin blockchain
     amount_sats_bytes: [u8; 8],
 
     /// Commitment for Merkle tree verification
-    /// commitment = Poseidon2(notePubKey, amount)
+    /// commitment = Poseidon2(stealthPub.x, amount)
     pub commitment: [u8; 32],
 
     /// Leaf index in Merkle tree (0 if not from direct deposit)
