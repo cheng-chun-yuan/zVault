@@ -12,8 +12,7 @@
     "test:demo": "bun run scripts/test-demo-flow.ts",
     "test:name": "bun run scripts/test-name-registry.ts",
     "test:all": "bun run scripts/test-all.ts",
-    "setup:devnet": "bun run scripts/devnet-setup.ts",
-    "init": "bun run scripts/deploy-and-seed.ts"
+    "setup:devnet": "bun run scripts/devnet-setup.ts"
   },
   "dependencies": {
     "@noble/hashes": "^2.0.1",

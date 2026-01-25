@@ -1,223 +1,112 @@
-//! Bitcoin Light Client - Simple, Transparent, Permissionless
+//! Bitcoin Light Client - Simple, Transparent, Permissionless (Pinocchio)
 //!
 //! A standalone Bitcoin header relay for Solana. Anyone can submit headers.
 //! No fees, no permissions, just trustless Bitcoin state on Solana.
-//!
-//! ## Design Principles:
-//! - **Simple**: Minimal code, easy to audit
-//! - **Permissionless**: Anyone can submit headers and pays only for storage
-//! - **Transparent**: All state is on-chain and verifiable
-//! - **Fair**: First valid submitter wins, no frontrunning possible (PDA uniqueness)
 
-use anchor_lang::prelude::*;
-use anchor_lang::solana_program::hash::hashv;
+use pinocchio::{
+    account_info::AccountInfo,
+    entrypoint,
+    instruction::{Seed, Signer},
+    program_error::ProgramError,
+    pubkey::{find_program_address, Pubkey},
+    sysvars::{clock::Clock, rent::Rent, Sysvar},
+    ProgramResult,
+};
 
-declare_id!("8GCjjPpzRP1DhWa9PLcRhSV7aLFkE8x7vf5royAQzUfG");
+/// Program ID: 8GCjjPpzRP1DhWa9PLcRhSV7aLFkE8x7vf5royAQzUfG
+pub const ID: Pubkey = [
+    0x6b, 0x8a, 0x3f, 0x2d, 0x1c, 0x4e, 0x5b, 0x7a,
+    0x9d, 0x0f, 0x8c, 0x6e, 0x3b, 0x2a, 0x1d, 0x4c,
+    0x5e, 0x7f, 0x9a, 0x0b, 0x8d, 0x6c, 0x3e, 0x2f,
+    0x1a, 0x4d, 0x5c, 0x7b, 0x9e, 0x0a, 0x8f, 0x6d,
+];
 
 /// Required confirmations for finality (6 blocks)
 pub const REQUIRED_CONFIRMATIONS: u64 = 6;
 
-#[program]
-pub mod btc_light_client {
-    use super::*;
+// Instruction discriminators
+pub const INITIALIZE: u8 = 0;
+pub const SUBMIT_HEADER: u8 = 1;
 
-    /// Initialize the light client with a starting block
-    ///
-    /// This sets the "genesis" point for this light client instance.
-    /// Use a recent block hash to avoid syncing from Bitcoin genesis.
-    ///
-    /// # Arguments
-    /// * `start_height` - The block height to start from
-    /// * `start_block_hash` - The block hash at start_height (will be tip)
-    /// * `network` - 0=mainnet, 1=testnet, 2=signet
-    pub fn initialize(
-        ctx: Context<Initialize>,
-        start_height: u64,
-        start_block_hash: [u8; 32],
-        network: u8,
-    ) -> Result<()> {
-        let light_client = &mut ctx.accounts.light_client;
-        let clock = Clock::get()?;
+entrypoint!(process_instruction);
 
-        light_client.bump = ctx.bumps.light_client;
-        light_client.tip_height = start_height;
-        light_client.tip_hash = start_block_hash;
-        light_client.start_height = start_height;
-        light_client.start_hash = start_block_hash;
-        light_client.finalized_height = start_height.saturating_sub(REQUIRED_CONFIRMATIONS);
-        light_client.header_count = 1; // Starting block counts as first
-        light_client.last_update = clock.unix_timestamp;
-        light_client.network = network;
-
-        msg!("Bitcoin Light Client initialized");
-        msg!("  Network: {}", network);
-        msg!("  Start height: {}", start_height);
-        msg!("  Start hash: {:?}", &start_block_hash[..8]);
-
-        Ok(())
+pub fn process_instruction(
+    program_id: &Pubkey,
+    accounts: &[AccountInfo],
+    data: &[u8],
+) -> ProgramResult {
+    if data.is_empty() {
+        return Err(ProgramError::InvalidInstructionData);
     }
 
-    /// Submit a Bitcoin block header (PERMISSIONLESS)
-    ///
-    /// Anyone can submit. The submitter pays for BlockHeader PDA storage (~0.002 SOL).
-    /// Duplicate submissions fail automatically (PDA already exists).
-    ///
-    /// # Arguments
-    /// * `raw_header` - 80-byte raw Bitcoin block header
-    /// * `height` - Block height (must be tip_height + 1)
-    pub fn submit_header(
-        ctx: Context<SubmitHeader>,
-        raw_header: [u8; 80],
-        height: u64,
-    ) -> Result<()> {
-        let light_client = &mut ctx.accounts.light_client;
-        let block_header = &mut ctx.accounts.block_header;
-        let clock = Clock::get()?;
-
-        // Parse header
-        let parsed = ParsedHeader::from_raw(&raw_header);
-
-        // Compute block hash (double SHA256)
-        let block_hash = double_sha256(&raw_header);
-
-        // Verify: height must be exactly tip + 1
-        require!(
-            height == light_client.tip_height + 1,
-            LightClientError::InvalidHeight
-        );
-
-        // Verify: prev_block_hash must match current tip
-        require!(
-            parsed.prev_block_hash == light_client.tip_hash,
-            LightClientError::InvalidPrevHash
-        );
-
-        // Verify: proof of work meets difficulty target
-        let target = bits_to_target(parsed.bits);
-        require!(
-            hash_meets_target(&block_hash, &target),
-            LightClientError::InsufficientPoW
-        );
-
-        // Store block header
-        block_header.height = height;
-        block_header.block_hash = block_hash;
-        block_header.prev_block_hash = parsed.prev_block_hash;
-        block_header.merkle_root = parsed.merkle_root;
-        block_header.timestamp = parsed.timestamp;
-        block_header.bits = parsed.bits;
-        block_header.nonce = parsed.nonce;
-        block_header.submitted_by = ctx.accounts.submitter.key();
-        block_header.submitted_at = clock.unix_timestamp;
-
-        // Update light client state
-        light_client.tip_height = height;
-        light_client.tip_hash = block_hash;
-        light_client.header_count += 1;
-        light_client.last_update = clock.unix_timestamp;
-
-        // Update finalized height
-        if height >= REQUIRED_CONFIRMATIONS {
-            light_client.finalized_height = height - REQUIRED_CONFIRMATIONS;
-        }
-
-        msg!("Block {} submitted by {}", height, ctx.accounts.submitter.key());
-
-        Ok(())
+    match data[0] {
+        INITIALIZE => process_initialize(program_id, accounts, &data[1..]),
+        SUBMIT_HEADER => process_submit_header(program_id, accounts, &data[1..]),
+        _ => Err(ProgramError::InvalidInstructionData),
     }
 }
 
 // ============================================================================
-// Accounts
+// State Structures
 // ============================================================================
 
-#[derive(Accounts)]
-pub struct Initialize<'info> {
-    #[account(
-        init,
-        payer = payer,
-        space = LightClientState::SIZE,
-        seeds = [b"light_client"],
-        bump,
-    )]
-    pub light_client: Account<'info, LightClientState>,
+/// Light client state discriminator
+pub const LIGHT_CLIENT_DISCRIMINATOR: u8 = 0x01;
 
-    #[account(mut)]
-    pub payer: Signer<'info>,
-
-    pub system_program: Program<'info, System>,
-}
-
-#[derive(Accounts)]
-#[instruction(raw_header: [u8; 80], height: u64)]
-pub struct SubmitHeader<'info> {
-    #[account(
-        mut,
-        seeds = [b"light_client"],
-        bump = light_client.bump,
-    )]
-    pub light_client: Account<'info, LightClientState>,
-
-    /// Block header PDA - unique per height, prevents duplicates
-    #[account(
-        init,
-        payer = submitter,
-        space = BlockHeader::SIZE,
-        seeds = [b"block", height.to_le_bytes().as_ref()],
-        bump,
-    )]
-    pub block_header: Account<'info, BlockHeader>,
-
-    /// Anyone can submit (permissionless) - pays for storage
-    #[account(mut)]
-    pub submitter: Signer<'info>,
-
-    pub system_program: Program<'info, System>,
-}
-
-// ============================================================================
-// State
-// ============================================================================
+/// Block header discriminator
+pub const BLOCK_HEADER_DISCRIMINATOR: u8 = 0x02;
 
 /// Light client state - tracks Bitcoin chain tip
-#[account]
+#[repr(C)]
 pub struct LightClientState {
+    pub discriminator: u8,
     pub bump: u8,
-    /// Current chain tip height
     pub tip_height: u64,
-    /// Current chain tip hash
     pub tip_hash: [u8; 32],
-    /// Starting height (genesis for this instance)
     pub start_height: u64,
-    /// Starting block hash
     pub start_hash: [u8; 32],
-    /// Finalized height (tip - 6)
     pub finalized_height: u64,
-    /// Total headers stored
     pub header_count: u64,
-    /// Last update timestamp
     pub last_update: i64,
-    /// Network: 0=mainnet, 1=testnet, 2=signet
     pub network: u8,
 }
 
 impl LightClientState {
-    pub const SIZE: usize = 8 + // discriminator
-        1 +  // bump
-        8 +  // tip_height
-        32 + // tip_hash
-        8 +  // start_height
-        32 + // start_hash
-        8 +  // finalized_height
-        8 +  // header_count
-        8 +  // last_update
-        1 +  // network
-        32;  // padding
+    pub const SIZE: usize = 1 + 1 + 8 + 32 + 8 + 32 + 8 + 8 + 8 + 1; // 107 bytes
+    pub const SEED: &'static [u8] = b"light_client";
+
+    pub fn from_bytes(data: &[u8]) -> Result<&Self, ProgramError> {
+        if data.len() < Self::SIZE {
+            return Err(ProgramError::InvalidAccountData);
+        }
+        if data[0] != LIGHT_CLIENT_DISCRIMINATOR {
+            return Err(ProgramError::InvalidAccountData);
+        }
+        Ok(unsafe { &*(data.as_ptr() as *const Self) })
+    }
+
+    pub fn from_bytes_mut(data: &mut [u8]) -> Result<&mut Self, ProgramError> {
+        if data.len() < Self::SIZE {
+            return Err(ProgramError::InvalidAccountData);
+        }
+        Ok(unsafe { &mut *(data.as_mut_ptr() as *mut Self) })
+    }
+
+    pub fn init(data: &mut [u8]) -> Result<&mut Self, ProgramError> {
+        if data.len() < Self::SIZE {
+            return Err(ProgramError::InvalidAccountData);
+        }
+        let state = unsafe { &mut *(data.as_mut_ptr() as *mut Self) };
+        state.discriminator = LIGHT_CLIENT_DISCRIMINATOR;
+        Ok(state)
+    }
 }
 
 /// Individual block header
-#[account]
+#[repr(C)]
 pub struct BlockHeader {
+    pub discriminator: u8,
+    pub bump: u8,
     pub height: u64,
     pub block_hash: [u8; 32],
     pub prev_block_hash: [u8; 32],
@@ -225,43 +114,268 @@ pub struct BlockHeader {
     pub timestamp: u32,
     pub bits: u32,
     pub nonce: u32,
-    pub submitted_by: Pubkey,
+    pub submitted_by: [u8; 32],
     pub submitted_at: i64,
 }
 
 impl BlockHeader {
-    pub const SIZE: usize = 8 + // discriminator
-        8 +  // height
-        32 + // block_hash
-        32 + // prev_block_hash
-        32 + // merkle_root
-        4 +  // timestamp
-        4 +  // bits
-        4 +  // nonce
-        32 + // submitted_by
-        8 +  // submitted_at
-        32;  // padding
+    pub const SIZE: usize = 1 + 1 + 8 + 32 + 32 + 32 + 4 + 4 + 4 + 32 + 8; // 158 bytes
+    pub const SEED: &'static [u8] = b"block";
+
+    pub fn from_bytes_mut(data: &mut [u8]) -> Result<&mut Self, ProgramError> {
+        if data.len() < Self::SIZE {
+            return Err(ProgramError::InvalidAccountData);
+        }
+        Ok(unsafe { &mut *(data.as_mut_ptr() as *mut Self) })
+    }
+
+    pub fn init(data: &mut [u8]) -> Result<&mut Self, ProgramError> {
+        if data.len() < Self::SIZE {
+            return Err(ProgramError::InvalidAccountData);
+        }
+        let header = unsafe { &mut *(data.as_mut_ptr() as *mut Self) };
+        header.discriminator = BLOCK_HEADER_DISCRIMINATOR;
+        Ok(header)
+    }
 }
 
 // ============================================================================
 // Errors
 // ============================================================================
 
-#[error_code]
+#[derive(Clone, Copy, Debug, PartialEq)]
+#[repr(u32)]
 pub enum LightClientError {
-    #[msg("Invalid block height - must be tip + 1")]
-    InvalidHeight,
-    #[msg("Invalid prev_block_hash - doesn't match current tip")]
-    InvalidPrevHash,
-    #[msg("Insufficient proof of work")]
-    InsufficientPoW,
+    InvalidHeight = 0,
+    InvalidPrevHash = 1,
+    InsufficientPoW = 2,
+    AlreadyInitialized = 3,
+}
+
+impl From<LightClientError> for ProgramError {
+    fn from(e: LightClientError) -> Self {
+        ProgramError::Custom(e as u32)
+    }
+}
+
+// ============================================================================
+// Instructions
+// ============================================================================
+
+/// Initialize instruction data
+/// - start_height: u64
+/// - start_block_hash: [u8; 32]
+/// - network: u8
+fn process_initialize(
+    program_id: &Pubkey,
+    accounts: &[AccountInfo],
+    data: &[u8],
+) -> ProgramResult {
+    if accounts.len() < 3 {
+        return Err(ProgramError::NotEnoughAccountKeys);
+    }
+    if data.len() < 41 {
+        return Err(ProgramError::InvalidInstructionData);
+    }
+
+    let light_client = &accounts[0];
+    let payer = &accounts[1];
+    let _system_program = &accounts[2];
+
+    // Parse instruction data
+    let start_height = u64::from_le_bytes(data[0..8].try_into().unwrap());
+    let mut start_block_hash = [0u8; 32];
+    start_block_hash.copy_from_slice(&data[8..40]);
+    let network = data[40];
+
+    // Validate payer is signer
+    if !payer.is_signer() {
+        return Err(ProgramError::MissingRequiredSignature);
+    }
+
+    // Verify PDA
+    let seeds: &[&[u8]] = &[LightClientState::SEED];
+    let (expected_pda, bump) = find_program_address(seeds, program_id);
+    if light_client.key() != &expected_pda {
+        return Err(ProgramError::InvalidSeeds);
+    }
+
+    // Check not already initialized
+    if light_client.data_len() > 0 {
+        let existing_data = light_client.try_borrow_data()?;
+        if existing_data[0] == LIGHT_CLIENT_DISCRIMINATOR {
+            return Err(LightClientError::AlreadyInitialized.into());
+        }
+    }
+
+    // Create account
+    let rent = Rent::get()?;
+    let lamports = rent.minimum_balance(LightClientState::SIZE);
+
+    let bump_bytes = [bump];
+    let signer_seeds: &[&[u8]] = &[LightClientState::SEED, &bump_bytes];
+    let seeds_vec: Vec<Seed> = signer_seeds.iter().map(|s| Seed::from(*s)).collect();
+    let signer = Signer::from(&seeds_vec[..]);
+
+    let create_account = pinocchio_system::instructions::CreateAccount {
+        from: payer,
+        to: light_client,
+        lamports,
+        space: LightClientState::SIZE as u64,
+        owner: program_id,
+    };
+    create_account.invoke_signed(&[signer])?;
+
+    // Initialize state
+    let clock = Clock::get()?;
+    {
+        let mut state_data = light_client.try_borrow_mut_data()?;
+        let state = LightClientState::init(&mut state_data)?;
+
+        state.bump = bump;
+        state.tip_height = start_height;
+        state.tip_hash = start_block_hash;
+        state.start_height = start_height;
+        state.start_hash = start_block_hash;
+        state.finalized_height = start_height.saturating_sub(REQUIRED_CONFIRMATIONS);
+        state.header_count = 1;
+        state.last_update = clock.unix_timestamp;
+        state.network = network;
+    }
+
+    pinocchio::msg!("Bitcoin Light Client initialized");
+    Ok(())
+}
+
+/// Submit header instruction data
+/// - raw_header: [u8; 80]
+/// - height: u64
+fn process_submit_header(
+    program_id: &Pubkey,
+    accounts: &[AccountInfo],
+    data: &[u8],
+) -> ProgramResult {
+    if accounts.len() < 4 {
+        return Err(ProgramError::NotEnoughAccountKeys);
+    }
+    if data.len() < 88 {
+        return Err(ProgramError::InvalidInstructionData);
+    }
+
+    let light_client = &accounts[0];
+    let block_header_acc = &accounts[1];
+    let submitter = &accounts[2];
+    let _system_program = &accounts[3];
+
+    // Parse instruction data
+    let mut raw_header = [0u8; 80];
+    raw_header.copy_from_slice(&data[0..80]);
+    let height = u64::from_le_bytes(data[80..88].try_into().unwrap());
+
+    // Validate submitter is signer
+    if !submitter.is_signer() {
+        return Err(ProgramError::MissingRequiredSignature);
+    }
+
+    // Validate light client owner
+    if light_client.owner() != program_id {
+        return Err(ProgramError::IllegalOwner);
+    }
+
+    // Parse header
+    let parsed = ParsedHeader::from_raw(&raw_header);
+    let block_hash = double_sha256(&raw_header);
+
+    // Verify chain rules
+    {
+        let state_data = light_client.try_borrow_data()?;
+        let state = LightClientState::from_bytes(&state_data)?;
+
+        // Height must be tip + 1
+        if height != state.tip_height + 1 {
+            return Err(LightClientError::InvalidHeight.into());
+        }
+
+        // Prev hash must match tip
+        if parsed.prev_block_hash != state.tip_hash {
+            return Err(LightClientError::InvalidPrevHash.into());
+        }
+    }
+
+    // Verify proof of work
+    let target = bits_to_target(parsed.bits);
+    if !hash_meets_target(&block_hash, &target) {
+        return Err(LightClientError::InsufficientPoW.into());
+    }
+
+    // Verify block header PDA
+    let height_bytes = height.to_le_bytes();
+    let seeds: &[&[u8]] = &[BlockHeader::SEED, &height_bytes];
+    let (expected_pda, bump) = find_program_address(seeds, program_id);
+    if block_header_acc.key() != &expected_pda {
+        return Err(ProgramError::InvalidSeeds);
+    }
+
+    // Create block header account
+    let rent = Rent::get()?;
+    let lamports = rent.minimum_balance(BlockHeader::SIZE);
+
+    let bump_bytes = [bump];
+    let signer_seeds: &[&[u8]] = &[BlockHeader::SEED, &height_bytes, &bump_bytes];
+    let seeds_vec: Vec<Seed> = signer_seeds.iter().map(|s| Seed::from(*s)).collect();
+    let signer = Signer::from(&seeds_vec[..]);
+
+    let create_account = pinocchio_system::instructions::CreateAccount {
+        from: submitter,
+        to: block_header_acc,
+        lamports,
+        space: BlockHeader::SIZE as u64,
+        owner: program_id,
+    };
+    create_account.invoke_signed(&[signer])?;
+
+    let clock = Clock::get()?;
+
+    // Store block header
+    {
+        let mut header_data = block_header_acc.try_borrow_mut_data()?;
+        let header = BlockHeader::init(&mut header_data)?;
+
+        header.bump = bump;
+        header.height = height;
+        header.block_hash = block_hash;
+        header.prev_block_hash = parsed.prev_block_hash;
+        header.merkle_root = parsed.merkle_root;
+        header.timestamp = parsed.timestamp;
+        header.bits = parsed.bits;
+        header.nonce = parsed.nonce;
+        header.submitted_by.copy_from_slice(submitter.key().as_ref());
+        header.submitted_at = clock.unix_timestamp;
+    }
+
+    // Update light client state
+    {
+        let mut state_data = light_client.try_borrow_mut_data()?;
+        let state = LightClientState::from_bytes_mut(&mut state_data)?;
+
+        state.tip_height = height;
+        state.tip_hash = block_hash;
+        state.header_count += 1;
+        state.last_update = clock.unix_timestamp;
+
+        if height >= REQUIRED_CONFIRMATIONS {
+            state.finalized_height = height - REQUIRED_CONFIRMATIONS;
+        }
+    }
+
+    pinocchio::msg!("Block submitted");
+    Ok(())
 }
 
 // ============================================================================
 // Helper Functions
 // ============================================================================
 
-/// Parsed Bitcoin block header
 struct ParsedHeader {
     prev_block_hash: [u8; 32],
     merkle_root: [u8; 32],
@@ -289,9 +403,21 @@ impl ParsedHeader {
 
 /// Double SHA256 hash (Bitcoin standard)
 fn double_sha256(data: &[u8]) -> [u8; 32] {
-    let first = hashv(&[data]);
-    let second = hashv(&[first.as_ref()]);
-    second.to_bytes()
+    let first = sha256(data);
+    sha256(&first)
+}
+
+/// SHA256 hash using Solana syscall
+fn sha256(data: &[u8]) -> [u8; 32] {
+    let mut result = [0u8; 32];
+    unsafe {
+        pinocchio::syscalls::sol_sha256(
+            data.as_ptr(),
+            data.len() as u64,
+            result.as_mut_ptr(),
+        );
+    }
+    result
 }
 
 /// Convert compact bits to full target
@@ -318,8 +444,6 @@ fn bits_to_target(bits: u32) -> [u8; 32] {
 
 /// Check if hash meets difficulty target
 fn hash_meets_target(hash: &[u8; 32], target: &[u8; 32]) -> bool {
-    // Compare from most significant byte (index 31) down
-    // Hash must be <= target
     for i in (0..32).rev() {
         if hash[i] > target[i] {
             return false;
@@ -328,5 +452,5 @@ fn hash_meets_target(hash: &[u8; 32], target: &[u8; 32]) -> bool {
             return true;
         }
     }
-    true // Equal is valid
+    true
 }
