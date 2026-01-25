@@ -1,0 +1,9 @@
+# Build artifacts
+target/
+
+# Generated prover config (contains test values)
+**/Prover.toml
+
+# Proof files
+*.proof
+*.gz

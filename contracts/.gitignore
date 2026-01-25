@@ -13,6 +13,8 @@ node_modules/
 # Devnet/testnet config (contains test keys)
 devnet-config.json
 devnet-test-notes.json
+.devnet-*.json
+.localnet-*.json
 
 # Test validator data
 test-ledger/
