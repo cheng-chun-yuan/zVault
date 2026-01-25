@@ -49,7 +49,7 @@ import {
 
 // Program ID (Solana Devnet)
 export const ZVAULT_PROGRAM_ID = new PublicKey(
-  "CBzbSQPcUXMYdmSvnA24HPZrDQPuEpq4qq2mcmErrWPR"
+  "BDH9iTYp2nBptboCcSmTn7GTkzYTzaMr7MMG5D5sXXRp"
 );
 
 /**

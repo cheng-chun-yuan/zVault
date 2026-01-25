@@ -21,12 +21,12 @@ import {
 
 /** zVault Program ID (Solana Devnet) */
 export const ZVAULT_PROGRAM_ID = new PublicKey(
-  process.env.NEXT_PUBLIC_ZVAULT_PROGRAM_ID || "CBzbSQPcUXMYdmSvnA24HPZrDQPuEpq4qq2mcmErrWPR"
+  process.env.NEXT_PUBLIC_PROGRAM_ID || "BDH9iTYp2nBptboCcSmTn7GTkzYTzaMr7MMG5D5sXXRp"
 );
 
 /** BTC Light Client Program ID */
 export const BTC_LIGHT_CLIENT_PROGRAM_ID = new PublicKey(
-  "8GCjjPpzRP1DhWa9PLcRhSV7aLFkE8x7vf5royAQzUfG"
+  process.env.NEXT_PUBLIC_BTC_LIGHT_CLIENT || "8qntLj65faXiqMKcQypyJ389Yq6MBU5X7AB5qsLnvKgy"
 );
 
 /** Token-2022 Program ID */

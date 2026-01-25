@@ -21,7 +21,7 @@ import { parseClaimLink } from "./claim-link";
 import { bigintToBytes } from "./crypto";
 import { deposit as apiDeposit, withdraw as apiWithdraw, privateClaim as apiPrivateClaim, privateSplit as apiPrivateSplit, sendLink as apiSendLink, sendStealth as apiSendStealth, } from "./api";
 // Program ID (Solana Devnet)
-export const ZVAULT_PROGRAM_ID = new PublicKey("CBzbSQPcUXMYdmSvnA24HPZrDQPuEpq4qq2mcmErrWPR");
+export const ZVAULT_PROGRAM_ID = new PublicKey("BDH9iTYp2nBptboCcSmTn7GTkzYTzaMr7MMG5D5sXXRp");
 /**
  * ZVault SDK Client
  *
