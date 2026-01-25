@@ -86,14 +86,11 @@ const STEALTH_KEY_DOMAIN = new TextEncoder().encode("zVault-stealth-v1");
  * Prepared stealth deposit data for BTC transaction
  */
 export interface PreparedStealthDeposit {
-  /** Taproot address to send BTC to */
+  /** Taproot address to send BTC to (any amount) */
   btcDepositAddress: string;
 
-  /** Hex data to embed in OP_RETURN output (34 bytes) */
+  /** Hex data to embed in OP_RETURN output (32 bytes) */
   opReturnData: Uint8Array;
-
-  /** Exact amount to send (in satoshis) */
-  amountSats: bigint;
 
   /** Stealth data for Solana announcement */
   stealthData: StealthDepositData;
@@ -144,46 +141,45 @@ export interface GrumpkinKeyPair {
  * Prepare a stealth deposit for a recipient (MINIMAL FORMAT)
  *
  * Uses EIP-5564/DKSAP pattern with single Grumpkin ephemeral key.
+ * Amount is NOT specified - send any amount to the returned address.
+ * Actual amount is read from the BTC transaction during verification.
  *
  * BTC transaction outputs:
- * - Output 1: amount to btcDepositAddress (Taproot)
+ * - Output 1: ANY amount to btcDepositAddress (Taproot)
  * - Output 2: OP_RETURN with commitment only (32 bytes)
  *
  * Stealth derivation:
  * 1. sharedSecret = ECDH(ephemeral.priv, viewingPub)
  * 2. stealthPub = spendingPub + hash(sharedSecret) * G
- * 3. commitment = Poseidon2(stealthPub.x, amount)
+ * 3. commitment = Poseidon2(stealthPub.x)  // amount-independent
  *
  * @param params - Deposit parameters
- * @param params.ephemeralKeyPair - Optional: provide your own ephemeral keypair
- *   for deterministic deposits. If not provided, a random keypair is generated.
- *   Use `generateGrumpkinKeyPair()` or `deriveGrumpkinKeyPairFromSeed()` to create.
+ * @param params.ephemeralKeyPair - Optional: provide your own ephemeral keypair.
+ *   If not provided, a random keypair is generated.
  *
  * @example
  * ```typescript
- * // Random ephemeral key (default)
  * const deposit = await prepareStealthDeposit({
- *   recipientMeta, amountSats, network
+ *   recipientMeta,
+ *   network: "testnet"
  * });
  *
- * // Deterministic ephemeral key (for recovery/reproducibility)
- * const seed = sha256(mySecret + recipientMeta + amount);
- * const ephemeral = deriveGrumpkinKeyPairFromSeed(seed);
- * const deposit = await prepareStealthDeposit({
- *   recipientMeta, amountSats, network, ephemeralKeyPair: ephemeral
- * });
+ * // Send ANY amount to this address
+ * console.log(deposit.btcDepositAddress);
+ *
+ * // Ephemeral pubkey stored on-chain for recipient scanning
+ * console.log(deposit.stealthData.ephemeralPub);
  * ```
  *
- * @returns Prepared deposit data
+ * @returns Prepared deposit data (same address works for any amount)
  */
 export async function prepareStealthDeposit(params: {
   recipientMeta: StealthMetaAddress;
-  amountSats: bigint;
   network: "testnet" | "mainnet";
-  /** Optional: provide your own ephemeral keypair for deterministic deposits */
+  /** Optional: provide your own ephemeral keypair */
   ephemeralKeyPair?: GrumpkinKeyPair;
 }): Promise<PreparedStealthDeposit> {
-  const { recipientMeta, amountSats, network, ephemeralKeyPair } = params;
+  const { recipientMeta, network, ephemeralKeyPair } = params;
 
   // Parse recipient's public keys (both Grumpkin now)
   const { spendingPubKey, viewingPubKey } = parseStealthMetaAddress(recipientMeta);
@@ -201,9 +197,9 @@ export async function prepareStealthDeposit(params: {
   const scalarPoint = pointMul(stealthScalar, GRUMPKIN_GENERATOR);
   const stealthPub = pointAdd(spendingPubKey, scalarPoint);
 
-  // Compute commitment using Poseidon2
-  // commitment = Poseidon2(stealthPub.x, amount)
-  const commitmentBigint = poseidon2Hash([stealthPub.x, amountSats]);
+  // Compute commitment using Poseidon2 (amount-independent)
+  // commitment = Poseidon2(stealthPub.x)
+  const commitmentBigint = poseidon2Hash([stealthPub.x]);
   const commitment = bigintToBytes(commitmentBigint);
 
   // Build OP_RETURN data (minimal format - commitment only)
@@ -218,7 +214,6 @@ export async function prepareStealthDeposit(params: {
   return {
     btcDepositAddress,
     opReturnData,
-    amountSats,
     stealthData: {
       ephemeralPub: pointToCompressedBytes(ephemeral.pubKey),
       commitment,
