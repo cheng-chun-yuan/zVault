@@ -287,7 +287,7 @@ export {
 export type { DepositCredentials, ClaimResult, SplitResult } from "./zvault";
 
 // ==========================================================================
-// Stealth address utilities (Dual-key ECDH)
+// Stealth address utilities (EIP-5564/DKSAP single ephemeral key pattern)
 // ==========================================================================
 
 export {
@@ -315,8 +315,6 @@ export {
   parseStealthOpReturn,
   verifyStealthDeposit,
   deriveStealthAnnouncementPDA,
-  STEALTH_OP_RETURN_MAGIC,
-  STEALTH_OP_RETURN_VERSION,
   STEALTH_OP_RETURN_SIZE,
   VERIFY_STEALTH_DEPOSIT_DISCRIMINATOR,
   type PreparedStealthDeposit,

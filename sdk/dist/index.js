@@ -86,13 +86,13 @@ export { uploadTransactionToBuffer, closeBuffer, readBufferData, fetchRawTransac
 // ==========================================================================
 export { verifyDeposit, derivePoolStatePDA, deriveLightClientPDA, deriveBlockHeaderPDA, deriveCommitmentTreePDA, deriveDepositRecordPDA, buildMerkleProof, } from "./verify-deposit";
 // ==========================================================================
-// Stealth address utilities (Dual-key ECDH)
+// Stealth address utilities (EIP-5564/DKSAP single ephemeral key pattern)
 // ==========================================================================
 export { isWalletAdapter, createStealthDeposit, scanAnnouncements, prepareClaimInputs, parseStealthAnnouncement, announcementToScanFormat, STEALTH_ANNOUNCEMENT_SIZE, STEALTH_ANNOUNCEMENT_DISCRIMINATOR, } from "./stealth";
 // ==========================================================================
 // Direct stealth deposit (combined BTC deposit + stealth announcement)
 // ==========================================================================
-export { prepareStealthDeposit, buildStealthOpReturn, parseStealthOpReturn, verifyStealthDeposit, deriveStealthAnnouncementPDA, STEALTH_OP_RETURN_MAGIC, STEALTH_OP_RETURN_VERSION, STEALTH_OP_RETURN_SIZE, VERIFY_STEALTH_DEPOSIT_DISCRIMINATOR, } from "./stealth-deposit";
+export { prepareStealthDeposit, buildStealthOpReturn, parseStealthOpReturn, verifyStealthDeposit, deriveStealthAnnouncementPDA, STEALTH_OP_RETURN_SIZE, VERIFY_STEALTH_DEPOSIT_DISCRIMINATOR, } from "./stealth-deposit";
 // ==========================================================================
 // Core utilities (Platform-agnostic)
 // ==========================================================================

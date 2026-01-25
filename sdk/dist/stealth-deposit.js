@@ -6,84 +6,88 @@
  * verification the commitment goes directly to the recipient - no
  * separate claim step needed.
  *
- * OP_RETURN Format (SIMPLIFIED - 99 bytes, down from 142):
- * - [0]       Magic: 0x7A ('z' for zVault stealth)
- * - [1]       Version (1 byte)
- * - [2-33]    ephemeral_view_pub (32 bytes, X25519)
- * - [34-66]   ephemeral_spend_pub (33 bytes, Grumpkin compressed)
- * - [67-98]   commitment (32 bytes, Poseidon2 hash)
+ * OP_RETURN Format (MINIMAL - 32 bytes):
+ * - [0-31]    commitment (32 bytes, raw Poseidon2 hash)
  *
- * SECURITY IMPROVEMENTS:
- * - Removed encrypted_amount (8 bytes): BTC amount is public on blockchain
- * - Removed encrypted_random (32 bytes): Ephemeral key uniqueness sufficient
- * - Reduced version field (3 bytes saved): 1 byte is enough
- * - Total savings: 43 bytes (142 → 99)
+ * NOTE: No magic/version header needed - program ID identifies the scheme.
+ * Ephemeral key is stored on Solana StealthAnnouncement only.
+ * Recipient matches commitment between Bitcoin and Solana to correlate.
+ *
+ * Benefits:
+ * - 99 → 32 bytes (-68% reduction)
+ * - Simpler parsing (just raw commitment)
+ * - Ephemeral key remains on Solana only (no cross-chain correlation via OP_RETURN)
  */
 import { PublicKey, SystemProgram, Transaction, TransactionInstruction, sendAndConfirmTransaction, } from "@solana/web3.js";
-import { box } from "tweetnacl";
-import { bytesToBigint, bigintToBytes, BN254_FIELD_PRIME } from "./crypto";
-import { generateKeyPair as generateGrumpkinKeyPair, ecdh as grumpkinEcdh, pointToCompressedBytes, pointFromCompressedBytes, } from "./grumpkin";
+import { sha256 } from "@noble/hashes/sha256";
+import { bigintToBytes } from "./crypto";
+import { generateKeyPair as generateGrumpkinKeyPair, ecdh as grumpkinEcdh, pointToCompressedBytes, scalarFromBytes, pointMul, pointAdd, GRUMPKIN_GENERATOR, } from "./grumpkin";
+import { parseStealthMetaAddress } from "./keys";
 import { deriveTaprootAddress } from "./taproot";
-import { deriveNotePubKey, computeCommitment } from "./poseidon2";
+import { poseidon2Hash } from "./poseidon2";
 import { prepareVerifyDeposit, fetchRawTransaction, } from "./chadbuffer";
 import { derivePoolStatePDA, deriveLightClientPDA, deriveBlockHeaderPDA, deriveCommitmentTreePDA, deriveDepositRecordPDA, buildMerkleProof, } from "./verify-deposit";
 // ========== Constants ==========
-/** Magic byte for stealth OP_RETURN */
-export const STEALTH_OP_RETURN_MAGIC = 0x7a; // 'z' for zVault stealth
-/** Current version for stealth OP_RETURN format (simplified) */
-export const STEALTH_OP_RETURN_VERSION = 2; // Version 2 = simplified format
 /**
- * Total size of stealth OP_RETURN data (SIMPLIFIED)
- * = 1 (magic) + 1 (version) + 32 (view pub) + 33 (spend pub) + 32 (commitment)
+ * Total size of stealth OP_RETURN data
+ * = 32 bytes (commitment only, no header needed - program ID identifies scheme)
  */
-export const STEALTH_OP_RETURN_SIZE = 99;
-/** Legacy size for backward compatibility parsing */
-export const STEALTH_OP_RETURN_SIZE_V1 = 142;
+export const STEALTH_OP_RETURN_SIZE = 32;
 /** Instruction discriminator for verify_stealth_deposit */
 export const VERIFY_STEALTH_DEPOSIT_DISCRIMINATOR = 20;
 // Program ID (Solana Devnet)
 const ZVAULT_PROGRAM_ID = new PublicKey("AtztELZfz3GHA8hFQCv7aT9Mt47Xhknv3ZCNb3fmXsgf");
+/** Domain separator for stealth key derivation */
+const STEALTH_KEY_DOMAIN = new TextEncoder().encode("zVault-stealth-v1");
+// ========== Helper Functions ==========
+/**
+ * Derive stealth scalar from shared secret (EIP-5564 pattern)
+ */
+function deriveStealthScalar(sharedSecretBytes) {
+    const hashInput = new Uint8Array(sharedSecretBytes.length + STEALTH_KEY_DOMAIN.length);
+    hashInput.set(sharedSecretBytes, 0);
+    hashInput.set(STEALTH_KEY_DOMAIN, sharedSecretBytes.length);
+    const hash = sha256(hashInput);
+    return scalarFromBytes(hash);
+}
 // ========== Sender Functions ==========
 /**
- * Prepare a stealth deposit for a recipient (SIMPLIFIED FORMAT)
+ * Prepare a stealth deposit for a recipient (MINIMAL FORMAT)
  *
- * Generates ephemeral keypairs and creates the OP_RETURN.
- * The sender then creates a BTC transaction with:
- * - Output 1: amount to btcDepositAddress
- * - Output 2: OP_RETURN with opReturnData
+ * Uses EIP-5564/DKSAP pattern with single Grumpkin ephemeral key.
  *
- * SECURITY IMPROVEMENTS:
- * - Uses Poseidon2 for commitment (matches Noir circuits)
- * - No encrypted_amount: BTC amount is public on blockchain
- * - No encrypted_random: Fresh ephemeral keys provide uniqueness
+ * BTC transaction outputs:
+ * - Output 1: amount to btcDepositAddress (Taproot)
+ * - Output 2: OP_RETURN with commitment only (34 bytes)
+ *
+ * Stealth derivation:
+ * 1. sharedSecret = ECDH(ephemeral.priv, viewingPub)
+ * 2. stealthPub = spendingPub + hash(sharedSecret) * G
+ * 3. commitment = Poseidon2(stealthPub.x, amount)
  *
  * @param params - Deposit parameters
  * @returns Prepared deposit data
  */
 export async function prepareStealthDeposit(params) {
     const { recipientMeta, amountSats, network } = params;
-    // Parse recipient's public keys
-    const recipientViewPub = recipientMeta.viewingPubKey;
-    const recipientSpendPub = pointFromCompressedBytes(recipientMeta.spendingPubKey);
-    // Generate ephemeral X25519 keypair for viewing
-    const ephemeralView = box.keyPair();
-    // Note: viewShared not needed for commitment computation
-    // Generate ephemeral Grumpkin keypair for spending
-    const ephemeralSpend = generateGrumpkinKeyPair();
-    const spendShared = grumpkinEcdh(ephemeralSpend.privKey, recipientSpendPub);
-    // Compute commitment using Poseidon2 (SIMPLIFIED: no random)
-    // notePubKey = Poseidon2(spendShared.x, spendShared.y, DOMAIN_NPK)
-    const notePubKey = deriveNotePubKey(spendShared.x, spendShared.y);
-    // commitment = Poseidon2(notePubKey, amount, 0)
-    // Note: random is 0 in simplified format
-    const commitmentBigint = computeCommitment(notePubKey, amountSats, 0n);
+    // Parse recipient's public keys (both Grumpkin now)
+    const { spendingPubKey, viewingPubKey } = parseStealthMetaAddress(recipientMeta);
+    // Generate single Grumpkin ephemeral keypair
+    const ephemeral = generateGrumpkinKeyPair();
+    // Compute shared secret with viewing key
+    const sharedSecret = grumpkinEcdh(ephemeral.privKey, viewingPubKey);
+    // Derive stealth public key (EIP-5564 pattern)
+    // stealthPub = spendingPub + hash(sharedSecret) * G
+    const sharedSecretBytes = pointToCompressedBytes(sharedSecret);
+    const stealthScalar = deriveStealthScalar(sharedSecretBytes);
+    const scalarPoint = pointMul(stealthScalar, GRUMPKIN_GENERATOR);
+    const stealthPub = pointAdd(spendingPubKey, scalarPoint);
+    // Compute commitment using Poseidon2
+    // commitment = Poseidon2(stealthPub.x, amount)
+    const commitmentBigint = poseidon2Hash([stealthPub.x, amountSats]);
     const commitment = bigintToBytes(commitmentBigint);
-    // Build OP_RETURN data (simplified format)
-    const opReturnData = buildStealthOpReturn({
-        ephemeralViewPub: ephemeralView.publicKey,
-        ephemeralSpendPub: pointToCompressedBytes(ephemeralSpend.pubKey),
-        commitment,
-    });
+    // Build OP_RETURN data (minimal format - commitment only)
+    const opReturnData = buildStealthOpReturn({ commitment });
     // Derive taproot address from commitment
     const { address: btcDepositAddress } = await deriveTaprootAddress(commitment, network);
     return {
@@ -91,113 +95,75 @@ export async function prepareStealthDeposit(params) {
         opReturnData,
         amountSats,
         stealthData: {
-            ephemeralViewPub: ephemeralView.publicKey,
-            ephemeralSpendPub: pointToCompressedBytes(ephemeralSpend.pubKey),
+            ephemeralPub: pointToCompressedBytes(ephemeral.pubKey),
             commitment,
         },
     };
 }
 /**
- * Build the OP_RETURN script data (SIMPLIFIED FORMAT)
+ * Build the OP_RETURN script data (MINIMAL FORMAT)
  *
- * Layout (99 bytes):
- * - [0]      Magic: 0x7A
- * - [1]      Version: 2
- * - [2-33]   ephemeral_view_pub (32 bytes)
- * - [34-66]  ephemeral_spend_pub (33 bytes)
- * - [67-98]  commitment (32 bytes)
+ * Layout (32 bytes):
+ * - [0-31]   commitment (32 bytes, raw)
+ *
+ * No magic/version needed - program ID identifies the scheme.
+ * Ephemeral key is stored on Solana StealthAnnouncement only.
  */
 export function buildStealthOpReturn(params) {
-    const data = new Uint8Array(STEALTH_OP_RETURN_SIZE);
-    let offset = 0;
-    // Magic byte
-    data[offset++] = STEALTH_OP_RETURN_MAGIC;
-    // Version (1 byte)
-    data[offset++] = STEALTH_OP_RETURN_VERSION;
-    // Ephemeral view pubkey (32 bytes)
-    data.set(params.ephemeralViewPub, offset);
-    offset += 32;
-    // Ephemeral spend pubkey (33 bytes)
-    data.set(params.ephemeralSpendPub, offset);
-    offset += 33;
-    // Commitment (32 bytes)
-    data.set(params.commitment, offset);
-    return data;
+    // Just return the commitment directly (32 bytes)
+    return new Uint8Array(params.commitment);
 }
 /**
- * Parse stealth data from OP_RETURN (SIMPLIFIED FORMAT)
- *
- * Supports both V1 (legacy 142 bytes) and V2 (simplified 99 bytes) formats.
+ * Parse stealth data from OP_RETURN (32-byte commitment)
  */
 export function parseStealthOpReturn(data) {
-    // Check minimum size (V2 is 99 bytes)
-    if (data.length < STEALTH_OP_RETURN_SIZE) {
+    if (data.length !== STEALTH_OP_RETURN_SIZE) {
         return null;
     }
-    // Check magic byte
-    if (data[0] !== STEALTH_OP_RETURN_MAGIC) {
-        return null;
-    }
-    // Parse version
-    const version = data[1];
-    if (version === 2) {
-        // V2: Simplified format (99 bytes)
-        return {
-            version,
-            ephemeralViewPub: data.slice(2, 34),
-            ephemeralSpendPub: data.slice(34, 67),
-            commitment: data.slice(67, 99),
-        };
-    }
-    else if (version === 1 && data.length >= STEALTH_OP_RETURN_SIZE_V1) {
-        // V1: Legacy format (142 bytes) - parse version as 4-byte LE
-        const versionV1 = new DataView(data.buffer, data.byteOffset + 1, 4).getUint32(0, true);
-        if (versionV1 !== 1) {
-            return null;
-        }
-        // V1 legacy format - return with only the fields we need
-        return {
-            version: versionV1,
-            ephemeralViewPub: data.slice(5, 37),
-            ephemeralSpendPub: data.slice(37, 70),
-            // Note: encrypted_amount and encrypted_random are at 70-78 and 78-110
-            // but we don't include them in the simplified interface
-            commitment: data.slice(110, 142),
-        };
-    }
-    return null;
+    return { commitment: new Uint8Array(data) };
 }
 // ========== On-chain Verification ==========
 /**
  * Derive stealth announcement PDA
+ *
+ * Uses ephemeral Grumpkin public key (33 bytes) as seed.
  */
-export function deriveStealthAnnouncementPDA(programId, ephemeralViewPub) {
-    return PublicKey.findProgramAddressSync([Buffer.from("stealth"), ephemeralViewPub], programId);
+export function deriveStealthAnnouncementPDA(programId, ephemeralPub) {
+    return PublicKey.findProgramAddressSync([Buffer.from("stealth"), ephemeralPub], programId);
 }
 /**
  * Verify a stealth deposit on Solana
  *
  * Calls the verify_stealth_deposit instruction which:
  * 1. Verifies the BTC transaction via SPV
- * 2. Parses stealth data from OP_RETURN
+ * 2. Parses commitment from OP_RETURN
  * 3. Adds commitment to Merkle tree
  * 4. Creates stealth announcement with leaf_index
+ *
+ * Note: The ephemeralPub must be provided separately since the OP_RETURN
+ * only contains the commitment. The ephemeral key is stored in the
+ * StealthAnnouncement for recipient scanning.
  *
  * @param connection - Solana connection
  * @param payer - Transaction fee payer
  * @param btcTxid - Bitcoin transaction ID (hex string)
  * @param expectedValue - Expected deposit value in satoshis
+ * @param ephemeralPub - Grumpkin ephemeral public key (33 bytes)
  * @param network - Bitcoin network
  * @param programId - Optional program ID override
  * @returns Transaction signature
  */
-export async function verifyStealthDeposit(connection, payer, btcTxid, expectedValue, network = "testnet", programId = ZVAULT_PROGRAM_ID) {
+export async function verifyStealthDeposit(connection, payer, btcTxid, expectedValue, ephemeralPub, network = "testnet", programId = ZVAULT_PROGRAM_ID) {
     console.log("=== Verify Stealth Deposit ===");
     console.log(`Txid: ${btcTxid}`);
     console.log(`Expected value: ${expectedValue} sats`);
+    // Validate ephemeral key size
+    if (ephemeralPub.length !== 33) {
+        throw new Error("ephemeralPub must be 33 bytes (compressed Grumpkin)");
+    }
     // Step 1: Fetch tx and merkle proof, upload to buffer
     const { bufferPubkey, transactionSize, merkleProof, blockHeight, txIndex, txidBytes, } = await prepareVerifyDeposit(connection, payer, btcTxid, network);
-    // Step 2: We need to parse the raw tx to get the stealth data for PDA derivation
+    // Step 2: Verify the OP_RETURN contains valid commitment
     const rawTx = await fetchRawTransaction(btcTxid, network);
     const stealthData = extractStealthDataFromRawTx(rawTx);
     if (!stealthData) {
@@ -209,7 +175,7 @@ export async function verifyStealthDeposit(connection, payer, btcTxid, expectedV
     const [blockHeader] = deriveBlockHeaderPDA(programId, blockHeight);
     const [commitmentTree] = deriveCommitmentTreePDA(programId);
     const [depositRecord] = deriveDepositRecordPDA(programId, txidBytes);
-    const [stealthAnnouncement] = deriveStealthAnnouncementPDA(programId, stealthData.ephemeralViewPub);
+    const [stealthAnnouncement] = deriveStealthAnnouncementPDA(programId, ephemeralPub);
     console.log("PDAs derived:");
     console.log(`  Pool: ${poolState.toBase58()}`);
     console.log(`  Light Client: ${lightClient.toBase58()}`);
@@ -219,13 +185,14 @@ export async function verifyStealthDeposit(connection, payer, btcTxid, expectedV
     console.log(`  Stealth Announcement: ${stealthAnnouncement.toBase58()}`);
     // Build merkle proof data
     const merkleProofData = buildMerkleProof(txidBytes, merkleProof, txIndex);
-    // Build instruction data
+    // Build instruction data (includes ephemeralPub for stealth announcement)
     const instructionData = buildVerifyStealthDepositData({
         txid: txidBytes,
         blockHeight: BigInt(blockHeight),
         expectedValue,
         transactionSize,
         merkleProof: merkleProofData,
+        ephemeralPub,
     });
     // Create instruction
     const instruction = new TransactionInstruction({
@@ -251,14 +218,16 @@ export async function verifyStealthDeposit(connection, payer, btcTxid, expectedV
 }
 /**
  * Build instruction data for verify_stealth_deposit
+ *
+ * Includes ephemeralPub since OP_RETURN only contains commitment.
  */
 function buildVerifyStealthDepositData(params) {
-    // Calculate size: discriminator + txid + block_height + expected_value + tx_size + merkle_proof
+    // Calculate size: discriminator + txid + block_height + expected_value + tx_size + ephemeral_pub + merkle_proof
     const proofSize = 32 +
         4 +
         params.merkleProof.siblings.length * 32 +
         Math.ceil(params.merkleProof.path.length / 8);
-    const data = new Uint8Array(1 + 32 + 8 + 8 + 4 + proofSize);
+    const data = new Uint8Array(1 + 32 + 8 + 8 + 4 + 33 + proofSize);
     let offset = 0;
     // Discriminator
     data[offset++] = VERIFY_STEALTH_DEPOSIT_DISCRIMINATOR;
@@ -280,6 +249,9 @@ function buildVerifyStealthDepositData(params) {
     new DataView(sizeBytes.buffer).setUint32(0, params.transactionSize, true);
     data.set(sizeBytes, offset);
     offset += 4;
+    // Ephemeral public key (33 bytes)
+    data.set(params.ephemeralPub, offset);
+    offset += 33;
     // Merkle proof
     // Txid (32 bytes)
     data.set(new Uint8Array(params.merkleProof.txid), offset);
@@ -305,58 +277,38 @@ function buildVerifyStealthDepositData(params) {
     return data;
 }
 /**
- * Extract stealth data from raw BTC transaction
+ * Extract stealth data from raw BTC transaction (32-byte commitment)
  */
 function extractStealthDataFromRawTx(rawTx) {
-    // Simple OP_RETURN finder - looks for 0x6a (OP_RETURN) followed by push and magic byte
+    // Simple OP_RETURN finder - looks for 0x6a (OP_RETURN) followed by push
     for (let i = 0; i < rawTx.length - STEALTH_OP_RETURN_SIZE - 2; i++) {
         // Look for OP_RETURN (0x6a)
         if (rawTx[i] === 0x6a) {
-            // Check push length
-            const pushLen = rawTx[i + 1];
-            if (pushLen >= STEALTH_OP_RETURN_SIZE && i + 2 + pushLen <= rawTx.length) {
-                // Check magic byte
-                if (rawTx[i + 2] === STEALTH_OP_RETURN_MAGIC) {
-                    const opReturnData = rawTx.slice(i + 2, i + 2 + pushLen);
-                    return parseStealthOpReturn(opReturnData);
+            // Check push length (could be 1-byte or OP_PUSHDATA)
+            let pushLen = 0;
+            let dataStart = i + 2;
+            if (rawTx[i + 1] <= 0x4b) {
+                // Direct push (1-75 bytes)
+                pushLen = rawTx[i + 1];
+            }
+            else if (rawTx[i + 1] === 0x4c) {
+                // OP_PUSHDATA1
+                pushLen = rawTx[i + 2];
+                dataStart = i + 3;
+            }
+            else if (rawTx[i + 1] === 0x4d) {
+                // OP_PUSHDATA2
+                pushLen = rawTx[i + 2] | (rawTx[i + 3] << 8);
+                dataStart = i + 4;
+            }
+            if (pushLen >= STEALTH_OP_RETURN_SIZE && dataStart + pushLen <= rawTx.length) {
+                const opReturnData = rawTx.slice(dataStart, dataStart + pushLen);
+                const parsed = parseStealthOpReturn(opReturnData);
+                if (parsed) {
+                    return parsed;
                 }
             }
         }
     }
     return null;
-}
-// ========== Utilities ==========
-function randomFieldElement() {
-    const bytes = new Uint8Array(32);
-    crypto.getRandomValues(bytes);
-    return bytesToBigint(bytes) % BN254_FIELD_PRIME;
-}
-function xorBytes(a, b) {
-    const result = new Uint8Array(a.length);
-    for (let i = 0; i < a.length; i++) {
-        result[i] = a[i] ^ b[i];
-    }
-    return result;
-}
-function concatBytes(...arrays) {
-    const totalLength = arrays.reduce((sum, arr) => sum + arr.length, 0);
-    const result = new Uint8Array(totalLength);
-    let offset = 0;
-    for (const arr of arrays) {
-        result.set(arr, offset);
-        offset += arr.length;
-    }
-    return result;
-}
-function textToBytes(text) {
-    return new TextEncoder().encode(text);
-}
-function bigintToBytes8(value) {
-    const bytes = new Uint8Array(8);
-    let v = value;
-    for (let i = 7; i >= 0; i--) {
-        bytes[i] = Number(v & 0xffn);
-        v >>= 8n;
-    }
-    return bytes;
 }
