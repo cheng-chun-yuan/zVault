@@ -11,6 +11,7 @@ import {
   MobileKeys,
   loadKeys,
   loadStealthMetaAddress,
+  loadStealthMetaAddressEncoded,
   saveKeys,
   deriveKeysFromMnemonic,
   generateMnemonic,
@@ -21,6 +22,17 @@ import {
   setCachedItem,
   STORAGE_KEYS,
 } from '../lib/storage';
+import {
+  deriveNote,
+  deriveTaprootAddress,
+  createClaimLink,
+  prepareStealthDeposit,
+  decodeStealthMetaAddress,
+  bigintToBytes,
+  type StealthMetaAddress,
+  type Note as SDKNote,
+} from '@zvault/sdk';
+import * as Crypto from 'expo-crypto';
 
 // Types
 export interface Note {
@@ -137,10 +149,10 @@ export function WalletProvider({ children }: { children: ReactNode }) {
       store.setInitialized(initialized);
 
       if (initialized) {
-        // Load stealth meta-address (doesn't require Face ID)
-        const stealthAddress = await loadStealthMetaAddress();
-        if (stealthAddress) {
-          store.setStealthMetaAddress(stealthAddress);
+        // Load stealth meta-address as encoded string (doesn't require Face ID)
+        const stealthAddressEncoded = await loadStealthMetaAddressEncoded();
+        if (stealthAddressEncoded) {
+          store.setStealthMetaAddress(stealthAddressEncoded);
         }
 
         // Load cached deposits
@@ -169,11 +181,11 @@ export function WalletProvider({ children }: { children: ReactNode }) {
 
   // Create a new wallet
   async function createWallet(): Promise<string> {
-    const mnemonic = await generateMnemonic();
-    const keys = await deriveKeysFromMnemonic(mnemonic);
+    const mnemonic = generateMnemonic();
+    const keys = deriveKeysFromMnemonic(mnemonic);
     await saveKeys(keys);
 
-    store.setStealthMetaAddress(keys.stealthMetaAddress);
+    store.setStealthMetaAddress(keys.stealthMetaAddressEncoded);
     store.setInitialized(true);
 
     return mnemonic;
@@ -181,10 +193,10 @@ export function WalletProvider({ children }: { children: ReactNode }) {
 
   // Import wallet from mnemonic
   async function importWallet(mnemonic: string): Promise<void> {
-    const keys = await deriveKeysFromMnemonic(mnemonic);
+    const keys = deriveKeysFromMnemonic(mnemonic);
     await saveKeys(keys);
 
-    store.setStealthMetaAddress(keys.stealthMetaAddress);
+    store.setStealthMetaAddress(keys.stealthMetaAddressEncoded);
     store.setInitialized(true);
   }
 
@@ -193,25 +205,42 @@ export function WalletProvider({ children }: { children: ReactNode }) {
     return loadKeys();
   }
 
-  // Create a new deposit
+  // Create a new deposit with real SDK integration
   async function createDeposit(amount: number): Promise<Deposit> {
-    // Generate deposit note
-    const nullifier = Math.random().toString(36).substring(2);
-    const secret = Math.random().toString(36).substring(2);
-    const commitment = `${nullifier}:${secret}:${amount}`;
+    // Generate cryptographically secure random seed
+    const randomBytes = await Crypto.getRandomBytesAsync(32);
+    const seed = Array.from(randomBytes)
+      .map((b) => b.toString(16).padStart(2, '0'))
+      .join('');
 
-    // TODO: Derive actual Taproot address from commitment
-    const taprootAddress = `bc1p${commitment.slice(0, 58)}`;
+    // Derive note from seed using SDK
+    const amountSats = BigInt(amount);
+    const note = deriveNote(seed, 0, amountSats);
+
+    // Convert commitment to bytes for Taproot derivation
+    const commitmentBytes = bigintToBytes(note.commitment);
+
+    // Derive real Taproot address from commitment (async)
+    const taprootResult = await deriveTaprootAddress(commitmentBytes, 'testnet');
+
+    // Generate claim link for recovery (takes a Note object)
+    const claimLink = createClaimLink(note);
+
+    // Generate unique deposit ID
+    const id = Date.now().toString();
 
     const deposit: Deposit = {
-      id: Date.now().toString(),
+      id,
       amount,
-      taprootAddress,
-      commitment,
+      taprootAddress: taprootResult.address,
+      commitment: note.commitment.toString(16).padStart(64, '0'),
       status: 'waiting',
       confirmations: 0,
       createdAt: Date.now(),
     };
+
+    // Store claim link separately (for recovery)
+    await setCachedItem(`claim_link_${id}`, claimLink);
 
     store.addDeposit(deposit);
 
@@ -222,16 +251,42 @@ export function WalletProvider({ children }: { children: ReactNode }) {
     return deposit;
   }
 
-  // Send to stealth address
+  // Send to stealth address (prepares deposit data)
   async function sendToStealth(recipientAddress: string, amount: number): Promise<string> {
-    // TODO: Implement stealth send
-    // 1. Parse recipient's stealth meta-address
-    // 2. Generate ephemeral keypair
-    // 3. Derive stealth address
-    // 4. Create output note
-    // 5. Generate ZK proof
-    // 6. Submit transaction
-    throw new Error('Not implemented');
+    // Parse recipient's stealth meta-address (132 hex chars = 66 bytes)
+    let recipientMeta: StealthMetaAddress;
+    try {
+      recipientMeta = decodeStealthMetaAddress(recipientAddress);
+    } catch (err) {
+      throw new Error('Invalid stealth address format');
+    }
+
+    // Prepare stealth deposit using SDK (async, amount-independent)
+    const stealthDeposit = await prepareStealthDeposit({
+      recipientMeta,
+      network: 'testnet',
+    });
+
+    // The stealth deposit contains:
+    // - btcDepositAddress: where to send BTC
+    // - opReturnData: commitment data for the BTC transaction
+    // - stealthData.ephemeralPub: for recipient to derive shared secret
+
+    // For mobile, we return the Taproot address for the user to send BTC to
+    // In a full implementation, this would integrate with a Bitcoin wallet
+    const depositInfo = {
+      btcDepositAddress: stealthDeposit.btcDepositAddress,
+      amount: amount.toString(),
+      recipient: recipientAddress.slice(0, 16) + '...',
+      opReturnData: Buffer.from(stealthDeposit.opReturnData).toString('hex'),
+    };
+
+    // Store the pending stealth send
+    const id = Date.now().toString();
+    await setCachedItem(`stealth_send_${id}`, depositInfo);
+
+    // Return the Taproot address for the BTC send
+    return stealthDeposit.btcDepositAddress;
   }
 
   // Send by shareable note

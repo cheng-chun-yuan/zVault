@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useCallback } from 'react';
 import {
   StyleSheet,
   View,
@@ -18,6 +18,7 @@ import FontAwesome from '@expo/vector-icons/FontAwesome';
 import { useColorScheme } from '@/components/useColorScheme';
 import Colors from '@/constants/Colors';
 import { useFormattedBalance, useWallet } from '@/contexts/WalletContext';
+import { useNameRegistry, type ResolvedRecipient } from '@/hooks';
 
 export default function SendStealthScreen() {
   const colorScheme = useColorScheme();
@@ -26,27 +27,52 @@ export default function SendStealthScreen() {
   const router = useRouter();
   const { sendToStealth } = useWallet();
   const { btc } = useFormattedBalance();
+  const { resolveRecipient, isZkeyName, isResolving, error: resolveError } = useNameRegistry();
 
   const [recipient, setRecipient] = useState('');
   const [amount, setAmount] = useState('');
   const [isSending, setIsSending] = useState(false);
+  const [resolvedRecipient, setResolvedRecipient] = useState<ResolvedRecipient | null>(null);
+  const [taprootAddress, setTaprootAddress] = useState<string | null>(null);
 
   const amountSats = parseFloat(amount || '0') * 100_000_000;
   const maxSats = parseFloat(btc) * 100_000_000;
   const isValidAmount = amountSats > 0 && amountSats <= maxSats;
-  const isValidRecipient = recipient.length > 20; // Basic validation
+  const isValidRecipient = resolvedRecipient !== null;
+
+  // Handle recipient input change
+  const handleRecipientChange = useCallback((text: string) => {
+    setRecipient(text);
+    setResolvedRecipient(null);
+    setTaprootAddress(null);
+  }, []);
+
+  // Resolve recipient address or name
+  const handleResolve = useCallback(async () => {
+    if (!recipient.trim()) return;
+
+    const resolved = await resolveRecipient(recipient);
+    if (resolved) {
+      setResolvedRecipient(resolved);
+    }
+  }, [recipient, resolveRecipient]);
 
   const handleSend = async () => {
-    if (!isValidAmount || !isValidRecipient) return;
+    if (!isValidAmount || !resolvedRecipient) return;
 
     setIsSending(true);
     try {
-      await sendToStealth(recipient, amountSats);
-      Alert.alert('Success', 'Transaction sent successfully!', [
-        { text: 'OK', onPress: () => router.back() },
-      ]);
+      // Send to the resolved stealth address
+      const address = await sendToStealth(resolvedRecipient.addressHex, amountSats);
+      setTaprootAddress(address);
+
+      Alert.alert(
+        'Deposit Address Ready',
+        `Send ${amount} BTC to the generated Taproot address. The recipient (${resolvedRecipient.displayName}) will be able to claim it privately.`,
+        [{ text: 'OK', onPress: () => router.back() }]
+      );
     } catch (error) {
-      Alert.alert('Error', 'Failed to send transaction. Please try again.');
+      Alert.alert('Error', error instanceof Error ? error.message : 'Failed to prepare transaction.');
     } finally {
       setIsSending(false);
     }
@@ -74,18 +100,65 @@ export default function SendStealthScreen() {
             <Text style={[styles.inputLabel, { color: isDark ? '#888' : '#666' }]}>
               Recipient zKey or .zkey name
             </Text>
-            <TextInput
-              style={[
-                styles.textInput,
-                { backgroundColor: isDark ? '#1a1a1a' : '#f5f5f5', color: colors.text },
-              ]}
-              placeholder="Enter zKey address or alice.zkey"
-              placeholderTextColor={isDark ? '#444' : '#bbb'}
-              value={recipient}
-              onChangeText={setRecipient}
-              autoCapitalize="none"
-              autoCorrect={false}
-            />
+            <View style={styles.inputRow}>
+              <TextInput
+                style={[
+                  styles.textInput,
+                  styles.textInputFlex,
+                  { backgroundColor: isDark ? '#1a1a1a' : '#f5f5f5', color: colors.text },
+                ]}
+                placeholder="Enter zKey address or alice.zkey"
+                placeholderTextColor={isDark ? '#444' : '#bbb'}
+                value={recipient}
+                onChangeText={handleRecipientChange}
+                autoCapitalize="none"
+                autoCorrect={false}
+              />
+              <TouchableOpacity
+                style={[
+                  styles.resolveButton,
+                  {
+                    backgroundColor: recipient.trim() ? colors.tint : isDark ? '#333' : '#ddd',
+                  },
+                ]}
+                onPress={handleResolve}
+                disabled={!recipient.trim() || isResolving}>
+                {isResolving ? (
+                  <ActivityIndicator color="#fff" size="small" />
+                ) : (
+                  <FontAwesome name="search" size={16} color="#fff" />
+                )}
+              </TouchableOpacity>
+            </View>
+
+            {/* Resolution Result */}
+            {resolvedRecipient && (
+              <View style={[styles.resolvedBox, { backgroundColor: '#22c55e15' }]}>
+                <FontAwesome name="check-circle" size={16} color="#22c55e" />
+                <Text style={[styles.resolvedText, { color: colors.text }]}>
+                  {resolvedRecipient.type === 'name' ? (
+                    <>Resolved: <Text style={{ fontWeight: '600' }}>{resolvedRecipient.displayName}</Text></>
+                  ) : (
+                    <>Address: <Text style={{ fontWeight: '600' }}>{resolvedRecipient.displayName}</Text></>
+                  )}
+                </Text>
+              </View>
+            )}
+
+            {/* Resolution Error */}
+            {resolveError && !resolvedRecipient && (
+              <View style={[styles.resolvedBox, { backgroundColor: '#ef444415' }]}>
+                <FontAwesome name="exclamation-circle" size={16} color="#ef4444" />
+                <Text style={[styles.resolvedText, { color: '#ef4444' }]}>{resolveError}</Text>
+              </View>
+            )}
+
+            {/* Hint */}
+            {!resolvedRecipient && !resolveError && isZkeyName(recipient) && (
+              <Text style={[styles.hintText, { color: isDark ? '#666' : '#999' }]}>
+                Tap the search button to resolve the .zkey name
+              </Text>
+            )}
           </View>
 
           {/* Amount Input */}
@@ -204,10 +277,39 @@ const styles = StyleSheet.create({
     fontSize: 13,
     fontWeight: '500',
   },
+  inputRow: {
+    flexDirection: 'row',
+    gap: 8,
+  },
   textInput: {
     padding: 16,
     borderRadius: 12,
     fontSize: 16,
+  },
+  textInputFlex: {
+    flex: 1,
+  },
+  resolveButton: {
+    width: 50,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderRadius: 12,
+  },
+  resolvedBox: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    padding: 12,
+    borderRadius: 8,
+    marginTop: 8,
+  },
+  resolvedText: {
+    fontSize: 14,
+    flex: 1,
+  },
+  hintText: {
+    fontSize: 13,
+    marginTop: 8,
   },
   amountInputContainer: {
     flexDirection: 'row',

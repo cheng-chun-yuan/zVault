@@ -93,7 +93,7 @@ export async function saveKeys(keys: MobileKeys): Promise<void> {
   // Store viewing key (can be delegated, so less restrictive)
   await setSecureItem(
     STORAGE_KEYS.VIEWING_KEY,
-    Buffer.from(keys.zvaultKeys.viewingPrivKey).toString('hex'),
+    Buffer.from(scalarToBytes(keys.zvaultKeys.viewingPrivKey)).toString('hex'),
     false
   );
 

@@ -33,8 +33,7 @@ export async function createDeposit(
 export async function scanForDeposits(
   keys: ZVaultKeys,
   announcements: Array<{
-    ephemeralViewPub: Uint8Array;
-    ephemeralSpendPub: Uint8Array;
+    ephemeralPub: Uint8Array;
     amountSats: bigint;
     commitment: Uint8Array;
     leafIndex: number;

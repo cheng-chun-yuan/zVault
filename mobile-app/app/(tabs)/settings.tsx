@@ -110,7 +110,9 @@ export default function SettingsScreen() {
             try {
               const keys = await loadKeys();
               if (keys) {
-                await Clipboard.setStringAsync(keys.viewingPrivKey);
+                // Convert viewing private key to hex string
+                const viewingKeyHex = keys.zvaultKeys.viewingPrivKey.toString(16).padStart(64, '0');
+                await Clipboard.setStringAsync(viewingKeyHex);
                 Alert.alert('Copied', 'Viewing key copied to clipboard');
               }
             } catch (error) {

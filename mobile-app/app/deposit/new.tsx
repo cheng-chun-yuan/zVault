@@ -7,6 +7,7 @@ import {
   TextInput,
   ActivityIndicator,
   Share,
+  Alert,
 } from 'react-native';
 import { useRouter } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -16,7 +17,8 @@ import QRCode from 'react-native-qrcode-svg';
 
 import { useColorScheme } from '@/components/useColorScheme';
 import Colors from '@/constants/Colors';
-import { useWallet, useWalletStore } from '@/contexts/WalletContext';
+import { useWallet, useWalletStore, type Deposit } from '@/contexts/WalletContext';
+import { getCachedItem } from '@/lib/storage';
 
 export default function NewDepositScreen() {
   const colorScheme = useColorScheme();
@@ -28,8 +30,10 @@ export default function NewDepositScreen() {
   const [step, setStep] = useState<'amount' | 'address'>('amount');
   const [amount, setAmount] = useState('');
   const [isCreating, setIsCreating] = useState(false);
-  const [depositAddress, setDepositAddress] = useState<string | null>(null);
+  const [deposit, setDeposit] = useState<Deposit | null>(null);
+  const [claimLink, setClaimLink] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
+  const [copiedLink, setCopiedLink] = useState(false);
 
   const amountSats = parseFloat(amount || '0') * 100_000_000;
   const isValidAmount = amountSats >= 10000; // Min 10k sats
@@ -39,33 +43,55 @@ export default function NewDepositScreen() {
 
     setIsCreating(true);
     try {
-      const deposit = await createDeposit(amountSats);
-      setDepositAddress(deposit.taprootAddress);
+      const newDeposit = await createDeposit(amountSats);
+      setDeposit(newDeposit);
+
+      // Load the claim link (stored separately for security)
+      const link = await getCachedItem<string>(`claim_link_${newDeposit.id}`);
+      setClaimLink(link);
+
       setStep('address');
     } catch (error) {
       console.error('Failed to create deposit:', error);
+      Alert.alert('Error', 'Failed to create deposit. Please try again.');
     } finally {
       setIsCreating(false);
     }
   };
 
   const copyAddress = async () => {
-    if (depositAddress) {
-      await Clipboard.setStringAsync(depositAddress);
+    if (deposit?.taprootAddress) {
+      await Clipboard.setStringAsync(deposit.taprootAddress);
       setCopied(true);
       setTimeout(() => setCopied(false), 2000);
     }
   };
 
+  const copyClaimLink = async () => {
+    if (claimLink) {
+      await Clipboard.setStringAsync(claimLink);
+      setCopiedLink(true);
+      setTimeout(() => setCopiedLink(false), 2000);
+    }
+  };
+
   const shareAddress = async () => {
-    if (depositAddress) {
+    if (deposit?.taprootAddress) {
       await Share.share({
-        message: `Send ${amount} BTC to this address:\n${depositAddress}`,
+        message: `Send ${amount} BTC to this address:\n${deposit.taprootAddress}`,
       });
     }
   };
 
-  if (step === 'address' && depositAddress) {
+  const shareClaimLink = async () => {
+    if (claimLink) {
+      await Share.share({
+        message: `zVault Claim Link (keep this safe!):\n${claimLink}`,
+      });
+    }
+  };
+
+  if (step === 'address' && deposit) {
     return (
       <SafeAreaView style={[styles.container, { backgroundColor: isDark ? '#000' : '#fff' }]}>
         <View style={styles.content}>
@@ -81,18 +107,21 @@ export default function NewDepositScreen() {
           {/* QR Code */}
           <View style={styles.qrContainer}>
             <View style={[styles.qrWrapper, { backgroundColor: '#fff' }]}>
-              <QRCode value={`bitcoin:${depositAddress}?amount=${amount}`} size={200} />
+              <QRCode value={`bitcoin:${deposit.taprootAddress}?amount=${amount}`} size={200} />
             </View>
           </View>
 
           {/* Address Display */}
           <View
             style={[styles.addressContainer, { backgroundColor: isDark ? '#1a1a1a' : '#f5f5f5' }]}>
+            <Text style={[styles.addressLabel, { color: isDark ? '#666' : '#999' }]}>
+              Taproot Address
+            </Text>
             <Text
               style={[styles.addressText, { color: colors.text }]}
               numberOfLines={2}
               ellipsizeMode="middle">
-              {depositAddress}
+              {deposit.taprootAddress}
             </Text>
           </View>
 
@@ -115,11 +144,47 @@ export default function NewDepositScreen() {
             </TouchableOpacity>
           </View>
 
+          {/* Claim Link Section */}
+          {claimLink && (
+            <View style={styles.claimLinkSection}>
+              <View style={[styles.warningBox, { backgroundColor: '#ef444415' }]}>
+                <FontAwesome name="exclamation-triangle" size={18} color="#ef4444" />
+                <View style={styles.warningContent}>
+                  <Text style={[styles.warningTitle, { color: colors.text }]}>
+                    Save Your Claim Link!
+                  </Text>
+                  <Text style={[styles.warningDescription, { color: isDark ? '#888' : '#666' }]}>
+                    This link is required to claim your deposit. If you lose it, your funds cannot
+                    be recovered.
+                  </Text>
+                </View>
+              </View>
+
+              <View style={styles.actionRow}>
+                <TouchableOpacity
+                  style={[styles.actionButton, { backgroundColor: '#ef444420' }]}
+                  onPress={copyClaimLink}>
+                  <FontAwesome name={copiedLink ? 'check' : 'key'} size={18} color="#ef4444" />
+                  <Text style={[styles.actionText, { color: '#ef4444' }]}>
+                    {copiedLink ? 'Copied!' : 'Copy Link'}
+                  </Text>
+                </TouchableOpacity>
+
+                <TouchableOpacity
+                  style={[styles.actionButton, { backgroundColor: '#ef444420' }]}
+                  onPress={shareClaimLink}>
+                  <FontAwesome name="share" size={18} color="#ef4444" />
+                  <Text style={[styles.actionText, { color: '#ef4444' }]}>Save Link</Text>
+                </TouchableOpacity>
+              </View>
+            </View>
+          )}
+
           {/* Info */}
           <View style={[styles.infoBox, { backgroundColor: '#fef3c720' }]}>
             <FontAwesome name="info-circle" size={18} color="#f59e0b" />
             <Text style={[styles.infoText, { color: isDark ? '#888' : '#666' }]}>
-              This is a Taproot address. Make sure your wallet supports sending to bc1p addresses.
+              This is a Taproot address. Make sure your wallet supports sending to tb1p addresses.
               Deposits require 6 confirmations (~1 hour).
             </Text>
           </View>
@@ -299,11 +364,40 @@ const styles = StyleSheet.create({
     borderRadius: 12,
     marginBottom: 16,
   },
+  addressLabel: {
+    fontSize: 12,
+    textAlign: 'center',
+    marginBottom: 4,
+  },
   addressText: {
     fontSize: 13,
     fontFamily: 'SpaceMono',
     textAlign: 'center',
     lineHeight: 20,
+  },
+  claimLinkSection: {
+    width: '100%',
+    marginBottom: 16,
+  },
+  warningBox: {
+    flexDirection: 'row',
+    padding: 16,
+    borderRadius: 12,
+    gap: 12,
+    alignItems: 'flex-start',
+    marginBottom: 12,
+  },
+  warningContent: {
+    flex: 1,
+  },
+  warningTitle: {
+    fontSize: 14,
+    fontWeight: '600',
+    marginBottom: 4,
+  },
+  warningDescription: {
+    fontSize: 13,
+    lineHeight: 18,
   },
   actionRow: {
     flexDirection: 'row',
