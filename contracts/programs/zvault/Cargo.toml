@@ -1,12 +1,12 @@
 [package]
-name = "zVault-pinocchio"
+name = "zvault-pinocchio"
 version = "0.1.0"
 description = "zVault - Privacy-preserving BTC to Solana bridge (Pinocchio)"
 edition = "2021"
 
 [lib]
 crate-type = ["cdylib", "lib"]
-name = "zVault_pinocchio"
+name = "zvault_pinocchio"
 
 [features]
 default = []
