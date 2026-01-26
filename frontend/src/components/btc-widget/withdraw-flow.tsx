@@ -2,7 +2,8 @@
 
 import { useState, useEffect, useMemo, useCallback } from "react";
 import { useWallet } from "@solana/wallet-adapter-react";
-import { CheckCircle2, ArrowUpFromLine, Wallet, Shield, Clock, AlertCircle, Key, Copy, Check } from "lucide-react";
+import { PublicKey } from "@solana/web3.js";
+import { CheckCircle2, ArrowUpFromLine, Wallet, Shield, Clock, AlertCircle, Key, Copy, Check, Pencil, X } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { zBTCApi } from "@/lib/api/client";
 import { parseSats, validateWithdrawalAmount } from "@/lib/utils/validation";
@@ -17,6 +18,16 @@ import {
 } from "@zvault/sdk";
 import { generatePartialWithdrawProof, type ProofResult } from "@/lib/proofs";
 import { NoteStorage } from "@/lib/proofs/storage";
+
+// Validate Solana address
+function isValidSolanaAddress(address: string): boolean {
+  try {
+    new PublicKey(address);
+    return true;
+  } catch {
+    return false;
+  }
+}
 
 // Constants
 const SERVICE_FEE_SATS = 10000;
@@ -38,6 +49,50 @@ export function WithdrawFlow() {
   const [changeClaimLink, setChangeClaimLink] = useState<string | null>(null);
   const [changeAmountSats, setChangeAmountSats] = useState<number>(0);
   const [changeClaimCopied, setChangeClaimCopied] = useState(false);
+
+  // Recipient address state
+  const [recipientAddress, setRecipientAddress] = useState<string>("");
+  const [isEditingRecipient, setIsEditingRecipient] = useState(false);
+  const [recipientError, setRecipientError] = useState<string | null>(null);
+
+  // Initialize recipient address when wallet connects
+  useEffect(() => {
+    if (publicKey && !recipientAddress) {
+      setRecipientAddress(publicKey.toBase58());
+    }
+  }, [publicKey, recipientAddress]);
+
+  // Validate recipient address
+  const validateRecipient = useCallback((address: string): boolean => {
+    if (!address.trim()) {
+      setRecipientError("Recipient address is required");
+      return false;
+    }
+    if (!isValidSolanaAddress(address)) {
+      setRecipientError("Invalid Solana address");
+      return false;
+    }
+    setRecipientError(null);
+    return true;
+  }, []);
+
+  // Handle recipient edit save
+  const handleSaveRecipient = useCallback(() => {
+    if (validateRecipient(recipientAddress)) {
+      setIsEditingRecipient(false);
+    }
+  }, [recipientAddress, validateRecipient]);
+
+  // Reset to own wallet
+  const handleResetRecipient = useCallback(() => {
+    if (publicKey) {
+      setRecipientAddress(publicKey.toBase58());
+      setRecipientError(null);
+      setIsEditingRecipient(false);
+    }
+  }, [publicKey]);
+
+  const isOwnWallet = publicKey?.toBase58() === recipientAddress;
 
   // Copy change claim link to clipboard
   const copyChangeClaimLink = useCallback(async () => {
@@ -154,11 +209,16 @@ export function WithdrawFlow() {
       console.log("[Withdraw] ZK proof generated successfully!");
       console.log("[Withdraw] Proof size:", proofResult.proofBytes?.length, "bytes");
 
+      // Validate recipient before submission
+      if (!validateRecipient(recipientAddress)) {
+        throw new Error("Invalid recipient address");
+      }
+
       // Submit to backend with proof (withdraw to zBTC on Solana)
       const response = await zBTCApi.redeem(
         amountSats,
-        publicKey.toBase58(), // zBTC recipient is the connected wallet
-        publicKey.toBase58()
+        recipientAddress, // zBTC recipient (custom or own wallet)
+        publicKey.toBase58() // Signer is always the connected wallet
       );
 
       if (response.success && response.request_id) {
@@ -203,6 +263,12 @@ export function WithdrawFlow() {
     setZkProof(null);
     setChangeClaimLink(null);
     setChangeAmountSats(0);
+    // Reset recipient to own wallet
+    if (publicKey) {
+      setRecipientAddress(publicKey.toBase58());
+    }
+    setIsEditingRecipient(false);
+    setRecipientError(null);
   };
 
   useEffect(() => {
@@ -286,9 +352,9 @@ export function WithdrawFlow() {
 
         {/* Notes list */}
         <div className="space-y-2 mb-4">
-          {availableNotes.map((note) => (
+          {availableNotes.map((note, index) => (
             <button
-              key={note.commitment}
+              key={`${note.commitment}-${index}`}
               onClick={() => handleSelectNote(note)}
               className={cn(
                 "w-full p-4 rounded-[12px] text-left transition-all",
@@ -415,14 +481,83 @@ export function WithdrawFlow() {
         {/* Recipient Wallet */}
         <div className="mb-4">
           <p className="text-body2 text-[#C7C5D1] pl-2 mb-2">Recipient Wallet</p>
-          <div className="flex items-center gap-2 p-3 bg-[#16161B] border border-[#14F19533] rounded-[12px]">
-            <div className="w-2 h-2 rounded-full bg-[#14F195]" />
-            <span className="text-body2 font-mono text-[#C7C5D1]">
-              {publicKey?.toBase58().slice(0, 8)}...{publicKey?.toBase58().slice(-8)}
-            </span>
-          </div>
+          {isEditingRecipient ? (
+            <div className="space-y-2">
+              <div className="flex items-center gap-2">
+                <input
+                  type="text"
+                  value={recipientAddress}
+                  onChange={(e) => {
+                    setRecipientAddress(e.target.value);
+                    setRecipientError(null);
+                  }}
+                  placeholder="Enter Solana address..."
+                  className={cn(
+                    "flex-1 px-3 py-2.5 bg-[#16161B] border rounded-[10px]",
+                    "text-body2 font-mono text-[#C7C5D1] placeholder:text-[#8B8A9E66]",
+                    "outline-none transition-colors",
+                    recipientError
+                      ? "border-red-500/50"
+                      : "border-[#8B8A9E33] focus:border-[#FFABFE66]"
+                  )}
+                />
+                <button
+                  onClick={handleSaveRecipient}
+                  className="p-2.5 rounded-[10px] bg-[#14F1951A] hover:bg-[#14F19533] text-[#14F195] transition-colors"
+                  title="Save"
+                >
+                  <Check className="w-4 h-4" />
+                </button>
+                <button
+                  onClick={() => {
+                    handleResetRecipient();
+                  }}
+                  className="p-2.5 rounded-[10px] bg-[#8B8A9E1A] hover:bg-[#8B8A9E33] text-[#8B8A9E] transition-colors"
+                  title="Cancel"
+                >
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
+              {recipientError && (
+                <p className="text-caption text-red-400 pl-2">{recipientError}</p>
+              )}
+              {publicKey && recipientAddress !== publicKey.toBase58() && (
+                <button
+                  onClick={handleResetRecipient}
+                  className="text-caption text-[#FFABFE] hover:text-[#FFABFE]/80 pl-2 transition-colors"
+                >
+                  Reset to my wallet
+                </button>
+              )}
+            </div>
+          ) : (
+            <div
+              className={cn(
+                "flex items-center gap-2 p-3 rounded-[12px] cursor-pointer transition-colors",
+                "bg-[#16161B] border",
+                isOwnWallet
+                  ? "border-[#14F19533] hover:border-[#14F19566]"
+                  : "border-[#FFABFE33] hover:border-[#FFABFE66]"
+              )}
+              onClick={() => setIsEditingRecipient(true)}
+            >
+              <div className={cn(
+                "w-2 h-2 rounded-full",
+                isOwnWallet ? "bg-[#14F195]" : "bg-[#FFABFE]"
+              )} />
+              <span className="flex-1 text-body2 font-mono text-[#C7C5D1] truncate">
+                {recipientAddress ? truncateMiddle(recipientAddress, 8) : "—"}
+              </span>
+              <Pencil className="w-3.5 h-3.5 text-[#8B8A9E]" />
+            </div>
+          )}
           <p className="text-caption text-[#8B8A9E] mt-1 pl-2">
-            zBTC will be sent to your connected Solana wallet
+            {isOwnWallet
+              ? "zBTC will be sent to your connected wallet"
+              : "zBTC will be sent to a custom address"}
+            {!isEditingRecipient && (
+              <span className="text-[#8B8A9E66]"> • Click to edit</span>
+            )}
           </p>
         </div>
 
@@ -533,7 +668,13 @@ export function WithdrawFlow() {
           </div>
           <div className="flex justify-between items-center text-body2 pt-2 border-t border-[#8B8A9E26]">
             <span className="text-[#C7C5D1]">Destination</span>
-            <span className="font-mono text-[#FFFFFF] text-xs">{publicKey ? truncateMiddle(publicKey.toBase58(), 6) : "—"}</span>
+            <span className={cn(
+              "font-mono text-xs",
+              isOwnWallet ? "text-[#FFFFFF]" : "text-[#FFABFE]"
+            )}>
+              {recipientAddress ? truncateMiddle(recipientAddress, 6) : "—"}
+              {!isOwnWallet && " (custom)"}
+            </span>
           </div>
         </div>
 

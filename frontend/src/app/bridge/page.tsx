@@ -6,7 +6,6 @@ import {
   ArrowLeft,
   ArrowDownToLine,
   ArrowUpFromLine,
-  Gift,
   Wallet,
   Shield,
   Key,
@@ -15,16 +14,16 @@ import {
   Send,
   Tag,
   Loader2,
-  Inbox,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { FeatureCard, type FeatureCardColor } from "@/components/ui";
 import { BitcoinIcon } from "@/components/bitcoin-wallet-selector";
 import { useWallet } from "@solana/wallet-adapter-react";
 import { useWalletModal } from "@solana/wallet-adapter-react-ui";
-import { useZVaultKeys } from "@/hooks/use-zvault-keys";
+import { useZVaultKeys } from "@/hooks/use-zvault";
 import { useCopyToClipboard } from "@/hooks/use-copy-to-clipboard";
 import { useZkeyName } from "@/hooks/use-zkey-name";
+import { useStealthInbox } from "@/hooks/use-zvault";
 import { notifyCopied } from "@/lib/notifications";
 import { TooltipText } from "@/components/ui/tooltip";
 import { OnboardingModal } from "@/components/onboarding-modal";
@@ -39,7 +38,6 @@ interface FeatureConfig {
 }
 
 const features: FeatureConfig[] = [
-  // Row 1 - Receive zBTC (Inbound)
   {
     icon: <ArrowDownToLine className="w-full h-full" />,
     title: "Deposit",
@@ -48,23 +46,6 @@ const features: FeatureConfig[] = [
     href: "/bridge/deposit",
     color: "btc",
   },
-  {
-    icon: <Gift className="w-full h-full" />,
-    title: "Claim",
-    description: "Use claim link",
-    subtext: "Redeem zBTC",
-    href: "/claim",
-    color: "sol",
-  },
-  {
-    icon: <Inbox className="w-full h-full" />,
-    title: "Inbox",
-    description: "Received zBTC",
-    subtext: "Stealth payments",
-    href: "/bridge/received",
-    color: "privacy",
-  },
-  // Row 2 - Spend zBTC (Outbound)
   {
     icon: <Send className="w-full h-full" />,
     title: "Pay",
@@ -84,10 +65,10 @@ const features: FeatureConfig[] = [
   {
     icon: <Wallet className="w-full h-full" />,
     title: "Notes",
-    description: "View & Split",
-    subtext: "Manage notes",
+    description: "All your zBTC",
+    subtext: "Claim & manage",
     href: "/bridge/activity",
-    color: "gray",
+    color: "privacy",
   },
 ];
 
@@ -114,6 +95,11 @@ export default function BridgePage() {
     validateName,
     checkAvailability,
   } = useZkeyName();
+  const {
+    totalAmountSats,
+    depositCount,
+    isLoading: isLoadingInbox,
+  } = useStealthInbox();
 
   // Name registration state
   const [showNameInput, setShowNameInput] = useState(false);
@@ -383,8 +369,56 @@ export default function BridgePage() {
           )}
         </div>
 
-        {/* Feature Cards Grid */}
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
+        {/* Claimable Notes Summary - only show when keys are derived */}
+        {keys && (
+          <div className="mb-6 p-4 bg-muted border border-privacy/20 rounded-[16px]">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-3">
+                <div className="p-2 rounded-full bg-privacy/10">
+                  <Wallet className="w-5 h-5 text-privacy" />
+                </div>
+                <div>
+                  <p className="text-caption text-gray">Claimable Notes</p>
+                  <div className="flex items-baseline gap-2">
+                    {isLoadingInbox ? (
+                      <div className="flex items-center gap-2">
+                        <Loader2 className="w-4 h-4 animate-spin text-privacy" />
+                        <span className="text-body2 text-gray">Scanning...</span>
+                      </div>
+                    ) : (
+                      <>
+                        <span className="text-heading6 text-privacy font-mono">
+                          {(Number(totalAmountSats) / 100_000_000).toFixed(8)}
+                        </span>
+                        <span className="text-caption text-gray">zBTC</span>
+                        {depositCount > 0 && (
+                          <span className="text-caption text-gray">
+                            ({depositCount} note{depositCount !== 1 ? "s" : ""})
+                          </span>
+                        )}
+                      </>
+                    )}
+                  </div>
+                </div>
+              </div>
+              {depositCount > 0 && (
+                <Link
+                  href="/bridge/activity?tab=claimable"
+                  className={cn(
+                    "flex items-center gap-1.5 px-3 py-1.5 rounded-[8px]",
+                    "bg-privacy/10 hover:bg-privacy/20 text-privacy text-caption transition-colors"
+                  )}
+                >
+                  View Notes
+                  <Wallet className="w-3.5 h-3.5" />
+                </Link>
+              )}
+            </div>
+          </div>
+        )}
+
+        {/* Feature Cards Grid - 2x2 layout */}
+        <div className="grid grid-cols-2 gap-4 mb-6">
           {features.map((feature) => (
             <FeatureCard
               key={feature.title}
@@ -415,7 +449,7 @@ export default function BridgePage() {
         </div>
 
         {/* Network Status */}
-        <div className="flex items-center justify-center gap-2 py-2 px-3 bg-warning/10 border border-warning/20 rounded-[8px]">
+        <div className="flex items-center gap-2 py-2 px-3 bg-warning/10 border border-warning/20 rounded-[8px]">
           <div className="w-2 h-2 rounded-full bg-warning animate-pulse" />
           <span className="text-caption text-warning">
             Bitcoin Testnet3 + Solana Devnet
