@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import Link from "next/link";
 import {
   ArrowLeft,
@@ -25,6 +25,9 @@ import { useWalletModal } from "@solana/wallet-adapter-react-ui";
 import { useZVaultKeys } from "@/hooks/use-zvault-keys";
 import { useCopyToClipboard } from "@/hooks/use-copy-to-clipboard";
 import { useZkeyName } from "@/hooks/use-zkey-name";
+import { notifyCopied } from "@/lib/notifications";
+import { TooltipText } from "@/components/ui/tooltip";
+import { OnboardingModal } from "@/components/onboarding-modal";
 
 interface FeatureConfig {
   icon: React.ReactNode;
@@ -101,17 +104,32 @@ export default function BridgePage() {
   const { copied, copy } = useCopyToClipboard();
   const {
     registeredName,
+    isLoading: isLoadingName,
     isRegistering,
+    isCheckingAvailability,
+    isNameTaken,
     error: nameError,
     registerName,
     formatName,
     validateName,
+    checkAvailability,
   } = useZkeyName();
 
   // Name registration state
   const [showNameInput, setShowNameInput] = useState(false);
   const [nameInput, setNameInput] = useState("");
   const nameValidationError = nameInput ? validateName(nameInput) : null;
+
+  // Debounced availability check
+  useEffect(() => {
+    if (!nameInput || nameValidationError) return;
+
+    const timer = setTimeout(() => {
+      checkAvailability(nameInput);
+    }, 300);
+
+    return () => clearTimeout(timer);
+  }, [nameInput, nameValidationError, checkAvailability]);
 
   const handleRegisterName = async () => {
     if (!nameInput || nameValidationError) return;
@@ -171,7 +189,13 @@ export default function BridgePage() {
         <div className="mb-6 p-4 bg-muted border border-privacy/20 rounded-[16px]">
           <div className="flex items-center gap-2 mb-3">
             <Key className="w-5 h-5 text-privacy" />
-            <h2 className="text-body1 text-foreground">Your Stealth Address</h2>
+            <h2 className="text-body1 text-foreground">
+              Your{" "}
+              <TooltipText
+                text="Stealth Address"
+                tooltip="A one-time address that hides your identity. Only you can scan and claim funds sent to it."
+              />
+            </h2>
           </div>
 
           {!wallet.connected ? (
@@ -222,7 +246,7 @@ export default function BridgePage() {
                     {formatName(registeredName)}
                   </span>
                   <button
-                    onClick={() => copy(formatName(registeredName))}
+                    onClick={() => { copy(formatName(registeredName)); notifyCopied(".zkey name"); }}
                     className="ml-auto p-1.5 rounded-[6px] bg-privacy/10 hover:bg-privacy/20 transition-colors"
                     title="Copy .zkey name"
                   >
@@ -241,7 +265,7 @@ export default function BridgePage() {
                   {shortAddress}
                 </code>
                 <button
-                  onClick={() => copy(stealthAddressEncoded || "")}
+                  onClick={() => { copy(stealthAddressEncoded || ""); notifyCopied("Stealth address"); }}
                   className={cn(
                     "p-2 rounded-[6px] transition-colors",
                     "bg-privacy/10 hover:bg-privacy/20"
@@ -256,38 +280,57 @@ export default function BridgePage() {
                 </button>
               </div>
 
-              {/* Name registration */}
-              {!registeredName && !showNameInput && (
+              {/* Name registration - only show if no name and not loading */}
+              {!registeredName && !showNameInput && !isLoadingName && (
                 <button
                   onClick={() => setShowNameInput(true)}
                   className="flex items-center gap-2 text-caption text-privacy hover:text-privacy/80 transition-colors mt-2"
                 >
                   <Tag className="w-3 h-3" />
-                  Register a .zkey name
+                  Register a{" "}
+                  <TooltipText
+                    text=".zkey name"
+                    tooltip="A human-readable name (like alice.zkey) that makes it easy for others to send you private payments."
+                    className="text-privacy"
+                  />
                 </button>
+              )}
+              {isLoadingName && (
+                <div className="flex items-center gap-2 text-caption text-gray mt-2">
+                  <Loader2 className="w-3 h-3 animate-spin" />
+                  Checking for registered name...
+                </div>
               )}
 
               {showNameInput && (
                 <div className="mt-3 p-3 bg-background/50 rounded-[10px] border border-gray/20">
                   <div className="flex items-center gap-2 mb-2">
-                    <input
-                      type="text"
-                      value={nameInput}
-                      onChange={(e) => setNameInput(e.target.value.toLowerCase())}
-                      placeholder="yourname"
-                      className={cn(
-                        "flex-1 px-3 py-2 bg-muted border rounded-[8px]",
-                        "text-body2 text-foreground placeholder:text-gray",
-                        "outline-none transition-colors",
-                        nameValidationError
-                          ? "border-red-500/50"
-                          : "border-gray/30 focus:border-privacy/50"
+                    <div className="flex-1 relative">
+                      <input
+                        type="text"
+                        value={nameInput}
+                        onChange={(e) => setNameInput(e.target.value.toLowerCase())}
+                        placeholder="yourname"
+                        className={cn(
+                          "w-full px-3 py-2 bg-muted border rounded-[8px]",
+                          "text-body2 text-foreground placeholder:text-gray",
+                          "outline-none transition-colors",
+                          nameValidationError || isNameTaken
+                            ? "border-red-500/50"
+                            : "border-gray/30 focus:border-privacy/50"
+                        )}
+                      />
+                      {isCheckingAvailability && (
+                        <Loader2 className="absolute right-3 top-1/2 -translate-y-1/2 w-3 h-3 text-gray animate-spin" />
                       )}
-                    />
+                    </div>
                     <span className="text-body2 text-gray">.zkey</span>
                   </div>
                   {nameValidationError && (
                     <p className="text-caption text-red-400 mb-2">{nameValidationError}</p>
+                  )}
+                  {!nameValidationError && isNameTaken && nameInput && (
+                    <p className="text-caption text-red-400 mb-2">This name is already taken</p>
                   )}
                   {nameError && (
                     <p className="text-caption text-red-400 mb-2">{nameError}</p>
@@ -295,7 +338,7 @@ export default function BridgePage() {
                   <div className="flex gap-2">
                     <button
                       onClick={handleRegisterName}
-                      disabled={isRegistering || !nameInput || !!nameValidationError}
+                      disabled={isRegistering || isCheckingAvailability || isNameTaken || !nameInput || !!nameValidationError}
                       className={cn(
                         "flex-1 flex items-center justify-center gap-2 px-3 py-2 rounded-[8px]",
                         "bg-privacy hover:bg-privacy/80 text-background",
@@ -307,6 +350,11 @@ export default function BridgePage() {
                         <>
                           <Loader2 className="w-3 h-3 animate-spin" />
                           Registering...
+                        </>
+                      ) : isCheckingAvailability ? (
+                        <>
+                          <Loader2 className="w-3 h-3 animate-spin" />
+                          Checking...
                         </>
                       ) : (
                         <>
@@ -405,6 +453,9 @@ export default function BridgePage() {
           <p className="text-caption">Powered by Privacy Cash</p>
         </div>
       </div>
+
+      {/* First-time user onboarding */}
+      <OnboardingModal />
     </main>
   );
 }

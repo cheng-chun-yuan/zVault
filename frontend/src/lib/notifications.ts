@@ -103,3 +103,12 @@ export function notifyStealthReceived(amount: number) {
     duration: 10000,
   });
 }
+
+/**
+ * Show a notification when text is copied to clipboard
+ */
+export function notifyCopied(label: string) {
+  toast.success(`${label} copied`, {
+    duration: 2000,
+  });
+}

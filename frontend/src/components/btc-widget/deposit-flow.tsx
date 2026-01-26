@@ -4,7 +4,7 @@ import { useState, useEffect, useCallback } from "react";
 import { useWallet } from "@solana/wallet-adapter-react";
 import { Connection } from "@solana/web3.js";
 import {
-  Copy, Check, AlertCircle, Key, Eye, EyeOff,
+  Copy, Check, AlertCircle, AlertTriangle, Key, Eye, EyeOff,
   RefreshCw, QrCode, ExternalLink, Shield, Send, User, Tag
 } from "lucide-react";
 import { QRCodeSVG } from "qrcode.react";
@@ -12,7 +12,7 @@ import { cn } from "@/lib/utils";
 import { useNoteStorage } from "@/hooks/use-note-storage";
 import { useCopyToClipboard } from "@/hooks/use-copy-to-clipboard";
 import { useZVaultKeys } from "@/hooks/use-zvault-keys";
-import { notifyDepositConfirmed, notifyDepositDetected } from "@/lib/notifications";
+import { notifyDepositConfirmed, notifyDepositDetected, notifyCopied } from "@/lib/notifications";
 import {
   createDepositFromSeed,
   serializeNote,
@@ -24,12 +24,16 @@ import {
   prepareStealthDeposit,
   lookupZkeyName,
   decodeStealthMetaAddress,
+  bytesToHex,
   type StealthMetaAddress,
   type PreparedStealthDeposit,
 } from "@zvault/sdk";
 import { registerDeposit } from "@/lib/api/deposits";
 import { useDepositStatus } from "@/hooks/use-deposit-status";
 import { DepositProgress } from "@/components/deposit";
+import { Tooltip, TooltipText } from "@/components/ui/tooltip";
+import { InlineError } from "@/components/ui/error-display";
+import { LoadingState } from "@/components/ui/loading-state";
 
 // Deposit modes
 type DepositMode = "note" | "stealth";
@@ -77,6 +81,7 @@ export function DepositFlow() {
     if (!stealthAddressEncoded) return;
     await navigator.clipboard.writeText(stealthAddressEncoded);
     setStealthCopied(true);
+    notifyCopied("Stealth address");
     setTimeout(() => setStealthCopied(false), 2000);
   };
 
@@ -231,6 +236,7 @@ export function DepositFlow() {
     if (!depositData) return;
     await navigator.clipboard.writeText(depositData.taproot_address);
     setAddressCopied(true);
+    notifyCopied("Deposit address");
     setTimeout(() => setAddressCopied(false), 2000);
   };
 
@@ -239,6 +245,7 @@ export function DepositFlow() {
     const fullUrl = `${window.location.origin}/claim?note=${claimLink}`;
     await navigator.clipboard.writeText(fullUrl);
     setClaimLinkCopied(true);
+    notifyCopied("Claim link");
     setTimeout(() => setClaimLinkCopied(false), 2000);
   };
 
@@ -278,7 +285,16 @@ export function DepositFlow() {
         const connection = new Connection(
           process.env.NEXT_PUBLIC_SOLANA_RPC_URL || "https://api.devnet.solana.com"
         );
-        const result = await lookupZkeyName(connection, recipient.trim());
+        // Wrap connection to match SDK expected type
+        const connectionAdapter = {
+          getAccountInfo: async (pubkey: { toBytes(): Uint8Array }) => {
+            const { PublicKey } = await import("@solana/web3.js");
+            const pk = new PublicKey(pubkey.toBytes());
+            const info = await connection.getAccountInfo(pk);
+            return info ? { data: new Uint8Array(info.data) } : null;
+          },
+        };
+        const result = await lookupZkeyName(connectionAdapter, recipient.trim());
         if (!result) {
           setError(`Name "${recipient.trim()}.zkey" not found`);
           return;
@@ -356,11 +372,15 @@ export function DepositFlow() {
   return (
     <div className="flex flex-col">
       {/* Mode Toggle */}
-      <div className="flex gap-2 mb-4 p-1 bg-muted rounded-[10px] border border-gray/15">
+      <div className="flex gap-2 mb-4 p-1 bg-muted rounded-[10px] border border-gray/15" role="tablist" aria-label="Deposit mode">
         <button
+          role="tab"
+          aria-selected={mode === "note"}
+          aria-controls="note-panel"
           onClick={() => { setMode("note"); resetFlow(); }}
           className={cn(
             "flex-1 flex items-center justify-center gap-2 py-2 px-3 rounded-[8px] text-body2 transition-colors",
+            "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-privacy focus-visible:ring-offset-1",
             mode === "note"
               ? "bg-privacy/12 text-privacy border border-privacy/25"
               : "text-gray hover:text-gray-light"
@@ -370,9 +390,13 @@ export function DepositFlow() {
           Self (Note)
         </button>
         <button
+          role="tab"
+          aria-selected={mode === "stealth"}
+          aria-controls="stealth-panel"
           onClick={() => { setMode("stealth"); resetFlow(); }}
           className={cn(
             "flex-1 flex items-center justify-center gap-2 py-2 px-3 rounded-[8px] text-body2 transition-colors",
+            "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sol focus-visible:ring-offset-1",
             mode === "stealth"
               ? "bg-sol/12 text-sol border border-sol/25"
               : "text-gray hover:text-gray-light"
@@ -388,7 +412,14 @@ export function DepositFlow() {
         <div className="mb-4 p-3 bg-privacy/5 border border-privacy/15 rounded-[12px]">
           <div className="flex items-center gap-2 mb-2">
             <Shield className="w-4 h-4 text-privacy" />
-            <span className="text-caption text-privacy">Your Stealth Address</span>
+            <span className="text-caption text-privacy">
+              Your{" "}
+              <TooltipText
+                text="Stealth Address"
+                tooltip="A one-time address that hides your identity. Only you can scan and claim funds sent to it."
+                className="text-privacy"
+              />
+            </span>
           </div>
           {!keys ? (
             <div className="flex items-center justify-between">
@@ -442,7 +473,10 @@ export function DepositFlow() {
               )}
             >
               <Tag className="w-3.5 h-3.5" />
-              .zkey Name
+              <TooltipText
+                text=".zkey Name"
+                tooltip="A human-readable name (like alice.zkey) that maps to a stealth address on Solana."
+              />
             </button>
             <button
               onClick={() => { setRecipientType("address"); setRecipient(""); setResolvedMeta(null); }}
@@ -495,16 +529,43 @@ export function DepositFlow() {
             </div>
           </div>
 
+          {/* Not found error */}
+          {error && !resolvedMeta && (
+            <div className="mb-4 p-3 bg-red-500/10 border border-red-500/20 rounded-[12px]">
+              <div className="flex items-center gap-2">
+                <AlertCircle className="w-4 h-4 text-red-400" />
+                <span className="text-body2 text-red-400">{error}</span>
+              </div>
+            </div>
+          )}
+
           {/* Resolved recipient info */}
           {resolvedMeta && (
-            <div className="mb-4 p-3 bg-sol/5 border border-sol/15 rounded-[12px]">
-              <div className="flex items-center gap-2 mb-1">
+            <div className="mb-4 p-4 bg-sol/5 border border-sol/15 rounded-[12px]">
+              <div className="flex items-center gap-2 mb-3">
                 <Check className="w-4 h-4 text-success" />
-                <span className="text-caption text-success">Recipient resolved</span>
+                <span className="text-body2-semibold text-success">Recipient Found</span>
               </div>
-              <p className="text-caption text-gray">
-                Stealth keys found. Enter amount to generate deposit address.
-              </p>
+
+              {/* QR Code */}
+              <div className="flex justify-center mb-3">
+                <div className="p-3 bg-white rounded-[8px]">
+                  <QRCodeSVG
+                    value={bytesToHex(resolvedMeta.spendingPubKey) + bytesToHex(resolvedMeta.viewingPubKey)}
+                    size={120}
+                    level="M"
+                  />
+                </div>
+              </div>
+
+              {/* Stealth Address */}
+              <div className="space-y-1">
+                <p className="text-caption text-gray text-center">Stealth Address (66 bytes)</p>
+                <code className="block text-[9px] font-mono text-privacy break-all bg-background/50 p-2 rounded text-center">
+                  {bytesToHex(resolvedMeta.spendingPubKey)}
+                  {bytesToHex(resolvedMeta.viewingPubKey)}
+                </code>
+              </div>
             </div>
           )}
 
@@ -550,7 +611,7 @@ export function DepositFlow() {
                       <QrCode className="w-4 h-4" />
                     </button>
                     <button
-                      onClick={() => { navigator.clipboard.writeText(stealthDeposit.btcDepositAddress); setAddressCopied(true); setTimeout(() => setAddressCopied(false), 2000); }}
+                      onClick={() => { navigator.clipboard.writeText(stealthDeposit.btcDepositAddress); setAddressCopied(true); notifyCopied("Deposit address"); setTimeout(() => setAddressCopied(false), 2000); }}
                       className="p-1.5 rounded-[6px] bg-btc/10 hover:bg-btc/20 transition-colors"
                     >
                       {addressCopied ? <Check className="w-4 h-4 text-success" /> : <Copy className="w-4 h-4 text-btc" />}
@@ -564,14 +625,29 @@ export function DepositFlow() {
 
               {/* QR Code */}
               {showQR && (
-                <div className="flex justify-center p-4 rounded-[12px] mb-4">
-                  <QRCodeSVG
-                    value={stealthDeposit.btcDepositAddress}
-                    size={180}
-                    level="M"
-                    bgColor="transparent"
-                    fgColor="#F7931A"
-                  />
+                <div
+                  className="flex justify-center p-4 rounded-[12px] mb-4"
+                  role="img"
+                  aria-label={`QR code for stealth deposit address ${stealthDeposit.btcDepositAddress}`}
+                >
+                  <button
+                    onClick={() => { navigator.clipboard.writeText(stealthDeposit.btcDepositAddress); setAddressCopied(true); notifyCopied("Deposit address"); setTimeout(() => setAddressCopied(false), 2000); }}
+                    className="relative group cursor-pointer focus:outline-none focus-visible:ring-2 focus-visible:ring-btc focus-visible:ring-offset-2 rounded-lg"
+                    aria-label="Click to copy deposit address"
+                  >
+                    <QRCodeSVG
+                      value={stealthDeposit.btcDepositAddress}
+                      size={180}
+                      level="M"
+                      bgColor="transparent"
+                      fgColor="#F7931A"
+                    />
+                    <div className="absolute inset-0 bg-black/60 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center rounded-lg">
+                      <span className="text-white text-caption font-medium">
+                        {addressCopied ? "Copied!" : "Tap to copy address"}
+                      </span>
+                    </div>
+                  </button>
                 </div>
               )}
 
@@ -620,9 +696,83 @@ export function DepositFlow() {
       {/* ========== NOTE MODE ========== */}
       {mode === "note" && (
         <>
+      {/* Progress Stepper */}
+      <div className="mb-6">
+        <div className="flex items-center justify-between">
+          {[
+            { label: "Enter Secret", step: 1 },
+            { label: "Send BTC", step: 2 },
+            { label: "Save Claim", step: 3 },
+            { label: "Complete", step: 4 },
+          ].map((item, index) => {
+            // Calculate current step
+            const currentStep = !isSecretValid ? 1 :
+              !depositData ? 1 :
+              trackerStatus.status === "confirmed" || trackerStatus.status === "ready" || trackerStatus.status === "claimed" ? 4 :
+              trackerStatus.status === "confirming" || trackerStatus.status === "detected" ? 3 : 2;
+
+            const isActive = item.step === currentStep;
+            const isCompleted = item.step < currentStep;
+
+            return (
+              <div key={item.step} className="flex flex-col items-center flex-1">
+                <div className="flex items-center w-full">
+                  {index > 0 && (
+                    <div
+                      className={cn(
+                        "flex-1 h-0.5 transition-colors",
+                        isCompleted || isActive ? "bg-privacy" : "bg-gray/30"
+                      )}
+                    />
+                  )}
+                  <div
+                    className={cn(
+                      "w-6 h-6 rounded-full flex items-center justify-center text-caption font-medium transition-colors",
+                      isCompleted ? "bg-privacy text-background" :
+                      isActive ? "bg-privacy/20 text-privacy border-2 border-privacy" :
+                      "bg-gray/20 text-gray border border-gray/30"
+                    )}
+                  >
+                    {isCompleted ? (
+                      <Check className="w-3.5 h-3.5" />
+                    ) : (
+                      item.step
+                    )}
+                  </div>
+                  {index < 3 && (
+                    <div
+                      className={cn(
+                        "flex-1 h-0.5 transition-colors",
+                        isCompleted ? "bg-privacy" : "bg-gray/30"
+                      )}
+                    />
+                  )}
+                </div>
+                <span
+                  className={cn(
+                    "text-[10px] mt-1.5 text-center transition-colors",
+                    isActive ? "text-privacy font-medium" :
+                    isCompleted ? "text-privacy/70" :
+                    "text-gray"
+                  )}
+                >
+                  {item.label}
+                </span>
+              </div>
+            );
+          })}
+        </div>
+      </div>
+
       {/* Secret note input */}
       <div className="mb-4">
-        <label className="text-body2 text-gray-light pl-2 mb-2 block">Secret Note</label>
+        <label className="text-body2 text-gray-light pl-2 mb-2 flex items-center gap-1.5">
+          <TooltipText
+            text="Secret Note"
+            tooltip="A private passphrase that proves ownership of your deposit. Anyone with this secret can claim the funds."
+            className="text-gray-light"
+          />
+        </label>
         <div className="relative">
           <input
             type={showSecret ? "text" : "password"}
@@ -638,10 +788,13 @@ export function DepositFlow() {
               }
             }}
             placeholder="Enter or generate a secret note (8+ chars)"
+            aria-label="Secret note for deposit"
+            aria-describedby="secret-note-help"
             className={cn(
               "w-full p-3 pr-24 bg-muted border border-gray/15 rounded-[12px]",
               "text-body2 font-mono text-foreground placeholder:text-gray",
-              "outline-none focus:border-privacy/40 transition-colors"
+              "outline-none focus:border-privacy/40 transition-colors",
+              "focus-visible:ring-2 focus-visible:ring-privacy/30 focus-visible:ring-offset-2 focus-visible:ring-offset-background"
             )}
           />
           <div className="absolute right-2 top-1/2 -translate-y-1/2 flex items-center gap-1">
@@ -663,25 +816,19 @@ export function DepositFlow() {
             </button>
           </div>
         </div>
-        <p className="text-caption text-gray mt-1 pl-2">
+        <p id="secret-note-help" className="text-caption text-gray mt-1 pl-2">
           {isSecretValid ? "Your secret is valid. Address generated below." : "Enter at least 8 characters to generate deposit address."}
         </p>
       </div>
 
       {/* Loading state */}
       {loading && (
-        <div className="flex items-center justify-center gap-2 py-4 text-gray">
-          <RefreshCw className="w-4 h-4 animate-spin" />
-          <span className="text-body2">Generating deposit address...</span>
-        </div>
+        <LoadingState message="Generating deposit address..." className="py-4" />
       )}
 
       {/* Error */}
       {error && (
-        <div className="warning-box mb-4">
-          <AlertCircle className="w-4 h-4 shrink-0" />
-          <span>{error}</span>
-        </div>
+        <InlineError error={error} className="mb-4" />
       )}
 
       {/* Deposit Data Section - shown when depositData exists */}
@@ -722,16 +869,46 @@ export function DepositFlow() {
 
           {/* QR Code - toggleable */}
           {showQR && (
-            <div className="flex justify-center p-4 rounded-[12px] mb-4">
-              <QRCodeSVG
-                value={depositData.taproot_address}
-                size={180}
-                level="M"
-                bgColor="transparent"
-                fgColor="#F7931A"
-              />
+            <div
+              className="flex justify-center p-4 rounded-[12px] mb-4"
+              role="img"
+              aria-label={`QR code for Bitcoin deposit address ${depositData.taproot_address}`}
+            >
+              <button
+                onClick={copyAddress}
+                className="relative group cursor-pointer focus:outline-none focus-visible:ring-2 focus-visible:ring-btc focus-visible:ring-offset-2 rounded-lg"
+                aria-label="Click to copy deposit address"
+              >
+                <QRCodeSVG
+                  value={depositData.taproot_address}
+                  size={180}
+                  level="M"
+                  bgColor="transparent"
+                  fgColor="#F7931A"
+                />
+                <div className="absolute inset-0 bg-black/60 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center rounded-lg">
+                  <span className="text-white text-caption font-medium">
+                    {addressCopied ? "Copied!" : "Tap to copy address"}
+                  </span>
+                </div>
+              </button>
             </div>
           )}
+
+          {/* Security Warning */}
+          <div className="p-3 bg-warning/10 border border-warning/30 rounded-[12px] mb-4">
+            <div className="flex items-start gap-3">
+              <AlertTriangle className="w-5 h-5 text-warning shrink-0 mt-0.5" />
+              <div>
+                <p className="text-body2-semibold text-warning mb-1">
+                  Keep this secret safe!
+                </p>
+                <p className="text-caption text-gray">
+                  Anyone with this secret can claim your deposit. Save it securely and never share it.
+                </p>
+              </div>
+            </div>
+          </div>
 
           {/* Claim Link */}
           {/* Secret = Claim Link (simplified!) */}
@@ -742,7 +919,7 @@ export function DepositFlow() {
                 <span className="text-caption text-privacy">Your Secret (Save This!)</span>
               </div>
               <button
-                onClick={() => copy(secretNote)}
+                onClick={() => { copy(secretNote); notifyCopied("Secret note"); }}
                 className="p-1.5 rounded-[6px] bg-privacy/10 hover:bg-privacy/20 transition-colors"
                 title="Copy secret"
               >
