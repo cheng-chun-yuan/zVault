@@ -297,12 +297,15 @@ export {
   prepareClaimInputs,
   parseStealthAnnouncement,
   announcementToScanFormat,
+  scanByZkeyName,
+  resolveZkeyName,
   STEALTH_ANNOUNCEMENT_SIZE,
   STEALTH_ANNOUNCEMENT_DISCRIMINATOR,
   type StealthDeposit,
   type ScannedNote,
   type ClaimInputs,
   type OnChainStealthAnnouncement,
+  type ConnectionAdapter,
 } from "./stealth";
 
 // ==========================================================================
@@ -418,3 +421,29 @@ export {
   type NameRegistryEntry,
   type ZkeyStealthAddress,
 } from "./name-registry";
+
+// ==========================================================================
+// Demo Instructions (Mock deposits for testing)
+// ==========================================================================
+
+export {
+  // Instruction data builders
+  buildAddDemoNoteData,
+  buildAddDemoStealthData,
+  buildAddDemoNoteDataFromParams,
+  buildAddDemoStealthDataFromParams,
+  // PDA seed helpers
+  getPoolStatePDASeeds,
+  getCommitmentTreePDASeeds,
+  getStealthAnnouncementPDASeeds,
+  // Account meta helpers
+  getDemoNoteAccountMetas,
+  getDemoStealthAccountMetas,
+  // Constants
+  DEMO_INSTRUCTION,
+  DEMO_SEEDS,
+  // Types
+  type AddDemoNoteParams,
+  type AddDemoStealthParams,
+  type PDASeed,
+} from "./demo";

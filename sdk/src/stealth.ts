@@ -60,7 +60,8 @@ import {
   type GrumpkinPoint,
 } from "./grumpkin";
 import type { StealthMetaAddress, ZVaultKeys, WalletSignerAdapter } from "./keys";
-import { deriveKeysFromWallet, parseStealthMetaAddress } from "./keys";
+import { deriveKeysFromWallet, parseStealthMetaAddress, constantTimeCompare } from "./keys";
+import { lookupZkeyName, type ZkeyStealthAddress } from "./name-registry";
 import {
   poseidon2Hash,
   computeCommitment as poseidon2ComputeCommitment,
@@ -505,4 +506,108 @@ export function announcementToScanFormat(
     commitment: announcement.commitment,
     leafIndex: announcement.leafIndex,
   };
+}
+
+// ========== Connection Adapter for .zkey Name Lookup ==========
+
+/**
+ * Minimal connection adapter for name registry lookups
+ *
+ * Works with both @solana/web3.js Connection and custom implementations
+ */
+export interface ConnectionAdapter {
+  getAccountInfo: (
+    pubkey: { toBytes(): Uint8Array }
+  ) => Promise<{ data: Uint8Array } | null>;
+}
+
+// ========== Scan by .zkey Name ==========
+
+/**
+ * Scan stealth announcements for deposits sent to a .zkey name
+ *
+ * Combines name lookup + scanning in one call. Verifies that the provided
+ * keys match the registered .zkey name before scanning.
+ *
+ * IMPORTANT: Scanning requires the viewing private key. This function
+ * verifies that your spending public key matches the registered .zkey name,
+ * then scans using your viewing key.
+ *
+ * @param keys - User's full ZVaultKeys (spending + viewing keys required)
+ * @param expectedName - The .zkey name to verify ownership (e.g., "alice" or "alice.zkey")
+ * @param connection - Solana connection adapter for account lookups
+ * @param announcements - Array of on-chain stealth announcements to scan
+ * @param programId - Optional program ID (defaults to devnet)
+ * @returns Array of found notes belonging to this address
+ * @throws Error if name not found or keys don't match registered name
+ *
+ * @example
+ * ```typescript
+ * const keys = await deriveKeysFromWallet(wallet);
+ * const notes = await scanByZkeyName(
+ *   keys,
+ *   "alice",
+ *   connection,
+ *   announcements
+ * );
+ * console.log(`Found ${notes.length} deposits for alice.zkey`);
+ * ```
+ */
+export async function scanByZkeyName(
+  keys: ZVaultKeys,
+  expectedName: string,
+  connection: ConnectionAdapter,
+  announcements: {
+    ephemeralPub: Uint8Array;
+    amountSats: bigint;
+    commitment: Uint8Array;
+    leafIndex: number;
+  }[],
+  programId?: string
+): Promise<ScannedNote[]> {
+  // 1. Lookup .zkey name to get registered stealth address
+  const zkeyAddress = await lookupZkeyName(connection, expectedName, programId);
+  if (!zkeyAddress) {
+    throw new Error(`Name "${expectedName}.zkey" not found`);
+  }
+
+  // 2. Verify keys match registered name
+  const userSpendingPub = pointToCompressedBytes(keys.spendingPubKey);
+  if (!constantTimeCompare(userSpendingPub, zkeyAddress.spendingPubKey)) {
+    throw new Error(
+      `Keys do not match "${expectedName}.zkey" registration. ` +
+      `The provided spending key does not match the registered spending key.`
+    );
+  }
+
+  // Optional: Also verify viewing key matches
+  const userViewingPub = pointToCompressedBytes(keys.viewingPubKey);
+  if (!constantTimeCompare(userViewingPub, zkeyAddress.viewingPubKey)) {
+    throw new Error(
+      `Keys do not match "${expectedName}.zkey" registration. ` +
+      `The provided viewing key does not match the registered viewing key.`
+    );
+  }
+
+  // 3. Scan using user's viewing key (keys verified to match name)
+  return scanAnnouncements(keys, announcements);
+}
+
+/**
+ * Look up a .zkey name and return the stealth address
+ *
+ * Convenience re-export that doesn't require keys (for sending only).
+ * For scanning deposits, use scanByZkeyName() which requires keys.
+ *
+ * @param connection - Solana connection adapter
+ * @param name - The .zkey name to look up
+ * @param programId - Optional program ID
+ * @returns Stealth address or null if not found
+ */
+export async function resolveZkeyName(
+  connection: ConnectionAdapter,
+  name: string,
+  programId?: string
+): Promise<ZkeyStealthAddress | null> {
+  return lookupZkeyName(connection, name, programId);
 }
