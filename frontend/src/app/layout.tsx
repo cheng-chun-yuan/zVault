@@ -21,7 +21,7 @@ const rethinkSans = Rethink_Sans({
 
 export const metadata: Metadata = {
   title: "zVault - Bitcoin to Solana Bridge",
-  description: "Bridge Bitcoin to Solana with privacy using sbBTC tokens",
+  description: "Bridge Bitcoin to Solana with privacy using zkBTC tokens",
 };
 
 export default function RootLayout({

@@ -35,7 +35,7 @@ function TabBar({
   claimableCount: number;
 }) {
   return (
-    <div className="flex gap-1 p-1 bg-[#16161B] border border-[#8B8A9E26] rounded-[12px]">
+    <div className="flex gap-1 p-1 bg-muted border border-gray/15 rounded-[12px] cyber-corners">
       {tabs.map((tab) => (
         <button
           key={tab.id}
@@ -43,14 +43,14 @@ function TabBar({
           className={cn(
             "flex-1 flex items-center justify-center gap-2 px-3 py-2 rounded-[10px] text-sm transition-colors",
             activeTab === tab.id
-              ? "bg-[#14F1951A] text-[#14F195] border border-[#14F19533]"
-              : "text-[#8B8A9E] hover:text-[#C7C5D1] hover:bg-[#8B8A9E1A]"
+              ? "bg-privacy/10 text-privacy border border-privacy/20 neon-border-pulse"
+              : "text-gray hover:text-gray-light hover:bg-gray/10"
           )}
         >
           {tab.icon}
-          <span>{tab.label}</span>
+          <span className={activeTab === tab.id ? "neon-privacy" : ""}>{tab.label}</span>
           {tab.id === "claimable" && claimableCount > 0 && (
-            <span className="min-w-[22px] h-[22px] px-2 flex items-center justify-center text-sm rounded-full bg-privacy text-background font-bold shadow-[0_0_8px_rgba(20,241,149,0.5)]">
+            <span className="min-w-[22px] h-[22px] px-2 flex items-center justify-center text-sm rounded-full bg-privacy text-background font-bold shadow-[0_0_12px_rgba(20,241,149,0.7),0_0_24px_rgba(20,241,149,0.4)] neon-privacy animate-pulse">
               {claimableCount}
             </span>
           )}
@@ -239,7 +239,7 @@ export default function ActivityPage() {
               GitHub
             </a>
           </div>
-          <p className="text-caption">Powered by Privacy Cash</p>
+          <p className="text-caption">Powered by zVault</p>
         </div>
       </div>
     </main>

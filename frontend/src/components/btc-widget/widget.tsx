@@ -58,7 +58,7 @@ const Footer = memo(function Footer() {
           GitHub
         </a>
       </div>
-      <span>Powered by Privacy Cash</span>
+      <span>Powered by zVault</span>
     </div>
   );
 });
@@ -117,7 +117,7 @@ export function IntegratedWidget({
 }
 
 // Dialog widget
-export function sbBTCWidget({ trigger, defaultTab = "deposit" }: {
+export function zkBTCWidget({ trigger, defaultTab = "deposit" }: {
   trigger?: React.ReactNode;
   defaultTab?: TabValue;
 }) {
@@ -151,4 +151,4 @@ export function sbBTCWidget({ trigger, defaultTab = "deposit" }: {
   );
 }
 
-export default sbBTCWidget;
+export default zkBTCWidget;

@@ -12,7 +12,7 @@ import { ApiError } from "./errors";
 // API base URL for deposit tracker
 const getTrackerApiUrl = () =>
   process.env.NEXT_PUBLIC_TRACKER_API_URL ||
-  process.env.NEXT_PUBLIC_sbBTC_API_URL ||
+  process.env.NEXT_PUBLIC_zkBTC_API_URL ||
   "http://localhost:3001";
 
 // =============================================================================
@@ -242,8 +242,8 @@ export function getStatusMessage(status: DepositStatus): string {
     sweeping: "Sweeping to pool wallet",
     sweep_confirming: "Sweep transaction confirming",
     verifying: "Verifying on Solana",
-    ready: "Ready to claim sbBTC",
-    claimed: "sbBTC claimed successfully",
+    ready: "Ready to claim zkBTC",
+    claimed: "zkBTC claimed successfully",
     failed: "Deposit failed",
   };
 

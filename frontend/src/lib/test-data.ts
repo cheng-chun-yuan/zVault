@@ -1,5 +1,5 @@
 /**
- * Test Data for sbBTC Demo
+ * Test Data for zkBTC Demo
  *
  * Simple seed-based demo notes. The seed IS the claim link!
  * Format: free-coupon-01, free-coupon-02, etc.

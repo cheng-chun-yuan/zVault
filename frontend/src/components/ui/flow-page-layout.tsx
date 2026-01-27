@@ -119,7 +119,7 @@ function Footer() {
           GitHub
         </a>
       </div>
-      <p className="text-caption">Powered by Privacy Cash</p>
+      <p className="text-caption">Powered by zVault</p>
     </div>
   );
 }

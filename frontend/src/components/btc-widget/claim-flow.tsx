@@ -220,7 +220,7 @@ function ClaimFlowContent() {
             <div className="p-3 bg-[#16161B] border border-[#8B8A9E26] rounded-[12px]">
               <p className="text-caption text-[#8B8A9E] mb-1">Amount to Claim</p>
               <p className="text-heading6 text-[#14F195]">
-                {formatBtc(verifyResult.amountSats)} sbBTC
+                {formatBtc(verifyResult.amountSats)} zkBTC
               </p>
             </div>
           </div>
@@ -269,7 +269,7 @@ function ClaimFlowContent() {
             className="btn-primary w-full"
           >
             <Coins className="w-5 h-5" />
-            Claim sbBTC
+            Claim zkBTC
           </button>
         </div>
       </div>
@@ -303,7 +303,7 @@ function ClaimFlowContent() {
           </div>
         </div>
         <p className="text-body2 text-[#C7C5D1]">Claiming tokens...</p>
-        <p className="text-caption text-[#8B8A9E]">Minting sbBTC to your wallet</p>
+        <p className="text-caption text-[#8B8A9E]">Minting zkBTC to your wallet</p>
       </div>
     );
   }
@@ -322,7 +322,7 @@ function ClaimFlowContent() {
             <div className="p-3 bg-[#16161B] border border-[#8B8A9E26] rounded-[12px]">
               <p className="text-caption text-[#8B8A9E] mb-1">Amount Claimed</p>
               <p className="text-heading6 text-[#14F195]">
-                {formatBtc(claimedAmount)} sbBTC
+                {formatBtc(claimedAmount)} zkBTC
               </p>
             </div>
           )}

@@ -1,4 +1,4 @@
-// API Request/Response Types for zVault (sbBTC)
+// API Request/Response Types for zVault (zkBTC)
 //
 // Simplified Flow:
 // 1. User generates: nullifier + secret

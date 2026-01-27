@@ -38,7 +38,7 @@ src/
 Create `.env.local`:
 
 ```env
-NEXT_PUBLIC_sbBTC_API_URL=http://localhost:8080
+NEXT_PUBLIC_zkBTC_API_URL=http://localhost:8080
 NEXT_PUBLIC_SOLANA_RPC=https://api.devnet.solana.com
 NEXT_PUBLIC_PROGRAM_ID=4yUhu6Cg7fGimyY9ZQpMpkshQUnPX6WaVyauDbuEGjoT
 ```

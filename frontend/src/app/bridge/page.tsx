@@ -131,24 +131,24 @@ export default function BridgePage() {
     : "";
 
   return (
-    <main className="min-h-screen bg-background hacker-bg noise-overlay flex flex-col items-center justify-center p-4">
+    <main className="min-h-screen bg-background hacker-bg noise-overlay hacker-grid scan-line flex flex-col items-center justify-center p-4">
       {/* Header */}
       <div className="w-full max-w-[680px] mb-6 flex items-center justify-between relative z-10">
         <Link
           href="/"
-          className="inline-flex items-center gap-2 text-body2 text-gray hover:text-gray-light transition-colors"
+          className="inline-flex items-center gap-2 text-body2 text-gray hover:text-gray-light transition-colors hover-glow"
         >
           <ArrowLeft className="w-4 h-4" />
           Home
         </Link>
         <div className="flex items-center gap-2">
-          <div className="flex items-center gap-1.5 px-2 py-1 rounded-full bg-btc/10 border border-btc/20">
-            <BitcoinIcon className="w-3 h-3" />
-            <span className="text-caption text-btc">BTC</span>
+          <div className="flex items-center gap-1.5 px-2 py-1 rounded-full bg-btc/10 border border-btc/20 btc-neon-border-pulse">
+            <BitcoinIcon className="w-3 h-3 btc-glow" />
+            <span className="text-caption text-btc neon-btc">BTC</span>
           </div>
-          <div className="flex items-center gap-1.5 px-2 py-1 rounded-full bg-privacy/10 border border-privacy/20">
-            <Shield className="w-3 h-3 text-privacy" />
-            <span className="text-caption text-privacy">ZK</span>
+          <div className="flex items-center gap-1.5 px-2 py-1 rounded-full bg-privacy/10 border border-privacy/20 neon-border-pulse">
+            <Shield className="w-3 h-3 text-privacy privacy-glow" />
+            <span className="text-caption text-privacy neon-privacy">ZK</span>
           </div>
         </div>
       </div>
@@ -484,7 +484,7 @@ export default function BridgePage() {
               Docs
             </a>
           </div>
-          <p className="text-caption">Powered by Privacy Cash</p>
+          <p className="text-caption">Powered by zVault</p>
         </div>
       </div>
 

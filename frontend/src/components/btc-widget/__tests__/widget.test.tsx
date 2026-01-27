@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen, fireEvent } from "@testing-library/react";
 // Rename import to PascalCase for JSX to work correctly
-import { sbBTCWidget as SbBTCWidget, IntegratedWidget } from "../widget";
+import { zkBTCWidget as SbBTCWidget, IntegratedWidget } from "../widget";
 
 // Mock wallet adapter
 vi.mock("@solana/wallet-adapter-react", () => ({

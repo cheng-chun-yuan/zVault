@@ -1,18 +1,10 @@
 "use client";
 
-import React, { useState, useEffect, memo } from "react";
+import React, { memo } from "react";
 import Link from "next/link";
-import { Bitcoin, Shield, Zap, Lock, ExternalLink, ArrowRight, Eye, EyeOff, Fingerprint, ShieldCheck } from "lucide-react";
+import { Bitcoin, Shield, Zap, Lock, ExternalLink, ArrowRight, EyeOff, Fingerprint, ShieldCheck, Loader2 } from "lucide-react";
 import { BitcoinIcon } from "@/components/bitcoin-wallet-selector";
-
-// Demo stats for display (backend API removed - stats would come from on-chain data)
-interface StatsData {
-  total_minted_sats?: number;
-  total_redeemed_sats?: number;
-  total_deposits?: number;
-  pending_deposits?: number;
-  pending_withdrawals?: number;
-}
+import { usePoolStats, PoolStats } from "@/hooks/use-pool-stats";
 
 const FeatureCard = memo(function FeatureCard({
   icon: Icon,
@@ -23,7 +15,7 @@ const FeatureCard = memo(function FeatureCard({
   icon: React.ComponentType<{ className?: string }>;
   title: string;
   description: string;
-  variant?: "default" | "bitcoin" | "privacy";
+  variant?: "default" | "bitcoin" | "privacy" | "cyber";
 }) {
   const variantStyles = {
     default: {
@@ -40,6 +32,11 @@ const FeatureCard = memo(function FeatureCard({
       iconBg: "bg-[#14F1951A]",
       iconColor: "text-[#14F195] privacy-glow",
       cardClass: "gradient-bg-card privacy-lines",
+    },
+    cyber: {
+      iconBg: "bg-[#00FFFF1A]",
+      iconColor: "text-[#00FFFF]",
+      cardClass: "gradient-bg-cyber",
     },
   };
 
@@ -62,31 +59,42 @@ FeatureCard.displayName = "FeatureCard";
 
 const StatsDisplay = memo(function StatsDisplay({
   stats,
+  isLoading,
 }: {
-  stats: StatsData;
+  stats: PoolStats | null;
+  isLoading: boolean;
 }) {
-  // total_minted_sats - total_redeemed_sats = current supply
-  const currentSupply = (stats.total_minted_sats ?? 0) - (stats.total_redeemed_sats ?? 0);
-  const btcLocked = (currentSupply / 100000000).toFixed(4);
-  const totalsbBTC = currentSupply.toLocaleString();
-  const totalDeposits = (stats.total_deposits ?? 0).toLocaleString();
-  const pendingCount = ((stats.pending_deposits ?? 0) + (stats.pending_withdrawals ?? 0)).toLocaleString();
+  if (isLoading) {
+    return (
+      <div className="flex items-center justify-center py-4">
+        <Loader2 className="w-6 h-6 animate-spin text-[#8B8A9E]" />
+      </div>
+    );
+  }
+
+  // Total Bridged = total minted on Solana (in BTC)
+  const totalBridgedBtc = (Number(stats?.totalMinted ?? 0n) / 100000000).toFixed(4);
+  // Vault Held = total minted - total burned (current circulating supply)
+  const vaultHeld = Number((stats?.totalMinted ?? 0n) - (stats?.totalBurned ?? 0n));
+  const vaultHeldBtc = (vaultHeld / 100000000).toFixed(4);
+  const totalDeposits = (stats?.depositCount ?? 0).toLocaleString();
+  const pendingCount = (stats?.pendingRedemptions ?? 0).toLocaleString();
 
   return (
     <div className="grid grid-cols-2 md:grid-cols-4 gap-6">
       <div className="space-y-2 text-center">
         <div className="flex items-center justify-center gap-2">
           <BitcoinIcon className="w-5 h-5 btc-glow" />
-          <span className="text-heading5 text-[#F7931A]">{btcLocked}</span>
+          <span className="text-heading5 text-[#F7931A]">{totalBridgedBtc}</span>
         </div>
-        <div className="text-caption text-[#8B8A9E]">BTC Locked</div>
+        <div className="text-caption text-[#8B8A9E]">Total Bridged (BTC)</div>
       </div>
       <div className="space-y-2 text-center">
         <div className="flex items-center justify-center gap-2">
           <Shield className="w-5 h-5 text-[#14F195] privacy-glow" />
-          <span className="text-heading5 text-[#FFFFFF]">{totalsbBTC}</span>
+          <span className="text-heading5 text-[#14F195]">{vaultHeldBtc}</span>
         </div>
-        <div className="text-caption text-[#8B8A9E]">sbBTC Supply (sats)</div>
+        <div className="text-caption text-[#8B8A9E]">Vault Held (BTC)</div>
       </div>
       <div className="space-y-2 text-center">
         <div className="text-heading5 text-[#FFFFFF]">
@@ -107,15 +115,8 @@ const StatsDisplay = memo(function StatsDisplay({
 StatsDisplay.displayName = "StatsDisplay";
 
 export default function Home() {
-  // Demo stats - in production, these would come from on-chain queries
-  // The backend API was removed since deposit/claim are handled client-side
-  const [stats] = useState<StatsData>({
-    total_minted_sats: 1500000,
-    total_redeemed_sats: 250000,
-    total_deposits: 42,
-    pending_deposits: 3,
-    pending_withdrawals: 1,
-  });
+  // Fetch real stats from on-chain pool state
+  const { stats, isLoading } = usePoolStats();
 
   return (
     <main className="min-h-screen bg-[#0F0F12] hacker-bg noise-overlay">
@@ -231,12 +232,12 @@ export default function Home() {
                 icon={EyeOff}
                 title="Privacy Protected"
                 description="Zero-knowledge proofs ensure your transaction amounts and history remain confidential"
-                variant="privacy"
+                variant="cyber"
               />
               <FeatureCard
                 icon={Bitcoin}
                 title="1:1 BTC Backed"
-                description="Each sbBTC token is fully backed by real Bitcoin locked in escrow"
+                description="Each zkBTC token is fully backed by real Bitcoin locked in escrow"
                 variant="bitcoin"
               />
               <FeatureCard
@@ -248,19 +249,17 @@ export default function Home() {
                 icon={ShieldCheck}
                 title="OFAC Compliant"
                 description="Built-in compliance screening ensures regulatory compliance while preserving privacy"
-                variant="privacy"
+                variant="cyber"
               />
             </div>
 
             {/* Stats */}
-            {stats && (
-              <div className="gradient-bg-card p-6 rounded-[16px] w-full">
-                <h3 className="text-caption text-[#8B8A9E] uppercase tracking-wide mb-4 text-center">
-                  Bridge Statistics
-                </h3>
-                <StatsDisplay stats={stats} />
-              </div>
-            )}
+            <div className="gradient-bg-card p-6 rounded-[16px] w-full">
+              <h3 className="text-caption text-[#8B8A9E] uppercase tracking-wide mb-4 text-center">
+                Bridge Statistics
+              </h3>
+              <StatsDisplay stats={stats} isLoading={isLoading} />
+            </div>
 
             {/* How it works */}
             <div className="space-y-6">
@@ -294,8 +293,8 @@ export default function Home() {
                     <Lock className="w-6 h-6 text-[#9945FF]" />
                   </div>
                   <div>
-                    <h3 className="text-body2-semibold text-[#FFFFFF] mb-1">Mint sbBTC</h3>
-                    <p className="text-caption text-[#8B8A9E]">Receive privacy-protected sbBTC tokens on Solana</p>
+                    <h3 className="text-body2-semibold text-[#FFFFFF] mb-1">Mint zkBTC</h3>
+                    <p className="text-caption text-[#8B8A9E]">Receive privacy-protected zkBTC tokens on Solana</p>
                   </div>
                 </div>
               </div>
