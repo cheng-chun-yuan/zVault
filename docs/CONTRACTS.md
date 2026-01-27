@@ -81,7 +81,7 @@ Initializes the pool state, commitment tree, and token mint.
 ```
 [0] pool_state       (writable, PDA)     - Pool configuration
 [1] commitment_tree  (writable, PDA)     - Merkle tree state
-[2] sbbtc_mint       (writable, PDA)     - Token-2022 mint
+[2] zkbtc_mint       (writable, PDA)     - Token-2022 mint
 [3] authority        (signer)            - Pool authority
 [4] system_program   (readonly)          - System program
 [5] token_program    (readonly)          - Token-2022 program
@@ -427,11 +427,11 @@ struct VerifyStealthDepositV2Data {
 pub struct PoolState {
     pub discriminator: u8,        // 0x01
     pub authority: [u8; 32],      // Admin pubkey
-    pub sbbtc_mint: [u8; 32],     // Token mint
+    pub zkbtc_mint: [u8; 32],     // Token mint
     pub merkle_root: [u8; 32],    // Current tree root
     pub deposit_count: u64,       // Total deposits
     pub total_deposited: u64,     // Total BTC deposited
-    pub total_minted: u64,        // Total sbBTC minted
+    pub total_minted: u64,        // Total zkBTC minted
     pub flags: u8,                // Bitflags (paused, etc.)
     pub bump: u8,                 // PDA bump
     pub last_update: i64,         // Unix timestamp

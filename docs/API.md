@@ -44,7 +44,7 @@ Most operations (deposit, claim, split, transfer) are handled **client-side** vi
 http://localhost:8080
 
 # Production (configure via env)
-${SBBTC_API_URL}
+${ZKBTC_API_URL}
 ```
 
 ---
@@ -64,7 +64,7 @@ curl http://localhost:8080/api/health
 ```json
 {
   "status": "ok",
-  "service": "sbbtc-api",
+  "service": "zkbtc-api",
   "version": "0.1.0"
 }
 ```
@@ -703,17 +703,17 @@ STEALTH_EXPIRY_SECONDS=3600
 ```bash
 # Development
 cd backend
-cargo run --bin sbbtc-api
+cargo run --bin zkbtc-api
 
 # With logging
-RUST_LOG=debug cargo run --bin sbbtc-api
+RUST_LOG=debug cargo run --bin zkbtc-api
 
 # Production
 cargo build --release
-./target/release/sbbtc-api
+./target/release/zkbtc-api
 
 # Combined API (redemption + stealth)
-cargo run --bin sbbtc-combined
+cargo run --bin zkbtc-combined
 ```
 
 ---

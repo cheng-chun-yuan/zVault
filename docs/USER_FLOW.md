@@ -1,6 +1,6 @@
 # zVault Complete User Flow
 
-A comprehensive guide covering the entire user journey from BTC deposit to sbBTC operations.
+A comprehensive guide covering the entire user journey from BTC deposit to zkBTC operations.
 
 ---
 
@@ -12,7 +12,7 @@ A comprehensive guide covering the entire user journey from BTC deposit to sbBTC
 4. [Phase 2: Deposit BTC](#phase-2-deposit-btc)
 5. [Phase 3: Submit Block Headers](#phase-3-submit-block-headers)
 6. [Phase 4: Verify Deposit](#phase-4-verify-deposit)
-7. [Phase 5: Claim sbBTC](#phase-5-claim-sbbtc)
+7. [Phase 5: Claim zkBTC](#phase-5-claim-zkbtc)
 8. [Phase 6: Split Commitment](#phase-6-split-commitment)
 9. [Phase 7: Transfer via Claim Link](#phase-7-transfer-via-claim-link)
 10. [Phase 8: Refresh Commitment](#phase-8-refresh-commitment)
@@ -49,7 +49,7 @@ A comprehensive guide covering the entire user journey from BTC deposit to sbBTC
 ║             │                                           │                      ║
 ║    ┌────────▼────────┐                         ┌────────▼────────┐            ║
 ║    │                 │                         │                 │            ║
-║    │  FROST Custody  │◄──── Redemptions ──────│  sbBTC Token    │            ║
+║    │  FROST Custody  │◄──── Redemptions ──────│  zkBTC Token    │            ║
 ║    │  (Threshold)    │                         │  (SPL Token)    │            ║
 ║    │                 │                         │                 │            ║
 ║    └─────────────────┘                         └─────────────────┘            ║
@@ -70,7 +70,7 @@ A comprehensive guide covering the entire user journey from BTC deposit to sbBTC
 ║  │                              USER                                        │  ║
 ║  │  ┌──────────┐  ┌──────────┐  ┌──────────┐  ┌──────────┐  ┌──────────┐  │  ║
 ║  │  │ Generate │  │  Send    │  │  Claim   │  │  Split   │  │ Withdraw │  │  ║
-║  │  │ Secrets  │  │  BTC     │  │  sbBTC   │  │  Amount  │  │  to BTC  │  │  ║
+║  │  │ Secrets  │  │  BTC     │  │  zkBTC   │  │  Amount  │  │  to BTC  │  │  ║
 ║  │  └────┬─────┘  └────┬─────┘  └────┬─────┘  └────┬─────┘  └────┬─────┘  │  ║
 ║  └───────┼─────────────┼─────────────┼─────────────┼─────────────┼────────┘  ║
 ║          │             │             │             │             │            ║
@@ -103,7 +103,7 @@ A comprehensive guide covering the entire user journey from BTC deposit to sbBTC
 ║  │  │                     │  │    │  │  │  • Double-spend Prevention │  │  │  ║
 ║  │  └─────────────────────┘  │    │  │  └────────────────────────────┘  │  │  ║
 ║  │                           │    │  │  ┌────────────────────────────┐  │  │  ║
-║  │                           │    │  │  │  sbBTC Token (SPL)         │  │  │  ║
+║  │                           │    │  │  │  zkBTC Token (SPL)         │  │  │  ║
 ║  │                           │    │  │  │  • Mint / Burn             │  │  │  ║
 ║  │                           │    │  │  └────────────────────────────┘  │  │  ║
 ║  │                           │    │  └──────────────────────────────────┘  │  ║
@@ -142,7 +142,7 @@ A comprehensive guide covering the entire user journey from BTC deposit to sbBTC
 ║                                                                                ║
 ║   PHASE 5          PHASE 6          PHASE 7          PHASE 8                  ║
 ║   Claim            Split            Transfer         Withdraw                  ║
-║   sbBTC            1 → 2            (Link)           to BTC                    ║
+║   zkBTC            1 → 2            (Link)           to BTC                    ║
 ║                                                                                ║
 ║   ┌───────┐       ┌───────┐        ┌───────┐        ┌───────┐                 ║
 ║   │       │       │       │        │       │        │       │                 ║
@@ -153,7 +153,7 @@ A comprehensive guide covering the entire user journey from BTC deposit to sbBTC
 ║       ▼               ▼                ▼                ▼                      ║
 ║   ┌───────┐       ┌───────┐        ┌───────┐        ┌───────┐                 ║
 ║   │ Mint  │       │2 new  │        │Friend │        │ Burn  │                 ║
-║   │sbBTC  │       │commits│        │claims │        │sbBTC  │                 ║
+║   │zkBTC  │       │commits│        │claims │        │zkBTC  │                 ║
 ║   │       │       │       │        │       │        │get BTC│                 ║
 ║   └───────┘       └───────┘        └───────┘        └───────┘                 ║
 ║                                                                                ║
@@ -640,13 +640,13 @@ async function verifyDeposit(
 
 ---
 
-## Phase 5: Claim sbBTC
+## Phase 5: Claim zkBTC
 
 ### ZK Proof Generation & Claim Flow
 
 ```
 ╔═══════════════════════════════════════════════════════════════════════════════╗
-║                              CLAIM sbBTC FLOW                                  ║
+║                              CLAIM zkBTC FLOW                                  ║
 ╠═══════════════════════════════════════════════════════════════════════════════╣
 ║                                                                                ║
 ║   STEP 1: Generate ZK Proof (Off-chain)                                       ║
@@ -707,7 +707,7 @@ async function verifyDeposit(
 ║   │   │                   IF VERIFICATION PASSES                         │   │ ║
 ║   │   │                                                                  │   │ ║
 ║   │   │   • Create NullifierRecord PDA (prevents double-spend)          │   │ ║
-║   │   │   • Mint sbBTC tokens to user's wallet                          │   │ ║
+║   │   │   • Mint zkBTC tokens to user's wallet                          │   │ ║
 ║   │   │   • Emit ClaimCompleted event                                    │   │ ║
 ║   │   │                                                                  │   │ ║
 ║   │   └─────────────────────────────────────────────────────────────────┘   │ ║
@@ -722,7 +722,7 @@ async function verifyDeposit(
 ```typescript
 import { generateClaimProof } from '@zVault/circuits';
 
-async function claimsbBTC(
+async function claimzkBTC(
   program: Program,
   credentials: Credentials,
   amount: number
@@ -767,7 +767,7 @@ async function claimsbBTC(
       poolState,
       commitmentTree: commitmentTreePDA,
       nullifierRecord,
-      sbbtcMint,
+      zkbtcMint,
       userTokenAccount,
       user: userWallet.publicKey,
       tokenProgram: TOKEN_2022_PROGRAM_ID,
@@ -776,7 +776,7 @@ async function claimsbBTC(
     .signers([userWallet])
     .rpc();
 
-  console.log("Claimed", amount, "sats worth of sbBTC");
+  console.log("Claimed", amount, "sats worth of zkBTC");
   console.log("Transaction:", tx);
 }
 ```
@@ -973,7 +973,7 @@ async function splitCommitment(
 ║   │                                                                          │ ║
 ║   │   4. Frontend generates ZK proof with Bob as recipient                  │ ║
 ║   │                                                                          │ ║
-║   │   5. Bob calls claim_direct → receives 40,000 sats of sbBTC            │ ║
+║   │   5. Bob calls claim_direct → receives 40,000 sats of zkBTC            │ ║
 ║   │                                                                          │ ║
 ║   └─────────────────────────────────────────────────────────────────────────┘ ║
 ║                                                                                ║
@@ -1095,8 +1095,8 @@ async function claimFromLink(link: string, bobWallet: Keypair) {
 ║   │                                                                          │ ║
 ║   │   ┌───────────────────────────────────────────────────────────────────┐ │ ║
 ║   │   │                                                                    │ │ ║
-║   │   │   1. Verify user has sufficient sbBTC                             │ │ ║
-║   │   │   2. Burn sbBTC from user's account                               │ │ ║
+║   │   │   1. Verify user has sufficient zkBTC                             │ │ ║
+║   │   │   2. Burn zkBTC from user's account                               │ │ ║
 ║   │   │   3. Create RedemptionRequest PDA:                                │ │ ║
 ║   │   │      • amount: 50,000 sats                                        │ │ ║
 ║   │   │      • btc_address: "bc1q..."                                     │ │ ║
@@ -1199,7 +1199,7 @@ async function requestWithdrawal(
     .accounts({
       poolState,
       redemptionRequest,
-      sbbtcMint,
+      zkbtcMint,
       userTokenAccount,
       user: userWallet.publicKey,
       tokenProgram: TOKEN_2022_PROGRAM_ID,
@@ -1262,7 +1262,7 @@ async function requestWithdrawal(
 ║              │                    ▼                                           ║
 ║              │           ┌─────────────────┐                                  ║
 ║   (refund    │           │                 │                                  ║
-║    path)     │           │    CLAIMED      │ (sbBTC minted)                   ║
+║    path)     │           │    CLAIMED      │ (zkBTC minted)                   ║
 ║              │           │                 │                                  ║
 ║              └───────────└─────────────────┘                                  ║
 ║                                                                                ║
@@ -1291,7 +1291,7 @@ async function requestWithdrawal(
 ║   │                 │   │                 │   │                 │           ║
 ║   │ SPENT_CLAIMED   │   │  SPENT_SPLIT    │   │ SPENT_REFRESH   │           ║
 ║   │                 │   │                 │   │                 │           ║
-║   │ (sbBTC minted)  │   │ (2 new commits) │   │ (1 new commit)  │           ║
+║   │ (zkBTC minted)  │   │ (2 new commits) │   │ (1 new commit)  │           ║
 ║   │                 │   │                 │   │                 │           ║
 ║   └─────────────────┘   └─────────────────┘   └─────────────────┘           ║
 ║                                   │                     │                    ║
@@ -1320,11 +1320,11 @@ async function requestWithdrawal(
 ║   PoolState (PDA: ["pool"])                                                   ║
 ║   ┌─────────────────────────────────────────────────────────────────────────┐ ║
 ║   │  authority:          Pubkey     // Admin                                 │ ║
-║   │  sbbtc_mint:         Pubkey     // Token mint address                   │ ║
+║   │  zkbtc_mint:         Pubkey     // Token mint address                   │ ║
 ║   │  min_deposit:        u64        // 10,000 sats                          │ ║
 ║   │  max_deposit:        u64        // 100,000,000,000 sats                 │ ║
-║   │  total_minted:       u64        // Total sbBTC minted                   │ ║
-║   │  total_burned:       u64        // Total sbBTC burned                   │ ║
+║   │  total_minted:       u64        // Total zkBTC minted                   │ ║
+║   │  total_burned:       u64        // Total zkBTC burned                   │ ║
 ║   │  deposit_count:      u64        // Number of deposits                   │ ║
 ║   │  paused:             bool       // Emergency pause                       │ ║
 ║   └─────────────────────────────────────────────────────────────────────────┘ ║
@@ -1490,7 +1490,7 @@ async function requestWithdrawal(
 | BTC Deposit | Bitcoin | 1,000-5,000 sats |
 | Submit Header | Solana | ~0.000005 SOL |
 | Verify Deposit | Solana | ~0.005 SOL |
-| Claim sbBTC | Solana | ~0.01 SOL |
+| Claim zkBTC | Solana | ~0.01 SOL |
 | Split | Solana | ~0.01 SOL |
 | Request Withdrawal | Solana | ~0.005 SOL |
 | BTC Withdrawal | Bitcoin | 1,000-5,000 sats (pool pays) |
@@ -1512,7 +1512,7 @@ async function requestWithdrawal(
 │                                                                              │
 │  CLAIM:                                                                      │
 │    1. Generate ZK proof with your secrets                                   │
-│    2. Call claim_direct → receive sbBTC                                     │
+│    2. Call claim_direct → receive zkBTC                                     │
 │                                                                              │
 │  SPLIT:                                                                      │
 │    1. Generate 2 new credential sets                                        │
@@ -1526,7 +1526,7 @@ async function requestWithdrawal(
 │                                                                              │
 │  WITHDRAW:                                                                   │
 │    1. Call request_redemption(amount, btc_address)                          │
-│    2. sbBTC burned, request queued                                          │
+│    2. zkBTC burned, request queued                                          │
 │    3. FROST signs and sends BTC                                             │
 │    4. Receive BTC at your address                                           │
 │                                                                              │

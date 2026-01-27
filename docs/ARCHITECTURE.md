@@ -310,7 +310,7 @@ BITCOIN_NETWORK=testnet
 ESPLORA_URL=https://blockstream.info/testnet/api
 
 # Backend
-SBBTC_API_URL=http://localhost:8080
+ZKBTC_API_URL=http://localhost:8080
 ```
 
 ---
