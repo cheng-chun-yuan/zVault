@@ -15,6 +15,7 @@ import {
   SystemProgram,
 } from "@solana/web3.js";
 import { ZVAULT_PROGRAM_ID as SDK_PROGRAM_ID } from "@zvault/sdk";
+import { getPriorityFeeInstructions } from "@/lib/helius";
 
 // =============================================================================
 // Constants
@@ -122,11 +123,16 @@ export function deriveBlockHeaderPDA(
 
 /**
  * Derive zBTC Mint PDA
- * Note: Seed string "sbbtc_mint" is kept for deployed contract compatibility
+ * Uses NEXT_PUBLIC_SBBTC_MINT env var if set, otherwise derives from program
  */
 export function derivezBTCMintPDA(
   programId: PublicKey = ZVAULT_PROGRAM_ID
 ): [PublicKey, number] {
+  // Use env variable if available (for deployed contracts with non-PDA mints)
+  if (process.env.NEXT_PUBLIC_SBBTC_MINT) {
+    return [new PublicKey(process.env.NEXT_PUBLIC_SBBTC_MINT), 0];
+  }
+  // Fallback to PDA derivation
   return PublicKey.findProgramAddressSync(
     [Buffer.from("sbbtc_mint")],
     programId
@@ -340,8 +346,14 @@ export async function buildClaimTransaction(
     data: Buffer.from(instructionData),
   });
 
-  // Build transaction
+  // Get priority fee instructions for better transaction landing
+  const priorityFeeIxs = await getPriorityFeeInstructions([
+    ZVAULT_PROGRAM_ID.toBase58(),
+  ]);
+
+  // Build transaction with priority fees first
   const transaction = new Transaction();
+  transaction.add(...priorityFeeIxs);
   transaction.add(instruction);
   transaction.feePayer = userPubkey;
 
@@ -403,7 +415,13 @@ export async function buildSplitTransaction(
     data: Buffer.from(instructionData),
   });
 
+  // Get priority fee instructions for better transaction landing
+  const priorityFeeIxs = await getPriorityFeeInstructions([
+    ZVAULT_PROGRAM_ID.toBase58(),
+  ]);
+
   const transaction = new Transaction();
+  transaction.add(...priorityFeeIxs);
   transaction.add(instruction);
   transaction.feePayer = userPubkey;
 
@@ -450,7 +468,13 @@ export async function buildRedeemTransaction(
     data: Buffer.from(instructionData),
   });
 
+  // Get priority fee instructions for better transaction landing
+  const priorityFeeIxs = await getPriorityFeeInstructions([
+    ZVAULT_PROGRAM_ID.toBase58(),
+  ]);
+
   const transaction = new Transaction();
+  transaction.add(...priorityFeeIxs);
   transaction.add(instruction);
   transaction.feePayer = userPubkey;
 

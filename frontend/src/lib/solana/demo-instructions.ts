@@ -14,7 +14,8 @@ import {
   Transaction,
   SystemProgram,
 } from "@solana/web3.js";
-import { ZVAULT_PROGRAM_ID } from "./instructions";
+import { getAssociatedTokenAddressSync } from "@solana/spl-token";
+import { ZVAULT_PROGRAM_ID, TOKEN_2022_PROGRAM_ID, derivezBTCMintPDA } from "./instructions";
 import { getPriorityFeeInstructions } from "@/lib/helius";
 import {
   buildAddDemoNoteData,
@@ -68,6 +69,25 @@ export function deriveStealthAnnouncementPDA(
   );
 }
 
+/**
+ * Derive Pool Vault (Associated Token Account for Pool PDA)
+ * This is where zBTC tokens are held for the shielded pool
+ */
+export function derivePoolVaultATA(
+  programId: PublicKey = ZVAULT_PROGRAM_ID
+): PublicKey {
+  const [poolState] = derivePoolStatePDA(programId);
+  const [zbtcMint] = derivezBTCMintPDA(programId);
+
+  // Pool vault is the ATA of the pool PDA for the zBTC mint
+  return getAssociatedTokenAddressSync(
+    zbtcMint,
+    poolState,
+    true, // allowOwnerOffCurve = true for PDA owners
+    TOKEN_2022_PROGRAM_ID
+  );
+}
+
 export interface AddDemoNoteParams {
   /** User's public key (payer) */
   payer: PublicKey;
@@ -80,6 +100,7 @@ export interface AddDemoNoteParams {
  *
  * Takes a secret (32 bytes), the contract derives nullifier and commitment.
  * Adds the commitment to the on-chain tree for claiming.
+ * Also mints zBTC to the pool vault so users can claim.
  */
 export function buildAddDemoNoteInstruction(
   params: AddDemoNoteParams
@@ -88,6 +109,8 @@ export function buildAddDemoNoteInstruction(
 
   const [poolState] = derivePoolStatePDA();
   const [commitmentTree] = deriveCommitmentTreePDA();
+  const [zbtcMint] = derivezBTCMintPDA();
+  const poolVault = derivePoolVaultATA();
 
   // Use SDK's data builder
   const data = buildAddDemoNoteData(secret);
@@ -97,6 +120,10 @@ export function buildAddDemoNoteInstruction(
       { pubkey: poolState, isSigner: false, isWritable: true },
       { pubkey: commitmentTree, isSigner: false, isWritable: true },
       { pubkey: payer, isSigner: true, isWritable: false },
+      // Token accounts for minting zBTC to pool vault
+      { pubkey: zbtcMint, isSigner: false, isWritable: true },
+      { pubkey: poolVault, isSigner: false, isWritable: true },
+      { pubkey: TOKEN_2022_PROGRAM_ID, isSigner: false, isWritable: false },
     ],
     programId: ZVAULT_PROGRAM_ID,
     data: Buffer.from(data),
@@ -120,6 +147,7 @@ export interface AddDemoStealthParams {
  * Adds commitment to tree AND creates stealth announcement.
  * This allows the recipient to scan and discover the deposit.
  * Uses single ephemeral key pattern (EIP-5564 style).
+ * Also mints zBTC to the pool vault so users can claim.
  */
 export function buildAddDemoStealthInstruction(
   params: AddDemoStealthParams
@@ -129,6 +157,8 @@ export function buildAddDemoStealthInstruction(
   const [poolState] = derivePoolStatePDA();
   const [commitmentTree] = deriveCommitmentTreePDA();
   const [stealthAnnouncement] = deriveStealthAnnouncementPDA(ephemeralPub);
+  const [zbtcMint] = derivezBTCMintPDA();
+  const poolVault = derivePoolVaultATA();
 
   // Use SDK's data builder
   const data = buildAddDemoStealthData(ephemeralPub, commitment, amountSats);
@@ -140,6 +170,10 @@ export function buildAddDemoStealthInstruction(
       { pubkey: stealthAnnouncement, isSigner: false, isWritable: true },
       { pubkey: payer, isSigner: true, isWritable: true },
       { pubkey: SystemProgram.programId, isSigner: false, isWritable: false },
+      // Token accounts for minting zBTC to pool vault
+      { pubkey: zbtcMint, isSigner: false, isWritable: true },
+      { pubkey: poolVault, isSigner: false, isWritable: true },
+      { pubkey: TOKEN_2022_PROGRAM_ID, isSigner: false, isWritable: false },
     ],
     programId: ZVAULT_PROGRAM_ID,
     data: Buffer.from(data),
