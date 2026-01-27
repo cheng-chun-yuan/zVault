@@ -696,8 +696,8 @@ flowchart TB
 
 | Component | Network | Address |
 |-----------|---------|---------|
-| zVault Program | Devnet | `CBzbSQPcUXMYdmSvnA24HPZrDQPuEpq4qq2mcmErrWPR` |
-| BTC Light Client | Devnet | `8GCjjPpzRP1DhWa9PLcRhSV7aLFkE8x7vf5royAQzUfG` |
+| zVault Program | Devnet | `5S5ynMni8Pgd6tKkpYaXiPJiEXgw927s7T2txDtDivRK` |
+| BTC Light Client | Devnet | `95vWurTc9BhjBvEbBdUKoTZHMPPyB1iQZEuXEaR7wPpd` |
 
 ### PDA Seeds
 

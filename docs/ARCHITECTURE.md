@@ -293,8 +293,8 @@ Sender                           Recipient
 
 | Component | Network | Address/URL |
 |-----------|---------|-------------|
-| zVault Program | Solana Devnet | `CBzbSQPcUXMYdmSvnA24HPZrDQPuEpq4qq2mcmErrWPR` |
-| BTC Light Client | Solana Devnet | `8GCjjPpzRP1DhWa9PLcRhSV7aLFkE8x7vf5royAQzUfG` |
+| zVault Program | Solana Devnet | `5S5ynMni8Pgd6tKkpYaXiPJiEXgw927s7T2txDtDivRK` |
+| BTC Light Client | Solana Devnet | `95vWurTc9BhjBvEbBdUKoTZHMPPyB1iQZEuXEaR7wPpd` |
 | Bitcoin | Testnet3 | Standard testnet |
 | Backend API | Local/Cloud | `http://localhost:8080` |
 
@@ -303,7 +303,7 @@ Sender                           Recipient
 ```env
 # Solana
 NEXT_PUBLIC_SOLANA_RPC=https://api.devnet.solana.com
-ZVAULT_PROGRAM_ID=CBzbSQPcUXMYdmSvnA24HPZrDQPuEpq4qq2mcmErrWPR
+ZVAULT_PROGRAM_ID=5S5ynMni8Pgd6tKkpYaXiPJiEXgw927s7T2txDtDivRK
 
 # Bitcoin
 BITCOIN_NETWORK=testnet

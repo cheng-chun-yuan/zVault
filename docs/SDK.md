@@ -918,7 +918,7 @@ MAX_LEAVES = 2 ** 20;  // ~1 million
 ROOT_HISTORY_SIZE = 30;
 
 // Program ID
-ZVAULT_PROGRAM_ID = 'CBzbSQPcUXMYdmSvnA24HPZrDQPuEpq4qq2mcmErrWPR';
+ZVAULT_PROGRAM_ID = '5S5ynMni8Pgd6tKkpYaXiPJiEXgw927s7T2txDtDivRK';
 ```
 
 ---
