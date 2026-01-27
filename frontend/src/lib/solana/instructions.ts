@@ -123,18 +123,18 @@ export function deriveBlockHeaderPDA(
 
 /**
  * Derive zBTC Mint PDA
- * Uses NEXT_PUBLIC_SBBTC_MINT env var if set, otherwise derives from program
+ * Uses NEXT_PUBLIC_ZBTC_MINT env var if set, otherwise derives from program
  */
 export function derivezBTCMintPDA(
   programId: PublicKey = ZVAULT_PROGRAM_ID
 ): [PublicKey, number] {
   // Use env variable if available (for deployed contracts with non-PDA mints)
-  if (process.env.NEXT_PUBLIC_SBBTC_MINT) {
-    return [new PublicKey(process.env.NEXT_PUBLIC_SBBTC_MINT), 0];
+  if (process.env.NEXT_PUBLIC_ZBTC_MINT) {
+    return [new PublicKey(process.env.NEXT_PUBLIC_ZBTC_MINT), 0];
   }
   // Fallback to PDA derivation
   return PublicKey.findProgramAddressSync(
-    [Buffer.from("sbbtc_mint")],
+    [Buffer.from("zkbtc_mint")],
     programId
   );
 }

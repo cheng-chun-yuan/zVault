@@ -69,7 +69,7 @@ export async function createDepositFromSeed(
   // Claim link = just the seed itself (URL-encoded)
   const claimLink = encodeClaimLink(seed);
 
-  const base = baseUrl || (typeof window !== "undefined" ? window.location.origin : "https://sbbtc.app");
+  const base = baseUrl || (typeof window !== "undefined" ? window.location.origin : "https://zkbtc.app");
   const claimUrl = `${base}/claim?note=${claimLink}`;
 
   const serializedNote = serializeNote(note);
@@ -150,7 +150,7 @@ export async function createDeposit(
   );
 
   // Build full claim URL
-  const base = baseUrl || (typeof window !== "undefined" ? window.location.origin : "https://sbbtc.app");
+  const base = baseUrl || (typeof window !== "undefined" ? window.location.origin : "https://zkbtc.app");
   const claimUrl = `${base}/claim?note=${claimLink}`;
 
   // Serialize for storage
@@ -201,7 +201,7 @@ export async function createDeterministicDeposit(
     note.secret.toString()
   );
 
-  const base = baseUrl || (typeof window !== "undefined" ? window.location.origin : "https://sbbtc.app");
+  const base = baseUrl || (typeof window !== "undefined" ? window.location.origin : "https://zkbtc.app");
   const claimUrl = `${base}/claim?note=${claimLink}`;
 
   const serializedNote = serializeNote(note);

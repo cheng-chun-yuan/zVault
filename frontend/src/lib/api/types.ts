@@ -114,7 +114,7 @@ export interface VerifyClaimResponse {
 
 export interface BalanceResponse {
   solana_address: string;
-  sbbtc_balance: number;
+  zkbtc_balance: number;
   pending_deposits: number;
   pending_withdrawals: number;
 }
@@ -182,7 +182,7 @@ export interface MintRequest {
 export interface MintResponse {
   success: boolean;
   tx_signature?: string;
-  sbbtc_amount?: number;
+  zkbtc_amount?: number;
   message?: string;
 }
 
