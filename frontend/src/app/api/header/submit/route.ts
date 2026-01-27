@@ -33,9 +33,9 @@ function getRelayerKeypair(): Keypair | null {
   }
 }
 
-// zVault Anchor Program ID (Devnet)
+// zVault Program ID (Devnet)
 const PROGRAM_ID = new PublicKey(
-  process.env.NEXT_PUBLIC_PROGRAM_ID || "4k6UTCS9QBBsJigJoikqEqfsePUpfYh51v9S4yFTYSB4"
+  process.env.NEXT_PUBLIC_PROGRAM_ID || "5S5ynMni8Pgd6tKkpYaXiPJiEXgw927s7T2txDtDivRK"
 );
 
 // Derive light client PDA (v2 for correct byte order)

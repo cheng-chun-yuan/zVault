@@ -26,7 +26,7 @@ export const ZVAULT_PROGRAM_ID = new PublicKey(SDK_PROGRAM_ID);
 
 /** BTC Light Client Program ID */
 export const BTC_LIGHT_CLIENT_PROGRAM_ID = new PublicKey(
-  process.env.NEXT_PUBLIC_BTC_LIGHT_CLIENT || "8qntLj65faXiqMKcQypyJ389Yq6MBU5X7AB5qsLnvKgy"
+  process.env.NEXT_PUBLIC_BTC_LIGHT_CLIENT || "95vWurTc9BhjBvEbBdUKoTZHMPPyB1iQZEuXEaR7wPpd"
 );
 
 /** Token-2022 Program ID */

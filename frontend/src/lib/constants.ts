@@ -20,7 +20,7 @@ export const MIN_WITHDRAWAL_SATS = 10_000;
 export const BTC_ADDRESS_REGEX = /^(bc1|[13]|tb1)[a-zA-HJ-NP-Z0-9]{25,62}$/;
 
 // zVault Solana Program Configuration (other addresses from env)
-export const BTC_LIGHT_CLIENT_ID = process.env.NEXT_PUBLIC_BTC_LIGHT_CLIENT || "8qntLj65faXiqMKcQypyJ389Yq6MBU5X7AB5qsLnvKgy";
-export const POOL_STATE_ADDRESS = process.env.NEXT_PUBLIC_POOL_STATE || "9oEs3fjvP7xg3xhcwBhrS7Q5LNv53oTVViKuJauWqLT5";
-export const COMMITMENT_TREE_ADDRESS = process.env.NEXT_PUBLIC_COMMITMENT_TREE || "oyKoCdXQ2Jh3FuV15KK4Ar9g7m57XF2L4edmYnLFXRb";
-export const ZBTC_MINT_ADDRESS = process.env.NEXT_PUBLIC_ZBTC_MINT || "6dzRonQCS3xdtKPdf4eBnrjzQBFEHQH4Amh7TuedUyy3";
+export const BTC_LIGHT_CLIENT_ID = process.env.NEXT_PUBLIC_BTC_LIGHT_CLIENT || "95vWurTc9BhjBvEbBdUKoTZHMPPyB1iQZEuXEaR7wPpd";
+export const POOL_STATE_ADDRESS = process.env.NEXT_PUBLIC_POOL_STATE || "BWFTGsxcQrVyvvHJx6wwkRvLtgM1J3BimuaxMf2NjSE3";
+export const COMMITMENT_TREE_ADDRESS = process.env.NEXT_PUBLIC_COMMITMENT_TREE || "J4jWzZRyv8CLyDqSJJ1diN5vXc9Ry2i6Y6WL3zgjUEci";
+export const ZBTC_MINT_ADDRESS = process.env.NEXT_PUBLIC_ZBTC_MINT || "FeMy76e1aWUJf3EytxAEPVE2U8xXzHYRSiWZgLWVxVwL";
