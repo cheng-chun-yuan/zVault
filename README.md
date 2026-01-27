@@ -97,7 +97,7 @@ bun run dev          # Start dev server (port 3000)
 
 ```bash
 cd backend
-cargo run --bin sbbtc-api      # Start API server (port 8080)
+cargo run --bin zkbtc-api      # Start API server (port 8080)
 ```
 
 ### Contracts (Solana)
@@ -236,7 +236,7 @@ BITCOIN_NETWORK=testnet
 ESPLORA_URL=https://blockstream.info/testnet/api
 
 # Backend
-SBBTC_API_URL=http://localhost:8080
+ZKBTC_API_URL=http://localhost:8080
 ```
 
 ---

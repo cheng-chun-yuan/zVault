@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-zVault is a privacy-preserving Bitcoin-to-Solana bridge using Zero-Knowledge Proofs. Users deposit BTC to receive private sbBTC tokens that can be transferred using stealth addresses and ZK proofs (Groth16 on BN254).
+zVault is a privacy-preserving Bitcoin-to-Solana bridge using Zero-Knowledge Proofs. Users deposit BTC to receive private zkBTC tokens that can be transferred using stealth addresses and ZK proofs (Groth16 on BN254).
 
 **Key Technologies**: Pinocchio (Solana), Noir circuits (ZK), Taproot (BTC deposits), X25519 ECDH (stealth addresses)
 
@@ -20,7 +20,7 @@ bun run test         # Vitest tests
 
 ### Backend (Rust) - `/backend`
 ```bash
-cargo run --bin sbbtc-api      # Start API server (port 8080)
+cargo run --bin zkbtc-api      # Start API server (port 8080)
 cargo run --bin redemption     # Start redemption service
 cargo test                     # Run tests
 ```
@@ -63,9 +63,9 @@ bun run start        # Start header relay service
 ```
 BTC Deposit → Taproot Address (commitment-derived) → SPV Verification → On-chain Commitment
                                                                               ↓
-Claim: Provide nullifier+secret → Generate Groth16 ZK Proof → Verify → Mint sbBTC
+Claim: Provide nullifier+secret → Generate Groth16 ZK Proof → Verify → Mint zkBTC
                                                                               ↓
-Redeem: Burn sbBTC → Backend signs BTC transaction → Return BTC to user
+Redeem: Burn zkBTC → Backend signs BTC transaction → Return BTC to user
 ```
 
 ### Main Components
@@ -86,9 +86,9 @@ Redeem: Burn sbBTC → Backend signs BTC transaction → Return BTC to user
 | Discriminator | Name | Purpose |
 |---|---|---|
 | 8 | VERIFY_DEPOSIT | Record BTC deposit with SPV proof |
-| 9 | CLAIM | Mint sbBTC with ZK proof (~95k CU) |
+| 9 | CLAIM | Mint zkBTC with ZK proof (~95k CU) |
 | 4 | SPLIT_COMMITMENT | Split 1 note into 2 notes (~100k CU) |
-| 5 | REQUEST_REDEMPTION | Burn sbBTC, request BTC withdrawal |
+| 5 | REQUEST_REDEMPTION | Burn zkBTC, request BTC withdrawal |
 | 12 | ANNOUNCE_STEALTH | Send via stealth address |
 
 ### Cryptography Flow
@@ -116,4 +116,4 @@ The SDK (`sdk`) provides:
 - **Package Manager**: Always use `bun` instead of `npm`
 - **Network**: Solana devnet + Bitcoin testnet
 - **Poseidon Hashing**: Done inside Noir circuits, not in SDK
-- **Token**: sbBTC uses Token-2022 program
+- **Token**: zkBTC uses Token-2022 program
