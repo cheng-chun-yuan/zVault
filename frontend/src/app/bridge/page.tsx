@@ -41,7 +41,7 @@ const features: FeatureConfig[] = [
   {
     icon: <ArrowDownToLine className="w-full h-full" />,
     title: "Deposit",
-    description: "BTC → zBTC",
+    description: "BTC → zkBTC",
     subtext: "Bridge Bitcoin",
     href: "/bridge/deposit",
     color: "btc",
@@ -57,15 +57,15 @@ const features: FeatureConfig[] = [
   {
     icon: <ArrowUpFromLine className="w-full h-full" />,
     title: "Withdraw",
-    description: "zBTC → BTC",
-    subtext: "Back to Bitcoin",
+    description: "zkBTC → zBTC",
+    subtext: "Convert to public",
     href: "/bridge/withdraw",
     color: "btc",
   },
   {
     icon: <Wallet className="w-full h-full" />,
     title: "Notes",
-    description: "All your zBTC",
+    description: "All your zkBTC",
     subtext: "Claim & manage",
     href: "/bridge/activity",
     color: "privacy",

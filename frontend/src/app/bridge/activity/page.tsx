@@ -66,7 +66,7 @@ function ClaimedTab() {
       <div className="rounded-full bg-[#8B8A9E1A] p-4 mb-4">
         <CheckCircle2 className="h-10 w-10 text-[#8B8A9E]" />
       </div>
-      <p className="text-heading6 text-[#FFFFFF] mb-2">No Claimed Notes Yet</p>
+      <p className="text-heading6 text-foreground mb-2">No Claimed Notes Yet</p>
       <p className="text-body2 text-[#8B8A9E] mb-4">
         When you claim notes from deposits or stealth transfers, they will appear here
       </p>

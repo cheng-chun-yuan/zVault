@@ -49,7 +49,7 @@ const FeatureCard = memo(function FeatureCard({
           <Icon className={`h-6 w-6 ${style.iconColor}`} />
         </div>
       </div>
-      <h3 className="text-heading6 text-[#FFFFFF]">{title}</h3>
+      <h3 className="text-heading6 text-foreground">{title}</h3>
       <p className="text-body2 text-[#8B8A9E]">{description}</p>
     </div>
   );
@@ -97,13 +97,13 @@ const StatsDisplay = memo(function StatsDisplay({
         <div className="text-caption text-[#8B8A9E]">Vault Held (BTC)</div>
       </div>
       <div className="space-y-2 text-center">
-        <div className="text-heading5 text-[#FFFFFF]">
+        <div className="text-heading5 text-foreground">
           {totalDeposits}
         </div>
         <div className="text-caption text-[#8B8A9E]">Total Deposits</div>
       </div>
       <div className="space-y-2 text-center">
-        <div className="text-heading5 text-[#FFFFFF]">
+        <div className="text-heading5 text-foreground">
           {pendingCount}
         </div>
         <div className="text-caption text-[#8B8A9E]">Pending</div>
@@ -130,7 +130,7 @@ export default function Home() {
                 <Shield className="h-3 w-3 text-[#14F195] absolute -bottom-1 -right-1" />
               </div>
             </div>
-            <span className="text-heading6 text-[#FFFFFF]">zVault</span>
+            <span className="text-heading6 text-foreground">zVault</span>
           </div>
           <div className="flex items-center gap-4">
             <a
@@ -173,7 +173,7 @@ export default function Home() {
               </div>
 
               {/* Main headline */}
-              <h1 className="text-4xl lg:text-6xl font-bold text-[#FFFFFF] leading-tight">
+              <h1 className="text-4xl lg:text-6xl font-bold text-foreground leading-tight">
                 <span className="bg-gradient-to-r from-[#F7931A] to-[#FFA940] bg-clip-text text-transparent">
                   Bitcoin
                 </span>{" "}
@@ -263,7 +263,7 @@ export default function Home() {
 
             {/* How it works */}
             <div className="space-y-6">
-              <h2 className="text-heading5 text-[#FFFFFF]">How It Works</h2>
+              <h2 className="text-heading5 text-foreground">How It Works</h2>
               <div className="grid md:grid-cols-3 gap-6">
                 {/* Step 1 - Bitcoin */}
                 <div className="flex flex-col items-center text-center gap-3 p-5 gradient-bg-bitcoin rounded-[12px]">
@@ -271,7 +271,7 @@ export default function Home() {
                     <Bitcoin className="w-6 h-6 text-[#F7931A] btc-glow" />
                   </div>
                   <div>
-                    <h3 className="text-body2-semibold text-[#FFFFFF] mb-1">Deposit BTC</h3>
+                    <h3 className="text-body2-semibold text-foreground mb-1">Deposit BTC</h3>
                     <p className="text-caption text-[#8B8A9E]">Connect your wallet and send Bitcoin to your unique deposit address</p>
                   </div>
                 </div>
@@ -282,7 +282,7 @@ export default function Home() {
                     <Shield className="w-6 h-6 text-[#14F195] privacy-glow" />
                   </div>
                   <div>
-                    <h3 className="text-body2-semibold text-[#FFFFFF] mb-1">Shield with ZK</h3>
+                    <h3 className="text-body2-semibold text-foreground mb-1">Shield with ZK</h3>
                     <p className="text-caption text-[#8B8A9E]">Your deposit is shielded using zero-knowledge proofs for privacy</p>
                   </div>
                 </div>
@@ -293,7 +293,7 @@ export default function Home() {
                     <Lock className="w-6 h-6 text-[#9945FF]" />
                   </div>
                   <div>
-                    <h3 className="text-body2-semibold text-[#FFFFFF] mb-1">Mint zkBTC</h3>
+                    <h3 className="text-body2-semibold text-foreground mb-1">Mint zkBTC</h3>
                     <p className="text-caption text-[#8B8A9E]">Receive privacy-protected zkBTC tokens on Solana</p>
                   </div>
                 </div>
@@ -312,7 +312,7 @@ export default function Home() {
               <Shield className="w-4 h-4 text-[#14F195]" />
               <span className="text-caption text-[#14F195]">Privacy</span>
               <span className="text-caption text-[#8B8A9E]">=</span>
-              <span className="text-caption text-[#FFFFFF]">zVault</span>
+              <span className="text-caption text-foreground">zVault</span>
             </div>
             <p className="text-caption text-[#8B8A9E]">
               Demo Version - Testnet Only
