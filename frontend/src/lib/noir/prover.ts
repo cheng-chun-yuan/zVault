@@ -34,12 +34,15 @@ import {
   type MerkleProofInput,
 } from "@zvault/sdk";
 
-// Set default circuit path for frontend (public folder)
+// Circuit CDN URL - defaults to local public folder
+const CIRCUIT_CDN_URL = process.env.NEXT_PUBLIC_CIRCUIT_CDN_URL || "/circuits/noir";
+
+// Set default circuit path for frontend (CDN or public folder)
 // Only run in browser to avoid SSR issues
 let circuitPathSet = false;
 function ensureCircuitPath() {
   if (!circuitPathSet && typeof window !== "undefined") {
-    setCircuitPath("/circuits/noir");
+    setCircuitPath(CIRCUIT_CDN_URL);
     circuitPathSet = true;
   }
 }

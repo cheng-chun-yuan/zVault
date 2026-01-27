@@ -18,6 +18,9 @@ export interface NoirCircuitArtifact {
 
 const CIRCUIT_CACHE = new Map<string, NoirCircuitArtifact>();
 
+// Circuit CDN URL - defaults to local public folder
+const CIRCUIT_CDN_URL = process.env.NEXT_PUBLIC_CIRCUIT_CDN_URL || "/circuits/noir";
+
 /**
  * Load a Noir circuit artifact
  */
@@ -29,8 +32,8 @@ export async function loadCircuitArtifact(
     return CIRCUIT_CACHE.get(circuitName)!;
   }
 
-  // Load from public directory
-  const artifactPath = `/circuits/noir/${circuitName}.json`;
+  // Load from CDN or public directory
+  const artifactPath = `${CIRCUIT_CDN_URL}/${circuitName}.json`;
   const response = await fetch(artifactPath);
   
   if (!response.ok) {
