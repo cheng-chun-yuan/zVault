@@ -13,10 +13,11 @@ Complete TypeScript SDK for interacting with the zVault protocol. Privacy-preser
 5. [Note Operations](#note-operations)
 6. [Cryptographic Utilities](#cryptographic-utilities)
 7. [Stealth Addresses](#stealth-addresses)
-8. [Name Registry](#name-registry)
-9. [Deposit Watcher](#deposit-watcher)
-10. [React Hooks](#react-hooks)
-11. [Types Reference](#types-reference)
+8. [Auto Stealth Deposits](#auto-stealth-deposits)
+9. [Name Registry](#name-registry)
+10. [Deposit Watcher](#deposit-watcher)
+11. [React Hooks](#react-hooks)
+12. [Types Reference](#types-reference)
 
 ---
 
@@ -468,6 +469,182 @@ const delegated = createDelegatedViewKey(
 if (hasPermission(delegated, ViewPermissions.VIEW_BALANCE)) {
   // Can see balance
 }
+```
+
+---
+
+## Auto Stealth Deposits
+
+Backend-managed 2-phase BTC deposit flow for quick demos. The backend handles ephemeral key generation, deposit detection, sweeping, and on-chain verification.
+
+### Flow Overview
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│ Phase 1: Deposit Detection                                  │
+├─────────────────────────────────────────────────────────────┤
+│  User                    Backend                  Bitcoin   │
+│    │                        │                        │      │
+│    │── POST /api/v2/prepare ─►│  Generate ephemeral   │      │
+│    │   { viewingPub,        │  Derive BTC address   │      │
+│    │     spendingPub }      │                        │      │
+│    │                        │                        │      │
+│    │◄── { depositId,       │                        │      │
+│    │      btcAddress,       │                        │      │
+│    │      ephemeralPub }    │                        │      │
+│    │                        │                        │      │
+│    │────── Send testnet BTC ─────────────────────────►│      │
+│    │                        │                        │      │
+│    │                        │◄─ Poll Esplora ────────│      │
+│    │◄─ WS: "detected" ──────│                        │      │
+│    │◄─ WS: "confirmed" ─────│  (1 confirmation)     │      │
+└─────────────────────────────────────────────────────────────┘
+
+┌─────────────────────────────────────────────────────────────┐
+│ Phase 2: On-Chain Verification                              │
+├─────────────────────────────────────────────────────────────┤
+│  Backend                                        Solana      │
+│    │                                               │        │
+│    │── Sweep to vault ───────────────────────────►│        │
+│    │── Upload raw tx to ChadBuffer ──────────────►│        │
+│    │── verify_stealth_deposit_v2 ────────────────►│        │
+│    │     • SPV proof                               │        │
+│    │     • Insert commitment                       │        │
+│    │     • Create StealthAnnouncement             │        │
+│    │     • Mint zBTC to pool                       │        │
+│    │                                               │        │
+│  User◄─ WS: "ready" ───────────────────────────────│        │
+│         User can now scan inbox and claim!         │        │
+└─────────────────────────────────────────────────────────────┘
+```
+
+### API Endpoints
+
+#### `POST /api/stealth/prepare`
+
+Prepare a stealth deposit address.
+
+```typescript
+// Request
+interface PrepareStealthDepositRequest {
+  viewing_pub: string;   // 66 hex chars (33 bytes Grumpkin)
+  spending_pub: string;  // 66 hex chars (33 bytes Grumpkin)
+}
+
+// Response
+interface PrepareStealthDepositResponse {
+  success: boolean;
+  deposit_id: string;
+  btc_address: string;      // tb1p... testnet Taproot
+  ephemeral_pub: string;    // For recipient scanning
+  expires_at: number;       // Unix timestamp
+}
+```
+
+#### `GET /api/stealth/:id`
+
+Get stealth deposit status.
+
+```typescript
+interface StealthDepositStatusResponse {
+  id: string;
+  status: StealthDepositStatus;
+  btc_address: string;
+  ephemeral_pub: string;
+  actual_amount_sats?: number;
+  confirmations: number;
+  sweep_confirmations: number;
+  deposit_txid?: string;
+  sweep_txid?: string;
+  solana_tx?: string;
+  leaf_index?: number;
+  error?: string;
+  created_at: number;
+  updated_at: number;
+  expires_at: number;
+}
+
+type StealthDepositStatus =
+  | 'pending'        // Waiting for BTC
+  | 'detected'       // BTC in mempool
+  | 'confirming'     // Waiting for confirmations
+  | 'confirmed'      // Ready to sweep
+  | 'sweeping'       // Sweeping to vault
+  | 'sweep_confirming' // Waiting for sweep confirmations
+  | 'verifying'      // Submitting on-chain
+  | 'ready'          // User can claim!
+  | 'failed';        // Error occurred
+```
+
+#### `WS /ws/stealth/:id`
+
+Subscribe to real-time status updates.
+
+```typescript
+interface StealthDepositStatusUpdate {
+  deposit_id: string;
+  status: StealthDepositStatus;
+  actual_amount_sats?: number;
+  confirmations: number;
+  sweep_confirmations: number;
+  is_ready: boolean;
+  error?: string;
+}
+```
+
+### React Hook
+
+```typescript
+import { useStealthDeposit } from '@/hooks/use-stealth-deposit';
+
+function AutoStealthDeposit() {
+  const {
+    prepareDeposit,
+    depositId,
+    btcAddress,
+    ephemeralPub,
+    status,
+    actualAmount,
+    confirmations,
+    sweepConfirmations,
+    isReady,
+    error,
+    reset,
+  } = useStealthDeposit();
+
+  const { keys } = useZVaultKeys();
+
+  const handlePrepare = async () => {
+    if (!keys) return;
+    await prepareDeposit(keys.viewingPubKey, keys.spendingPubKey);
+  };
+
+  return (
+    <div>
+      {!btcAddress ? (
+        <button onClick={handlePrepare}>Generate Address</button>
+      ) : (
+        <>
+          <QRCode value={btcAddress} />
+          <p>Send BTC to: {btcAddress}</p>
+          <p>Status: {status}</p>
+          {isReady && <p>Check your Stealth Inbox!</p>}
+        </>
+      )}
+    </div>
+  );
+}
+```
+
+### Demo Mode Configuration
+
+For 3-minute demo, use reduced confirmations:
+
+```rust
+// Demo mode settings
+required_confirmations: 1,        // vs 6 in production
+required_sweep_confirmations: 1,  // vs 2 in production
+poll_interval_secs: 5,            // vs 10 in production
 ```
 
 ---

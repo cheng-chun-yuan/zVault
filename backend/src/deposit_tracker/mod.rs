@@ -32,6 +32,7 @@
 //! - `WS /ws/deposits/:id` - Subscribe to status updates
 
 pub mod api;
+pub mod db;
 pub mod service;
 pub mod sweeper;
 pub mod types;
@@ -48,6 +49,10 @@ pub use sweeper::{SweepResult, SweeperError, UtxoSweeper};
 pub use types::{
     DepositRecord, DepositStatus, DepositStatusResponse, DepositStatusUpdate,
     RegisterDepositRequest, RegisterDepositResponse, TrackerConfig, TrackerStats,
+    // V2 stealth deposit types
+    PrepareStealthDepositRequest, PrepareStealthDepositResponse,
+    StealthDepositRecord, StealthDepositStatus, StealthDepositStatusResponse,
+    StealthDepositStatusUpdate,
 };
 pub use verifier::{SpvVerifier, VerificationResult, VerifierError};
 pub use watcher::{AddressWatcher, BlockHeaderData, MerkleProofData, Utxo, WatcherError};
@@ -55,3 +60,4 @@ pub use websocket::{
     create_ws_state, ws_all_deposits_handler, ws_deposit_handler, DepositUpdatePublisher,
     SharedWebSocketState, WebSocketState,
 };
+pub use db::{DbError, StealthDepositStats, StealthDepositStore};

@@ -11,10 +11,11 @@ REST API documentation for the zVault backend services. The backend provides red
 3. [Health Check](#health-check)
 4. [Redemption API](#redemption-api)
 5. [Stealth API](#stealth-api)
-6. [WebSocket API](#websocket-api)
-7. [Status Lifecycles](#status-lifecycles)
-8. [Error Handling](#error-handling)
-9. [Configuration](#configuration)
+6. [Stealth Deposit API](#stealth-deposit-api)
+7. [WebSocket API](#websocket-api)
+8. [Status Lifecycles](#status-lifecycles)
+9. [Error Handling](#error-handling)
+10. [Configuration](#configuration)
 
 ---
 
@@ -326,6 +327,195 @@ curl -X POST http://localhost:8080/api/stealth/announce \
 
 ---
 
+## Stealth Deposit API
+
+Backend-managed 2-phase BTC deposit flow. The backend handles ephemeral key generation, deposit detection, sweeping, and on-chain verification automatically.
+
+### POST `/api/stealth/prepare`
+
+Prepare a stealth deposit address. Backend generates ephemeral keypair and derives BTC deposit address.
+
+**Request:**
+```bash
+curl -X POST http://localhost:8080/api/stealth/prepare \
+  -H "Content-Type: application/json" \
+  -d '{
+    "viewing_pub": "02abc123...",
+    "spending_pub": "03def456..."
+  }'
+```
+
+**Request Body:**
+```json
+{
+  "viewing_pub": "02abc123...",
+  "spending_pub": "03def456..."
+}
+```
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `viewing_pub` | string | Yes | User's viewing public key (66 hex chars = 33 bytes Grumpkin compressed) |
+| `spending_pub` | string | Yes | User's spending public key (66 hex chars = 33 bytes Grumpkin compressed) |
+
+**Response (Success):**
+```json
+{
+  "success": true,
+  "deposit_id": "sdep_1706200000_abc123",
+  "btc_address": "tb1pxyz...",
+  "ephemeral_pub": "02abc...",
+  "expires_at": 1706286400
+}
+```
+
+**Response (Error):**
+```json
+{
+  "success": false,
+  "deposit_id": null,
+  "btc_address": null,
+  "ephemeral_pub": null,
+  "expires_at": null,
+  "error": "Invalid viewing public key format"
+}
+```
+
+---
+
+### GET `/api/stealth/:id`
+
+Get stealth deposit status by ID.
+
+**Request:**
+```bash
+curl http://localhost:8080/api/stealth/sdep_1706200000_abc123
+```
+
+**Response:**
+```json
+{
+  "id": "sdep_1706200000_abc123",
+  "status": "ready",
+  "btc_address": "tb1pxyz...",
+  "ephemeral_pub": "02abc...",
+  "actual_amount_sats": 100000,
+  "confirmations": 1,
+  "sweep_confirmations": 1,
+  "deposit_txid": "abc123...",
+  "sweep_txid": "def456...",
+  "solana_tx": "xyz789...",
+  "leaf_index": 42,
+  "error": null,
+  "created_at": 1706200000,
+  "updated_at": 1706200600,
+  "expires_at": 1706286400
+}
+```
+
+**Status Values:**
+| Status | Description |
+|--------|-------------|
+| `pending` | Waiting for BTC deposit |
+| `detected` | BTC transaction seen in mempool |
+| `confirming` | Waiting for deposit confirmations |
+| `confirmed` | Deposit confirmed, ready to sweep |
+| `sweeping` | Sweeping UTXO to vault |
+| `sweep_confirming` | Waiting for sweep confirmations |
+| `verifying` | Submitting on-chain verification |
+| `ready` | Verified! User can scan inbox and claim |
+| `failed` | Processing failed (see error field) |
+
+---
+
+### GET `/api/stealth`
+
+List all stealth deposits (admin/debugging).
+
+**Request:**
+```bash
+curl http://localhost:8080/api/stealth
+```
+
+**Response:**
+```json
+{
+  "deposits": [
+    {
+      "id": "sdep_1706200000_abc123",
+      "status": "ready",
+      "btc_address": "tb1pxyz...",
+      "actual_amount_sats": 100000,
+      "created_at": 1706200000
+    }
+  ],
+  "stats": {
+    "total": 10,
+    "pending": 2,
+    "ready": 5,
+    "failed": 1
+  }
+}
+```
+
+---
+
+### WebSocket `/ws/stealth/:id`
+
+Subscribe to real-time stealth deposit status updates.
+
+**Connect:**
+```javascript
+const ws = new WebSocket('ws://localhost:8080/ws/stealth/sdep_1706200000_abc123');
+
+ws.onmessage = (event) => {
+  const update = JSON.parse(event.data);
+  console.log('Status:', update.status);
+  console.log('Ready:', update.is_ready);
+};
+```
+
+**Server Messages:**
+```json
+{
+  "deposit_id": "sdep_1706200000_abc123",
+  "status": "detected",
+  "actual_amount_sats": 100000,
+  "confirmations": 0,
+  "sweep_confirmations": 0,
+  "is_ready": false,
+  "error": null
+}
+```
+
+```json
+{
+  "deposit_id": "sdep_1706200000_abc123",
+  "status": "ready",
+  "actual_amount_sats": 100000,
+  "confirmations": 1,
+  "sweep_confirmations": 1,
+  "is_ready": true,
+  "error": null
+}
+```
+
+---
+
+### Demo Mode Configuration
+
+For 3-minute demos, use reduced confirmations:
+
+| Setting | Demo | Production |
+|---------|------|------------|
+| Required deposit confirmations | 1 | 6 |
+| Required sweep confirmations | 1 | 2 |
+| Poll interval | 5 seconds | 10 seconds |
+
+Set `DEMO_MODE=true` environment variable to enable.
+
+---
+
 ## WebSocket API
 
 ### Deposit Tracker WebSocket
@@ -404,7 +594,7 @@ pending → processing → broadcasting → completed
 | completed | - | Transaction confirmed |
 | failed | - | Error occurred |
 
-### Stealth Deposit Lifecycle
+### Stealth Deposit Lifecycle (V1)
 
 ```
 ┌─────────┐     ┌──────────┐     ┌────────────┐     ┌───────────┐     ┌───────────┐
@@ -415,6 +605,38 @@ pending → processing → broadcasting → completed
      │
      └─────────────────────────────────────────────────────────────────► expired
 ```
+
+### Stealth Deposit Lifecycle (Backend-Managed)
+
+```
+┌─────────┐     ┌──────────┐     ┌────────────┐     ┌───────────┐
+│ pending │────►│ detected │────►│ confirming │────►│ confirmed │
+└─────────┘     └──────────┘     └────────────┘     └───────────┘
+                                                          │
+                                                          ▼
+┌─────────┐     ┌───────────┐     ┌──────────────────┐    │
+│  ready  │◄────│ verifying │◄────│ sweep_confirming │◄───┘
+└─────────┘     └───────────┘     └──────────────────┘
+                                          │
+                                          ▼
+                                   ┌──────────┐
+                                   │ sweeping │
+                                   └──────────┘
+
+Any state can transition to 'failed' on error.
+```
+
+| State | Description | Next |
+|-------|-------------|------|
+| `pending` | Waiting for BTC deposit | `detected` |
+| `detected` | BTC seen in mempool | `confirming` |
+| `confirming` | Waiting for 1+ confirmations | `confirmed` |
+| `confirmed` | Ready to sweep | `sweeping` |
+| `sweeping` | Broadcasting sweep tx | `sweep_confirming` |
+| `sweep_confirming` | Waiting for sweep confirmation | `verifying` |
+| `verifying` | Submitting to Solana | `ready` |
+| `ready` | User can scan inbox | - |
+| `failed` | Error occurred | - |
 
 ---
 
@@ -517,7 +739,7 @@ pub struct StealthDepositService {
 
 ### Future Database Schema
 
-For production, consider PostgreSQL:
+For production, consider PostgreSQL or SQLite:
 
 ```sql
 -- Withdrawal requests
@@ -532,7 +754,7 @@ CREATE TABLE withdrawal_requests (
     updated_at TIMESTAMP NOT NULL
 );
 
--- Stealth deposits
+-- Stealth deposits (v1)
 CREATE TABLE stealth_deposits (
     id VARCHAR(64) PRIMARY KEY,
     recipient_stealth_address BYTEA NOT NULL,
@@ -547,6 +769,41 @@ CREATE TABLE stealth_deposits (
     created_at TIMESTAMP NOT NULL,
     updated_at TIMESTAMP NOT NULL
 );
+
+-- Stealth deposits v2 (backend-managed)
+CREATE TABLE stealth_deposits_v2 (
+    id TEXT PRIMARY KEY,
+    viewing_pub BLOB NOT NULL,          -- 33 bytes Grumpkin compressed
+    spending_pub BLOB NOT NULL,         -- 33 bytes Grumpkin compressed
+    ephemeral_priv BLOB NOT NULL,       -- encrypted private key
+    ephemeral_pub BLOB NOT NULL,        -- 33 bytes Grumpkin compressed
+    commitment BLOB NOT NULL,           -- 32 bytes Poseidon2 hash
+    btc_address TEXT NOT NULL UNIQUE,   -- tb1p... taproot address
+
+    actual_amount_sats INTEGER,         -- filled after detection
+    status TEXT NOT NULL DEFAULT 'pending',
+    confirmations INTEGER DEFAULT 0,
+
+    deposit_txid TEXT,
+    deposit_vout INTEGER,
+    deposit_block_height INTEGER,
+
+    sweep_txid TEXT,
+    sweep_confirmations INTEGER DEFAULT 0,
+    sweep_block_height INTEGER,
+
+    solana_tx TEXT,
+    leaf_index INTEGER,
+
+    error TEXT,
+
+    created_at INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL,
+    expires_at INTEGER NOT NULL
+);
+
+CREATE INDEX idx_stealth_v2_status ON stealth_deposits_v2(status);
+CREATE INDEX idx_stealth_v2_btc_address ON stealth_deposits_v2(btc_address);
 ```
 
 ---

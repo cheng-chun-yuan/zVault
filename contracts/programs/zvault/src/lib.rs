@@ -65,6 +65,9 @@ pub mod instruction {
     // Demo/testing (admin only)
     pub const ADD_DEMO_NOTE: u8 = 21;
     pub const ADD_DEMO_STEALTH: u8 = 22;
+
+    // Backend-managed stealth deposit v2 (authority only)
+    pub const VERIFY_STEALTH_DEPOSIT_V2: u8 = 23;
 }
 
 entrypoint!(process_instruction);
@@ -118,6 +121,10 @@ pub fn process_instruction(
         }
         instruction::ADD_DEMO_STEALTH => {
             instructions::process_add_demo_stealth(program_id, accounts, data)
+        }
+        // Backend-managed stealth deposit v2
+        instruction::VERIFY_STEALTH_DEPOSIT_V2 => {
+            instructions::process_verify_stealth_deposit_v2(program_id, accounts, data)
         }
         _ => Err(ProgramError::InvalidInstructionData),
     }
@@ -193,6 +200,7 @@ mod tests {
             instruction::TRANSFER_NAME,
             instruction::ADD_DEMO_NOTE,
             instruction::ADD_DEMO_STEALTH,
+            instruction::VERIFY_STEALTH_DEPOSIT_V2,
         ];
 
         for (i, &d1) in discriminators.iter().enumerate() {

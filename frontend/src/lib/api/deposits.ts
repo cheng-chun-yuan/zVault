@@ -69,6 +69,63 @@ export interface DepositStatusUpdate {
 }
 
 // =============================================================================
+// Stealth Deposit Types
+// =============================================================================
+
+export type StealthDepositStatus =
+  | "pending"
+  | "detected"
+  | "confirming"
+  | "confirmed"
+  | "sweeping"
+  | "sweep_confirming"
+  | "verifying"
+  | "ready"
+  | "failed";
+
+export interface PrepareStealthDepositRequest {
+  viewing_pub: string;
+  spending_pub: string;
+}
+
+export interface PrepareStealthDepositResponse {
+  success: boolean;
+  deposit_id?: string;
+  btc_address?: string;
+  ephemeral_pub?: string;
+  expires_at?: number;
+  error?: string;
+}
+
+export interface StealthDepositStatusResponse {
+  id: string;
+  status: StealthDepositStatus;
+  btc_address: string;
+  ephemeral_pub: string;
+  actual_amount_sats?: number;
+  confirmations: number;
+  sweep_confirmations: number;
+  deposit_txid?: string;
+  sweep_txid?: string;
+  solana_tx?: string;
+  leaf_index?: number;
+  error?: string;
+  created_at: number;
+  updated_at: number;
+  expires_at: number;
+}
+
+export interface StealthDepositStatusUpdate {
+  deposit_id: string;
+  status: StealthDepositStatus;
+  actual_amount_sats?: number;
+  confirmations: number;
+  sweep_confirmations: number;
+  is_ready: boolean;
+  error?: string;
+}
+
+// =============================================================================
 // API Functions
 // =============================================================================
 
@@ -137,6 +194,118 @@ export async function getDepositStatus(
   }
 
   return response.json();
+}
+
+// =============================================================================
+// Stealth Deposit API Functions
+// =============================================================================
+
+/**
+ * Prepare a stealth deposit address
+ *
+ * @param viewingPub - User's viewing public key (66 hex chars)
+ * @param spendingPub - User's spending public key (66 hex chars)
+ */
+export async function prepareStealthDeposit(
+  viewingPub: string,
+  spendingPub: string
+): Promise<PrepareStealthDepositResponse> {
+  const body: PrepareStealthDepositRequest = {
+    viewing_pub: viewingPub,
+    spending_pub: spendingPub,
+  };
+
+  const response = await fetch(`${getTrackerApiUrl()}/api/stealth/prepare`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify(body),
+  });
+
+  if (!response.ok) {
+    const error = await response.json().catch(() => ({
+      error: `HTTP ${response.status}: ${response.statusText}`,
+    }));
+    throw ApiError.fromResponse(error, response.status);
+  }
+
+  return response.json();
+}
+
+/**
+ * Get stealth deposit status by ID
+ *
+ * @param depositId - The deposit ID returned from prepareStealthDeposit
+ */
+export async function getStealthDepositStatus(
+  depositId: string
+): Promise<StealthDepositStatusResponse> {
+  const response = await fetch(
+    `${getTrackerApiUrl()}/api/stealth/${depositId}`,
+    {
+      method: "GET",
+      headers: {
+        "Content-Type": "application/json",
+      },
+    }
+  );
+
+  if (!response.ok) {
+    const error = await response.json().catch(() => ({
+      error: `HTTP ${response.status}: ${response.statusText}`,
+    }));
+    throw ApiError.fromResponse(error, response.status);
+  }
+
+  return response.json();
+}
+
+/**
+ * Subscribe to stealth deposit status updates via WebSocket
+ */
+export function subscribeToStealthDeposit(
+  depositId: string,
+  options: {
+    onStatusUpdate: (update: StealthDepositStatusUpdate) => void;
+    onError?: (error: Event) => void;
+    onClose?: (event: CloseEvent) => void;
+    onOpen?: () => void;
+  }
+): { ws: WebSocket; unsubscribe: () => void } {
+  const wsUrl = getTrackerApiUrl()
+    .replace("http://", "ws://")
+    .replace("https://", "wss://");
+
+  const ws = new WebSocket(`${wsUrl}/ws/stealth/${depositId}`);
+
+  ws.onmessage = (event) => {
+    try {
+      const update: StealthDepositStatusUpdate = JSON.parse(event.data);
+      options.onStatusUpdate(update);
+    } catch (e) {
+      console.error("Failed to parse WebSocket message:", e);
+    }
+  };
+
+  ws.onerror = (error) => {
+    options.onError?.(error);
+  };
+
+  ws.onclose = (event) => {
+    options.onClose?.(event);
+  };
+
+  ws.onopen = () => {
+    options.onOpen?.();
+  };
+
+  return {
+    ws,
+    unsubscribe: () => {
+      ws.close();
+    },
+  };
 }
 
 // =============================================================================
@@ -286,6 +455,96 @@ export function getDepositProgress(
     case "ready":
       return 95;
     case "claimed":
+      return 100;
+    case "failed":
+      return 0;
+    default:
+      return 0;
+  }
+}
+
+// =============================================================================
+// Stealth Deposit Helpers
+// =============================================================================
+
+/**
+ * Check if a stealth deposit is still pending BTC
+ */
+export function isStealthDepositPending(status: StealthDepositStatus): boolean {
+  return ["pending", "detected", "confirming"].includes(status);
+}
+
+/**
+ * Check if a stealth deposit is being processed
+ */
+export function isStealthDepositProcessing(
+  status: StealthDepositStatus
+): boolean {
+  return ["confirmed", "sweeping", "sweep_confirming", "verifying"].includes(
+    status
+  );
+}
+
+/**
+ * Check if a stealth deposit is ready (user can scan inbox)
+ */
+export function isStealthDepositReady(status: StealthDepositStatus): boolean {
+  return status === "ready";
+}
+
+/**
+ * Check if a stealth deposit is in a terminal state
+ */
+export function isStealthDepositTerminal(
+  status: StealthDepositStatus
+): boolean {
+  return ["ready", "failed"].includes(status);
+}
+
+/**
+ * Get human-readable status message for stealth deposit
+ */
+export function getStealthStatusMessage(status: StealthDepositStatus): string {
+  const messages: Record<StealthDepositStatus, string> = {
+    pending: "Waiting for BTC deposit",
+    detected: "BTC detected in mempool",
+    confirming: "Waiting for confirmation",
+    confirmed: "Preparing to sweep",
+    sweeping: "Sweeping to vault",
+    sweep_confirming: "Sweep confirming",
+    verifying: "Verifying on Solana",
+    ready: "Ready! Check your Stealth Inbox",
+    failed: "Deposit failed",
+  };
+
+  return messages[status] || status;
+}
+
+/**
+ * Get progress percentage for a stealth deposit
+ * Returns 0-100
+ */
+export function getStealthDepositProgress(
+  status: StealthDepositStatus,
+  confirmations: number,
+  sweepConfirmations: number
+): number {
+  switch (status) {
+    case "pending":
+      return 5;
+    case "detected":
+      return 10;
+    case "confirming":
+      return Math.min(40, 10 + confirmations * 30);
+    case "confirmed":
+      return 45;
+    case "sweeping":
+      return 55;
+    case "sweep_confirming":
+      return Math.min(75, 55 + sweepConfirmations * 20);
+    case "verifying":
+      return 85;
+    case "ready":
       return 100;
     case "failed":
       return 0;

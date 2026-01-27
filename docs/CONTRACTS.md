@@ -67,6 +67,7 @@ The zVault program implements a shielded pool for private BTC-to-Solana bridging
 | 19 | TRANSFER_NAME | Transfer name ownership | ~10,000 |
 | 21 | ADD_DEMO_NOTE | Add test commitment (admin) | ~10,000 |
 | 22 | ADD_DEMO_STEALTH | Add test stealth (admin) | ~10,000 |
+| 23 | VERIFY_STEALTH_DEPOSIT_V2 | Backend-managed stealth deposit | ~60,000 |
 
 ---
 
@@ -354,6 +355,66 @@ Adds a test stealth announcement (admin only, devnet).
 [3] authority            (signer)           - Pool authority
 [4] system_program       (readonly)         - System program
 ```
+
+---
+
+## Backend-Managed Instructions
+
+### VERIFY_STEALTH_DEPOSIT_V2 (23)
+
+Backend-managed stealth deposit flow combining SPV verification, stealth announcement creation, and zBTC minting in a single atomic transaction.
+
+**Use Case:** 2-phase BTC deposit flow for demo/quick testing:
+1. Backend generates ephemeral keypair, derives BTC deposit address
+2. User deposits BTC to that address
+3. Backend detects deposit, sweeps to vault, calls this instruction
+
+**Accounts:**
+```
+[0]  pool_state           (writable, PDA)    - Pool state
+[1]  light_client         (readonly, PDA)    - BTC light client
+[2]  block_header         (readonly, PDA)    - Block containing sweep tx
+[3]  commitment_tree      (writable, PDA)    - Merkle tree
+[4]  deposit_record       (writable, PDA)    - Deposit record (new)
+[5]  stealth_announcement (writable, PDA)    - Stealth announcement (new)
+[6]  tx_buffer            (readonly)         - ChadBuffer with raw sweep tx
+[7]  authority            (signer, writable) - Pool authority (pays rent)
+[8]  system_program       (readonly)         - System program
+[9]  zbtc_mint            (writable)         - zBTC Token-2022 mint
+[10] pool_vault           (writable)         - Pool vault token account
+[11] token_program        (readonly)         - Token-2022 program
+```
+
+**Data (117 bytes + merkle proof):**
+```rust
+struct VerifyStealthDepositV2Data {
+    txid: [u8; 32],           // Sweep tx ID (reversed)
+    block_height: u64,        // Block containing tx
+    amount_sats: u64,         // Amount in satoshis
+    tx_size: u32,             // Raw tx size in ChadBuffer
+    ephemeral_pub: [u8; 33],  // Grumpkin compressed pubkey
+    commitment: [u8; 32],     // Backend-computed Poseidon2 commitment
+    // followed by merkle_proof (variable length)
+}
+```
+
+**Flow:**
+1. Verify authority is pool authority
+2. Read raw tx from ChadBuffer, verify hash matches txid
+3. Verify SPV merkle proof against light client
+4. Verify 1+ confirmations (demo mode)
+5. Create DepositRecord PDA (prevents double-spend)
+6. Insert commitment into tree → get leaf_index
+7. Create StealthAnnouncement PDA
+8. Mint zBTC to pool vault
+9. Update pool statistics
+
+**Key Differences from VERIFY_DEPOSIT:**
+- Authority-gated (only pool authority can call)
+- Commitment pre-computed by backend (not from OP_RETURN)
+- Ephemeral pubkey provided directly
+- Creates stealth announcement atomically
+- Mints zBTC in same transaction
 
 ---
 

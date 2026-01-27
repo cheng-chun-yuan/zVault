@@ -31,15 +31,16 @@ import {
   type StealthMetaAddress,
   type PreparedStealthDeposit,
 } from "@zvault/sdk";
-import { registerDeposit } from "@/lib/api/deposits";
+import { registerDeposit, getStealthStatusMessage } from "@/lib/api/deposits";
 import { useDepositStatus } from "@/hooks/use-deposit-status";
+import { useStealthDeposit } from "@/hooks/use-stealth-deposit";
 import { DepositProgress } from "@/components/deposit";
 import { Tooltip, TooltipText } from "@/components/ui/tooltip";
 import { InlineError } from "@/components/ui/error-display";
 import { LoadingState } from "@/components/ui/loading-state";
 
 // Deposit modes
-type DepositMode = "note" | "stealth";
+type DepositMode = "note" | "stealth" | "auto";
 
 // Network: "testnet" for tb1p... addresses, "mainnet" for bc1p... addresses
 const BITCOIN_NETWORK: "mainnet" | "testnet" = "testnet";
@@ -80,8 +81,8 @@ export function DepositFlow() {
   } = useZVaultKeys();
   const [stealthCopied, setStealthCopied] = useState(false);
 
-  // Demo mode state
-  const [demoMode, setDemoMode] = useState(false);
+  // Demo mode state (default ON for hackathon)
+  const [demoMode, setDemoMode] = useState(true);
   const [demoAmount, setDemoAmount] = useState("10000");
   const [demoSubmitting, setDemoSubmitting] = useState(false);
   const [demoResult, setDemoResult] = useState<{
@@ -98,8 +99,8 @@ export function DepositFlow() {
     setTimeout(() => setStealthCopied(false), 2000);
   };
 
-  // Mode state
-  const [mode, setMode] = useState<DepositMode>("note");
+  // Mode state (default to "auto" for hackathon demo)
+  const [mode, setMode] = useState<DepositMode>("auto");
 
   // Note mode state
   const [secretNote, setSecretNote] = useState("");
@@ -120,6 +121,24 @@ export function DepositFlow() {
   const [resolvedMeta, setResolvedMeta] = useState<StealthMetaAddress | null>(null);
   const [stealthDeposit, setStealthDeposit] = useState<PreparedStealthDeposit | null>(null);
   const [resolvingRecipient, setResolvingRecipient] = useState(false);
+
+  // Auto stealth deposit hook (backend-managed)
+  const autoStealth = useStealthDeposit({
+    onStatusChange: (status, prevStatus) => {
+      console.log("[AutoStealth] Status:", prevStatus, "→", status);
+      if (status === "detected") {
+        notifyDepositDetected(1, 1);
+      }
+    },
+    onReady: () => {
+      console.log("[AutoStealth] Ready - check inbox!");
+      notifySuccess("Deposit ready! Check your Stealth Inbox.");
+    },
+    onError: (err) => {
+      console.error("[AutoStealth] Error:", err);
+      notifyError(err);
+    },
+  });
 
   // Backend deposit tracker hook
   const trackerStatus = useDepositStatus(trackerId, {
@@ -282,6 +301,8 @@ export function DepositFlow() {
     // Demo mode reset
     setDemoAmount("10000");
     setDemoResult(null);
+    // Auto stealth reset
+    autoStealth.reset();
   };
 
   // Demo mode: Submit mock deposit via backend relayer (keeps user anonymous)
@@ -540,6 +561,22 @@ export function DepositFlow() {
         </button>
         <button
           role="tab"
+          aria-selected={mode === "auto"}
+          aria-controls="auto-panel"
+          onClick={() => { setMode("auto"); resetFlow(); }}
+          className={cn(
+            "flex-1 flex items-center justify-center gap-2 py-2 px-3 rounded-[8px] text-body2 transition-colors",
+            "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-success focus-visible:ring-offset-1",
+            mode === "auto"
+              ? "bg-success/12 text-success border border-success/25"
+              : "text-gray hover:text-gray-light"
+          )}
+        >
+          <Zap className="w-4 h-4" />
+          Auto Stealth
+        </button>
+        <button
+          role="tab"
           aria-selected={mode === "stealth"}
           aria-controls="stealth-panel"
           onClick={() => { setMode("stealth"); resetFlow(); }}
@@ -552,7 +589,7 @@ export function DepositFlow() {
           )}
         >
           <Send className="w-4 h-4" />
-          Send to Address
+          Send to Other
         </button>
       </div>
 
@@ -605,6 +642,276 @@ export function DepositFlow() {
             Share this to receive private payments from others
           </p>
         </div>
+      )}
+
+      {/* ========== AUTO STEALTH MODE ========== */}
+      {mode === "auto" && (
+        <>
+          {/* Derive keys if not already */}
+          {!keys ? (
+            <div className="p-4 bg-success/5 border border-success/15 rounded-[12px] mb-4">
+              <div className="flex items-center gap-2 mb-3">
+                <Key className="w-5 h-5 text-success" />
+                <span className="text-body2-semibold text-success">Derive Your Keys First</span>
+              </div>
+              <p className="text-caption text-gray mb-3">
+                Sign a message to derive your stealth keys. This enables private deposits.
+              </p>
+              <button
+                onClick={deriveKeys}
+                disabled={keysLoading}
+                className={cn(
+                  "w-full py-2.5 rounded-[10px] text-body2 font-medium transition-colors",
+                  "bg-success hover:bg-success/90 text-background",
+                  "disabled:bg-gray/20 disabled:text-gray disabled:cursor-not-allowed"
+                )}
+              >
+                {keysLoading ? (
+                  <>
+                    <Loader2 className="w-4 h-4 animate-spin inline mr-2" />
+                    Signing...
+                  </>
+                ) : (
+                  "Derive Stealth Keys"
+                )}
+              </button>
+            </div>
+          ) : !autoStealth.btcAddress ? (
+            // Generate address step
+            <>
+              <div className="p-4 bg-success/5 border border-success/15 rounded-[12px] mb-4">
+                <div className="flex items-center gap-2 mb-2">
+                  <Shield className="w-5 h-5 text-success" />
+                  <span className="text-body2-semibold text-success">Auto Stealth Deposit</span>
+                </div>
+                <p className="text-caption text-gray">
+                  Generate a one-time BTC address. Send any amount - the backend handles everything automatically.
+                </p>
+              </div>
+
+              <button
+                onClick={() => {
+                  if (!keys) return;
+                  const viewingPub = bytesToHex(keys.viewingPubKey);
+                  const spendingPub = bytesToHex(keys.spendingPubKey);
+                  autoStealth.prepareDeposit(viewingPub, spendingPub);
+                }}
+                disabled={autoStealth.isLoading}
+                className={cn(
+                  "w-full py-3 rounded-[12px] font-medium transition-colors flex items-center justify-center gap-2",
+                  "bg-success hover:bg-success/90 text-background",
+                  "disabled:bg-gray/20 disabled:text-gray disabled:cursor-not-allowed"
+                )}
+              >
+                {autoStealth.isLoading ? (
+                  <>
+                    <Loader2 className="w-4 h-4 animate-spin" />
+                    Generating...
+                  </>
+                ) : (
+                  <>
+                    <Zap className="w-4 h-4" />
+                    Generate Deposit Address
+                  </>
+                )}
+              </button>
+
+              {autoStealth.error && (
+                <InlineError error={autoStealth.error} className="mt-4" />
+              )}
+            </>
+          ) : (
+            // Show deposit address and track status
+            <>
+              {/* Deposit Address */}
+              <div className="gradient-bg-bitcoin p-4 rounded-[12px] mb-4">
+                <div className="flex items-center justify-between mb-2">
+                  <p className="text-caption text-gray">Send BTC to this address</p>
+                  <div className="flex items-center gap-1">
+                    <button
+                      onClick={() => setShowQR(!showQR)}
+                      className={cn(
+                        "p-1.5 rounded-[6px] transition-colors",
+                        showQR ? "bg-btc/20 text-btc" : "bg-btc/10 text-btc hover:bg-btc/20"
+                      )}
+                    >
+                      <QrCode className="w-4 h-4" />
+                    </button>
+                    <button
+                      onClick={() => {
+                        if (autoStealth.btcAddress) {
+                          navigator.clipboard.writeText(autoStealth.btcAddress);
+                          setAddressCopied(true);
+                          notifyCopied("Deposit address");
+                          setTimeout(() => setAddressCopied(false), 2000);
+                        }
+                      }}
+                      className="p-1.5 rounded-[6px] bg-btc/10 hover:bg-btc/20 transition-colors"
+                    >
+                      {addressCopied ? <Check className="w-4 h-4 text-success" /> : <Copy className="w-4 h-4 text-btc" />}
+                    </button>
+                  </div>
+                </div>
+                <code className="text-body2 font-mono text-btc break-all block">
+                  {autoStealth.btcAddress}
+                </code>
+              </div>
+
+              {/* QR Code */}
+              {showQR && autoStealth.btcAddress && (
+                <div className="flex justify-center p-4 rounded-[12px] mb-4">
+                  <button
+                    onClick={() => {
+                      if (autoStealth.btcAddress) {
+                        navigator.clipboard.writeText(autoStealth.btcAddress);
+                        setAddressCopied(true);
+                        notifyCopied("Deposit address");
+                        setTimeout(() => setAddressCopied(false), 2000);
+                      }
+                    }}
+                    className="relative group cursor-pointer focus:outline-none focus-visible:ring-2 focus-visible:ring-btc focus-visible:ring-offset-2 rounded-lg"
+                  >
+                    <QRCodeSVG
+                      value={autoStealth.btcAddress}
+                      size={180}
+                      level="M"
+                      bgColor="transparent"
+                      fgColor="#F7931A"
+                    />
+                    <div className="absolute inset-0 bg-black/60 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center rounded-lg">
+                      <span className="text-white text-caption font-medium">
+                        {addressCopied ? "Copied!" : "Tap to copy address"}
+                      </span>
+                    </div>
+                  </button>
+                </div>
+              )}
+
+              {/* Status Progress */}
+              <div className="gradient-bg-card p-4 rounded-[12px] mb-4 border border-success/20">
+                <div className="flex items-center justify-between mb-3">
+                  <span className="text-body2 text-gray-light">Status</span>
+                  <span className={cn(
+                    "text-body2-semibold",
+                    autoStealth.isReady ? "text-success" :
+                    autoStealth.isFailed ? "text-red-400" :
+                    "text-btc"
+                  )}>
+                    {autoStealth.statusMessage}
+                  </span>
+                </div>
+
+                {/* Progress bar */}
+                <div className="w-full h-2 bg-gray/20 rounded-full overflow-hidden mb-2">
+                  <div
+                    className={cn(
+                      "h-full transition-all duration-500 rounded-full",
+                      autoStealth.isReady ? "bg-success" :
+                      autoStealth.isFailed ? "bg-red-400" :
+                      "bg-btc"
+                    )}
+                    style={{ width: `${autoStealth.progress}%` }}
+                  />
+                </div>
+
+                {/* Status details */}
+                {autoStealth.status && autoStealth.status !== "pending" && (
+                  <div className="text-caption text-gray space-y-1 mt-3 pt-3 border-t border-gray/15">
+                    {autoStealth.actualAmount && (
+                      <div className="flex justify-between">
+                        <span>Amount:</span>
+                        <span className="text-btc font-mono">
+                          {(autoStealth.actualAmount / 100_000_000).toFixed(8)} BTC
+                        </span>
+                      </div>
+                    )}
+                    {autoStealth.confirmations > 0 && (
+                      <div className="flex justify-between">
+                        <span>Confirmations:</span>
+                        <span>{autoStealth.confirmations}</span>
+                      </div>
+                    )}
+                    {autoStealth.depositTxid && (
+                      <div className="flex justify-between">
+                        <span>Deposit TX:</span>
+                        <a
+                          href={`https://mempool.space/testnet/tx/${autoStealth.depositTxid}`}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="text-btc hover:text-btc-light truncate max-w-[120px]"
+                        >
+                          {autoStealth.depositTxid.slice(0, 8)}...
+                        </a>
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+
+              {/* Ready message */}
+              {autoStealth.isReady && (
+                <div className="p-4 bg-success/10 border border-success/30 rounded-[12px] mb-4">
+                  <div className="flex items-center gap-2 text-success mb-2">
+                    <CheckCircle2 className="w-5 h-5" />
+                    <span className="text-body2-semibold">Deposit Complete!</span>
+                  </div>
+                  <p className="text-caption text-gray">
+                    Your deposit has been verified on Solana. Check your <strong>Stealth Inbox</strong> to see and claim it.
+                  </p>
+                  {autoStealth.solanaTx && (
+                    <a
+                      href={`https://solscan.io/tx/${autoStealth.solanaTx}?cluster=devnet`}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="flex items-center gap-1 text-caption text-sol hover:text-sol-light mt-2"
+                    >
+                      View Solana transaction
+                      <ExternalLink className="w-3 h-3" />
+                    </a>
+                  )}
+                </div>
+              )}
+
+              {/* Error */}
+              {autoStealth.error && (
+                <InlineError error={autoStealth.error} className="mb-4" />
+              )}
+
+              {/* Testnet faucet */}
+              {!autoStealth.isReady && (
+                <div className="flex items-center justify-between p-3 bg-muted border border-gray/15 rounded-[12px] mb-4">
+                  <span className="text-caption text-gray">Need testnet BTC?</span>
+                  <a
+                    href="https://coinfaucet.eu/en/btc-testnet/"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="text-caption text-btc hover:text-btc-light transition-colors flex items-center gap-1"
+                  >
+                    Get from faucet
+                    <ExternalLink className="w-3 h-3" />
+                  </a>
+                </div>
+              )}
+
+              {/* View on explorer */}
+              <a
+                href={`https://mempool.space/testnet/address/${autoStealth.btcAddress}`}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="btn-tertiary w-full mb-3 justify-center"
+              >
+                View on Mempool
+                <ExternalLink className="w-4 h-4" />
+              </a>
+
+              {/* Reset button */}
+              <button onClick={resetFlow} className="btn-secondary w-full">
+                <RefreshCw className="w-4 h-4" />
+                {autoStealth.isReady ? "Start New Deposit" : "Cancel"}
+              </button>
+            </>
+          )}
+        </>
       )}
 
       {/* ========== STEALTH MODE ========== */}
