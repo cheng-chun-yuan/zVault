@@ -26,7 +26,7 @@ use pinocchio::{
 
 use crate::error::ZVaultError;
 use crate::state::{CommitmentTree, PoolState, StealthAnnouncement, STEALTH_ANNOUNCEMENT_DISCRIMINATOR};
-use crate::utils::validate_program_owner;
+use crate::utils::{mint_zbtc, validate_program_owner, validate_token_2022_owner, validate_token_program_key};
 
 /// Add demo stealth instruction data (single ephemeral key)
 /// Layout:
@@ -90,19 +90,23 @@ fn create_pda_account<'a>(
 ///
 /// Creates a private deposit that user can find with viewing key
 /// and spend with spending key. No real BTC required.
+/// Also mints zBTC to pool vault so users can claim.
 ///
 /// Accounts:
-/// 0. pool_state - Pool state PDA
-/// 1. commitment_tree - Commitment tree PDA
-/// 2. stealth_announcement - Stealth announcement PDA (to create)
+/// 0. pool_state - Pool state PDA (writable)
+/// 1. commitment_tree - Commitment tree PDA (writable)
+/// 2. stealth_announcement - Stealth announcement PDA (to create, writable)
 /// 3. authority - Pool authority (signer, pays for announcement)
 /// 4. system_program - System program
+/// 5. zbtc_mint - zBTC Token-2022 mint (writable)
+/// 6. pool_vault - Pool vault token account (writable)
+/// 7. token_program - Token-2022 program
 pub fn process_add_demo_stealth(
     program_id: &Pubkey,
     accounts: &[AccountInfo],
     data: &[u8],
 ) -> ProgramResult {
-    if accounts.len() < 5 {
+    if accounts.len() < 8 {
         return Err(ProgramError::NotEnoughAccountKeys);
     }
 
@@ -111,6 +115,9 @@ pub fn process_add_demo_stealth(
     let stealth_announcement = &accounts[2];
     let authority = &accounts[3];
     let system_program = &accounts[4];
+    let zbtc_mint = &accounts[5];
+    let pool_vault = &accounts[6];
+    let token_program = &accounts[7];
 
     let ix_data = AddDemoStealthData::from_bytes(data)?;
 
@@ -127,19 +134,24 @@ pub fn process_add_demo_stealth(
     // Validate account owners
     validate_program_owner(pool_state, program_id)?;
     validate_program_owner(commitment_tree, program_id)?;
+    validate_token_2022_owner(zbtc_mint)?;
+    validate_token_2022_owner(pool_vault)?;
+    validate_token_program_key(token_program)?;
 
-    // Validate authority matches pool
-    {
+    // Validate authority matches pool and get bump
+    let pool_bump = {
         let pool_data = pool_state.try_borrow_data()?;
         let pool = PoolState::from_bytes(&pool_data)?;
 
         if authority.key().as_ref() != pool.authority {
             return Err(ZVaultError::Unauthorized.into());
         }
-    }
+        pool.bump
+    };
 
     // Verify stealth announcement PDA
-    let seeds: &[&[u8]] = &[StealthAnnouncement::SEED, &ix_data.ephemeral_pub];
+    // Use bytes 1-32 of ephemeral_pub (skip prefix byte) - max seed length is 32 bytes
+    let seeds: &[&[u8]] = &[StealthAnnouncement::SEED, &ix_data.ephemeral_pub[1..33]];
     let (expected_pda, bump) = find_program_address(seeds, program_id);
     if stealth_announcement.key() != &expected_pda {
         return Err(ProgramError::InvalidSeeds);
@@ -173,7 +185,7 @@ pub fn process_add_demo_stealth(
         let bump_bytes = [bump];
         let signer_seeds: &[&[u8]] = &[
             StealthAnnouncement::SEED,
-            &ix_data.ephemeral_pub,
+            &ix_data.ephemeral_pub[1..33],
             &bump_bytes,
         ];
 
@@ -201,12 +213,27 @@ pub fn process_add_demo_stealth(
         announcement.set_created_at(clock.unix_timestamp);
     }
 
+    // Mint zBTC to pool vault so users can claim
+    let bump_bytes = [pool_bump];
+    let pool_signer_seeds: &[&[u8]] = &[PoolState::SEED, &bump_bytes];
+
+    mint_zbtc(
+        token_program,
+        zbtc_mint,
+        pool_vault,
+        pool_state,
+        ix_data.amount,
+        pool_signer_seeds,
+    )?;
+
     // Update pool statistics
     {
         let mut pool_data = pool_state.try_borrow_mut_data()?;
         let pool = PoolState::from_bytes_mut(&mut pool_data)?;
 
         pool.increment_deposit_count()?;
+        pool.add_minted(ix_data.amount)?;
+        pool.add_shielded(ix_data.amount)?;
         pool.set_last_update(clock.unix_timestamp);
     }
 

@@ -20,7 +20,7 @@ pub const STEALTH_ANNOUNCEMENT_DISCRIMINATOR: u8 = 0x08;
 
 /// Stealth announcement account size (single ephemeral key)
 ///
-/// Layout (98 bytes):
+/// Layout (91 bytes):
 /// - discriminator (1 byte)
 /// - bump (1 byte)
 /// - ephemeral_pub (33 bytes, Grumpkin compressed)
@@ -34,7 +34,7 @@ pub const STEALTH_ANNOUNCEMENT_SIZE: usize = 1 + // discriminator
     8 + // amount_sats (verified from BTC tx, stored directly)
     32 + // commitment
     8 + // leaf_index (position in Merkle tree)
-    8; // created_at = 98 bytes (saved 33 bytes from dual-key format)
+    8; // created_at = 91 bytes
 
 /// Stealth address announcement with single ephemeral key
 ///

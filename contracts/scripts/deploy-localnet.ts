@@ -30,8 +30,10 @@ import {
 } from "@solana/web3.js";
 import {
   TOKEN_2022_PROGRAM_ID,
-  createMint,
   getOrCreateAssociatedTokenAccount,
+  createInitializeMintInstruction,
+  getMintLen,
+  ExtensionType,
 } from "@solana/spl-token";
 import { sha256 } from "@noble/hashes/sha2.js";
 import * as fs from "fs";
@@ -300,6 +302,8 @@ function buildAddDemoNoteIx(
   poolState: PublicKey,
   commitmentTree: PublicKey,
   authority: PublicKey,
+  zbtcMint: PublicKey,
+  poolVault: PublicKey,
   programId: PublicKey,
   secret: Uint8Array
 ): TransactionInstruction {
@@ -312,6 +316,9 @@ function buildAddDemoNoteIx(
       { pubkey: poolState, isSigner: false, isWritable: true },
       { pubkey: commitmentTree, isSigner: false, isWritable: true },
       { pubkey: authority, isSigner: true, isWritable: false },
+      { pubkey: zbtcMint, isSigner: false, isWritable: true },
+      { pubkey: poolVault, isSigner: false, isWritable: true },
+      { pubkey: TOKEN_2022_PROGRAM_ID, isSigner: false, isWritable: false },
     ],
     programId,
     data,
@@ -379,31 +386,52 @@ async function initializeZVault(
   if (poolAccount && poolAccount.data[0] === Discriminators.POOL_STATE) {
     log("zVault already initialized, skipping...");
 
-    // Parse existing pool state to get mint info
+    // Parse existing pool state to get mint and vault info
+    // Pool state layout: discriminator(1) + bump(1) + flags(1) + padding(1) + authority(32) + zbtc_mint(32) + ...
     const mintPubkey = new PublicKey(poolAccount.data.subarray(36, 68));
+    // pool_vault is at offset 100 (after zbtc_mint(32) + privacy_cash_pool(32))
+    const poolVaultPubkey = new PublicKey(poolAccount.data.subarray(100, 132));
+
+    log(`Existing mint: ${mintPubkey.toBase58()}`);
+    log(`Existing pool vault: ${poolVaultPubkey.toBase58()}`);
 
     return {
       poolStatePda,
       commitmentTreePda,
       btcLightClientPda: PublicKey.default,
       sbbtcMint: mintPubkey,
-      poolVault: PublicKey.default,
+      poolVault: poolVaultPubkey,
       authority: authority.publicKey,
     };
   }
 
-  // Create sbBTC Token-2022 mint
+  // Create sbBTC Token-2022 mint with pool PDA as mint authority
   log("Creating sbBTC Token-2022 mint...");
-  const sbbtcMint = await createMint(
-    connection,
-    authority,
-    authority.publicKey, // mint authority (will be transferred to pool PDA)
-    null, // no freeze authority
-    8, // 8 decimals (satoshis)
-    Keypair.generate(),
-    undefined,
-    TOKEN_2022_PROGRAM_ID
+  const mintKeypair = Keypair.generate();
+  const mintLen = getMintLen([]);
+  const mintLamports = await connection.getMinimumBalanceForRentExemption(mintLen);
+
+  const createMintTx = new Transaction().add(
+    SystemProgram.createAccount({
+      fromPubkey: authority.publicKey,
+      newAccountPubkey: mintKeypair.publicKey,
+      space: mintLen,
+      lamports: mintLamports,
+      programId: TOKEN_2022_PROGRAM_ID,
+    }),
+    createInitializeMintInstruction(
+      mintKeypair.publicKey,
+      8, // decimals (satoshis)
+      poolStatePda, // mint authority is pool PDA (critical for CPI minting!)
+      null, // no freeze authority
+      TOKEN_2022_PROGRAM_ID
+    )
   );
+
+  await sendAndConfirmTransaction(connection, createMintTx, [authority, mintKeypair], {
+    commitment: "confirmed",
+  });
+  const sbbtcMint = mintKeypair.publicKey;
   log(`sbBTC Mint: ${sbbtcMint.toBase58()}`);
 
   // Create pool vault (ATA for pool PDA)
@@ -475,11 +503,14 @@ async function addDemoNotes(
   programId: PublicKey,
   poolStatePda: PublicKey,
   commitmentTreePda: PublicKey,
+  zbtcMint: PublicKey,
+  poolVault: PublicKey,
   count: number = 3
 ): Promise<void> {
   logSection("Adding Demo Notes");
 
   log(`Adding ${count} demo notes to commitment tree...`);
+  log(`zBTC will be minted to pool vault: ${poolVault.toBase58()}`);
 
   for (let i = 0; i < count; i++) {
     const secret = generateSecret();
@@ -487,6 +518,8 @@ async function addDemoNotes(
       poolStatePda,
       commitmentTreePda,
       authority.publicKey,
+      zbtcMint,
+      poolVault,
       programId,
       secret
     );
@@ -621,13 +654,15 @@ async function main() {
   );
   initResult.btcLightClientPda = btcLightClientPda;
 
-  // Add demo notes
+  // Add demo notes (now also mints zBTC to pool vault)
   await addDemoNotes(
     connection,
     authority,
     deployResult.zvaultProgramId,
     initResult.poolStatePda,
     initResult.commitmentTreePda,
+    initResult.sbbtcMint,
+    initResult.poolVault,
     3
   );
 

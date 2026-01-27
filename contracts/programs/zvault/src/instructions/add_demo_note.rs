@@ -23,7 +23,7 @@ use pinocchio::{
 
 use crate::error::ZVaultError;
 use crate::state::{CommitmentTree, PoolState};
-use crate::utils::{sha256, validate_program_owner};
+use crate::utils::{mint_zbtc, sha256, validate_program_owner, validate_token_2022_owner, validate_token_program_key};
 
 /// Fixed demo amount: 10,000 satoshis = 0.0001 BTC
 pub const DEMO_AMOUNT_SATS: u64 = 10_000;
@@ -71,23 +71,30 @@ fn compute_commitment(nullifier: &[u8; 32], secret: &[u8; 32]) -> [u8; 32] {
 ///
 /// User provides secret, contract derives everything else.
 /// Fixed amount: 0.0001 BTC for demo purposes.
+/// Also mints zBTC to pool vault so users can claim.
 ///
 /// Accounts:
-/// 0. pool_state - Pool state PDA
-/// 1. commitment_tree - Commitment tree PDA
+/// 0. pool_state - Pool state PDA (writable)
+/// 1. commitment_tree - Commitment tree PDA (writable)
 /// 2. authority - Pool authority (signer)
+/// 3. zbtc_mint - zBTC Token-2022 mint (writable)
+/// 4. pool_vault - Pool vault token account (writable)
+/// 5. token_program - Token-2022 program
 pub fn process_add_demo_note(
     program_id: &Pubkey,
     accounts: &[AccountInfo],
     data: &[u8],
 ) -> ProgramResult {
-    if accounts.len() < 3 {
+    if accounts.len() < 6 {
         return Err(ProgramError::NotEnoughAccountKeys);
     }
 
     let pool_state = &accounts[0];
     let commitment_tree = &accounts[1];
     let authority = &accounts[2];
+    let zbtc_mint = &accounts[3];
+    let pool_vault = &accounts[4];
+    let token_program = &accounts[5];
 
     let ix_data = AddDemoNoteData::from_bytes(data)?;
 
@@ -99,16 +106,20 @@ pub fn process_add_demo_note(
     // Validate account owners
     validate_program_owner(pool_state, program_id)?;
     validate_program_owner(commitment_tree, program_id)?;
+    validate_token_2022_owner(zbtc_mint)?;
+    validate_token_2022_owner(pool_vault)?;
+    validate_token_program_key(token_program)?;
 
-    // Validate authority matches pool
-    {
+    // Validate authority matches pool and get bump
+    let pool_bump = {
         let pool_data = pool_state.try_borrow_data()?;
         let pool = PoolState::from_bytes(&pool_data)?;
 
         if authority.key().as_ref() != pool.authority {
             return Err(ZVaultError::Unauthorized.into());
         }
-    }
+        pool.bump
+    };
 
     // Derive nullifier and commitment from secret
     let nullifier = derive_nullifier(&ix_data.secret);
@@ -128,12 +139,27 @@ pub fn process_add_demo_note(
         tree.insert_leaf(&commitment)?;
     }
 
+    // Mint zBTC to pool vault so users can claim
+    let bump_bytes = [pool_bump];
+    let pool_signer_seeds: &[&[u8]] = &[PoolState::SEED, &bump_bytes];
+
+    mint_zbtc(
+        token_program,
+        zbtc_mint,
+        pool_vault,
+        pool_state,
+        DEMO_AMOUNT_SATS,
+        pool_signer_seeds,
+    )?;
+
     // Update pool statistics
     {
         let mut pool_data = pool_state.try_borrow_mut_data()?;
         let pool = PoolState::from_bytes_mut(&mut pool_data)?;
 
         pool.increment_deposit_count()?;
+        pool.add_minted(DEMO_AMOUNT_SATS)?;
+        pool.add_shielded(DEMO_AMOUNT_SATS)?;
         pool.set_last_update(clock.unix_timestamp);
     }
 
