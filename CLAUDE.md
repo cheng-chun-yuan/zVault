@@ -99,8 +99,8 @@ Redeem: Burn zkBTC → Backend signs BTC transaction → Return BTC to user
 
 ## Key Program IDs
 
-- **zVault (devnet)**: `CBzbSQPcUXMYdmSvnA24HPZrDQPuEpq4qq2mcmErrWPR`
-- **BTC Light Client**: `8GCjjPpzRP1DhWa9PLcRhSV7aLFkE8x7vf5royAQzUfG`
+- **zVault (devnet)**: `5S5ynMni8Pgd6tKkpYaXiPJiEXgw927s7T2txDtDivRK`
+- **BTC Light Client**: `95vWurTc9BhjBvEbBdUKoTZHMPPyB1iQZEuXEaR7wPpd`
 
 ## SDK Usage
 
