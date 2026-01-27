@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useMemo, useCallback } from "react";
+import { useState, useEffect, useMemo, useCallback, useRef } from "react";
 import { useWallet } from "@solana/wallet-adapter-react";
 import { PublicKey } from "@solana/web3.js";
 import { CheckCircle2, ArrowUpFromLine, Wallet, Shield, Clock, AlertCircle, Key, Copy, Check, Pencil, X } from "lucide-react";
@@ -8,9 +8,10 @@ import { cn } from "@/lib/utils";
 import { zBTCApi } from "@/lib/api/client";
 import { parseSats, validateWithdrawalAmount } from "@/lib/utils/validation";
 import { WalletButton } from "@/components/ui";
+import { StealthRecipientInput } from "@/components/ui/stealth-recipient-input";
 import { formatBtc, truncateMiddle } from "@/lib/utils/formatting";
 import { useZVaultKeys, useStealthInbox, type InboxNote } from "@/hooks/use-zvault";
-import { initPoseidon } from "@zvault/sdk";
+import { initPoseidon, type StealthMetaAddress } from "@zvault/sdk";
 
 // Validate Solana address
 function isValidSolanaAddress(address: string): boolean {
@@ -23,8 +24,7 @@ function isValidSolanaAddress(address: string): boolean {
 }
 
 // Constants
-const SERVICE_FEE_SATS = 10000;
-const MIN_WITHDRAW_SATS = 10000;
+const MIN_WITHDRAW_SATS = 1000;
 
 type WithdrawStep = "connect" | "select_note" | "form" | "proving" | "success";
 
@@ -44,18 +44,26 @@ export function WithdrawFlow() {
   const [changeClaimCopied, setChangeClaimCopied] = useState(false);
 
   // Recipient address state
+  const [recipientMode, setRecipientMode] = useState<"public" | "stealth">("public");
   const [recipientAddress, setRecipientAddress] = useState<string>("");
   const [isEditingRecipient, setIsEditingRecipient] = useState(false);
   const [recipientError, setRecipientError] = useState<string | null>(null);
+  const recipientInitializedRef = useRef(false);
 
-  // Initialize recipient address when wallet connects
+  // Stealth recipient state
+  const [resolvedMeta, setResolvedMeta] = useState<StealthMetaAddress | null>(null);
+  const [resolvedName, setResolvedName] = useState<string | null>(null);
+  const [stealthError, setStealthError] = useState<string | null>(null);
+
+  // Initialize recipient address when wallet connects (only once)
   useEffect(() => {
-    if (publicKey && !recipientAddress) {
+    if (publicKey && !recipientInitializedRef.current) {
       setRecipientAddress(publicKey.toBase58());
+      recipientInitializedRef.current = true;
     }
-  }, [publicKey, recipientAddress]);
+  }, [publicKey]);
 
-  // Validate recipient address
+  // Validate recipient address (for public mode)
   const validateRecipient = useCallback((address: string): boolean => {
     if (!address.trim()) {
       setRecipientError("Recipient address is required");
@@ -67,6 +75,12 @@ export function WithdrawFlow() {
     }
     setRecipientError(null);
     return true;
+  }, []);
+
+  // Handle stealth recipient resolution from component
+  const handleStealthResolved = useCallback((meta: StealthMetaAddress | null, name: string | null) => {
+    setResolvedMeta(meta);
+    setResolvedName(name);
   }, []);
 
   // Handle recipient edit save
@@ -103,16 +117,11 @@ export function WithdrawFlow() {
 
   const amountSats = useMemo(() => parseSats(amount), [amount]);
 
-  // Max amount is selected note balance minus fee
+  // Max amount is the full note balance
   const maxWithdrawSats = useMemo(() => {
     if (!selectedNote) return 0;
-    return Math.max(0, Number(selectedNote.amount) - SERVICE_FEE_SATS);
+    return Number(selectedNote.amount);
   }, [selectedNote]);
-
-  const receiveAmount = useMemo(() => {
-    if (!amountSats || amountSats < SERVICE_FEE_SATS) return 0;
-    return amountSats - SERVICE_FEE_SATS;
-  }, [amountSats]);
 
   const isValidAmount = amountSats && amountSats >= MIN_WITHDRAW_SATS;
 
@@ -195,11 +204,16 @@ export function WithdrawFlow() {
     setChangeClaimLink(null);
     setChangeAmountSats(0);
     // Reset recipient to own wallet
+    setRecipientMode("public");
     if (publicKey) {
       setRecipientAddress(publicKey.toBase58());
     }
     setIsEditingRecipient(false);
     setRecipientError(null);
+    // Reset stealth state
+    setResolvedMeta(null);
+    setResolvedName(null);
+    setStealthError(null);
   };
 
   useEffect(() => {
@@ -285,17 +299,6 @@ export function WithdrawFlow() {
   if (step === "select_note") {
     return (
       <div className="flex flex-col">
-        {/* Header */}
-        <div className="flex items-center gap-3 mb-4">
-          <div className="p-2 rounded-[10px] bg-purple/10 border border-purple/20">
-            <Key className="w-5 h-5 text-purple" />
-          </div>
-          <div>
-            <p className="text-body2-semibold text-foreground">Select Note to Withdraw</p>
-            <p className="text-caption text-gray">Choose a note from your deposits</p>
-          </div>
-        </div>
-
         {/* Privacy info */}
         <div className="privacy-box mb-4">
           <Shield className="w-5 h-5 shrink-0" />
@@ -338,7 +341,7 @@ export function WithdrawFlow() {
         <div className="flex items-center gap-3 p-3 bg-muted border border-gray/15 rounded-[12px]">
           <AlertCircle className="w-5 h-5 text-gray shrink-0" />
           <p className="text-caption text-gray">
-            You can withdraw any amount up to the note balance (minus fees).
+            You can withdraw any amount up to the note balance.
           </p>
         </div>
       </div>
@@ -370,7 +373,7 @@ export function WithdrawFlow() {
               </button>
             </div>
             <span className="text-caption text-gray">
-              Max withdraw: {formatBtc(maxWithdrawSats)} zkBTC (after fee)
+              Max withdraw: {formatBtc(maxWithdrawSats)} zkBTC
             </span>
           </div>
         </div>
@@ -414,7 +417,7 @@ export function WithdrawFlow() {
             </div>
           </div>
 
-          {/* Fee info */}
+          {/* Amount info */}
           <div className={cn(
             "flex flex-col items-stretch gap-2 px-4 py-3 text-body2-semibold",
             !isValidAmount && "blur-[4px]"
@@ -422,12 +425,8 @@ export function WithdrawFlow() {
             <div className="flex justify-between text-white">
               <span>You Will Receive</span>
               <span className="flex items-center gap-2 text-privacy">
-                {formatBtc(receiveAmount)} zBTC
+                {formatBtc(amountSats ?? 0)} zBTC
               </span>
-            </div>
-            <div className="flex justify-between text-gray-light">
-              <span>Service Fee</span>
-              <span>{formatBtc(SERVICE_FEE_SATS)} sats</span>
             </div>
             <div className="flex justify-between text-gray">
               <span>Change (kept private)</span>
@@ -438,85 +437,139 @@ export function WithdrawFlow() {
 
         {/* Recipient Wallet */}
         <div className="mb-4">
-          <p className="text-body2 text-gray-light pl-2 mb-2">Recipient Wallet</p>
-          {isEditingRecipient ? (
-            <div className="space-y-2">
-              <div className="flex items-center gap-2">
-                <input
-                  type="text"
-                  value={recipientAddress}
-                  onChange={(e) => {
-                    setRecipientAddress(e.target.value);
-                    setRecipientError(null);
-                  }}
-                  placeholder="Enter Solana address..."
-                  className={cn(
-                    "flex-1 px-3 py-2.5 bg-muted border rounded-[10px]",
-                    "text-body2 font-mono text-gray-light placeholder:text-gray/40",
-                    "outline-none transition-colors",
-                    recipientError
-                      ? "border-red-500/50"
-                      : "border-gray/20 focus:border-purple/40"
-                  )}
-                />
-                <button
-                  onClick={handleSaveRecipient}
-                  className="p-2.5 rounded-[10px] bg-privacy/10 hover:bg-privacy/20 text-privacy transition-colors"
-                  title="Save"
-                >
-                  <Check className="w-4 h-4" />
-                </button>
-                <button
-                  onClick={() => {
-                    handleResetRecipient();
-                  }}
-                  className="p-2.5 rounded-[10px] bg-gray/10 hover:bg-gray/20 text-gray transition-colors"
-                  title="Cancel"
-                >
-                  <X className="w-4 h-4" />
-                </button>
-              </div>
-              {recipientError && (
-                <p className="text-caption text-red-400 pl-2">{recipientError}</p>
-              )}
-              {publicKey && recipientAddress !== publicKey.toBase58() && (
-                <button
-                  onClick={handleResetRecipient}
-                  className="text-caption text-purple hover:text-purple/80 pl-2 transition-colors"
-                >
-                  Reset to my wallet
-                </button>
-              )}
-            </div>
-          ) : (
-            <div
+          <p className="text-body2 text-gray-light pl-2 mb-2">Recipient</p>
+
+          {/* Mode Toggle */}
+          <div className="flex gap-2 mb-3">
+            <button
+              onClick={() => {
+                setRecipientMode("public");
+                setRecipientError(null);
+              }}
               className={cn(
-                "flex items-center gap-2 p-3 rounded-[12px] cursor-pointer transition-colors",
-                "bg-muted border",
-                isOwnWallet
-                  ? "border-privacy/20 hover:border-privacy/40"
-                  : "border-purple/20 hover:border-purple/40"
+                "flex-1 px-3 py-2 rounded-[10px] text-body2 transition-colors",
+                recipientMode === "public"
+                  ? "bg-privacy/20 border border-privacy/40 text-privacy"
+                  : "bg-muted border border-gray/20 text-gray hover:border-gray/40"
               )}
-              onClick={() => setIsEditingRecipient(true)}
             >
-              <div className={cn(
-                "w-2 h-2 rounded-full",
-                isOwnWallet ? "bg-privacy" : "bg-purple"
-              )} />
-              <span className="flex-1 text-body2 font-mono text-gray-light truncate">
-                {recipientAddress ? truncateMiddle(recipientAddress, 8) : "—"}
-              </span>
-              <Pencil className="w-3.5 h-3.5 text-gray" />
+              Public (Solana)
+            </button>
+            <button
+              onClick={() => {
+                setRecipientMode("stealth");
+                setRecipientError(null);
+              }}
+              className={cn(
+                "flex-1 px-3 py-2 rounded-[10px] text-body2 transition-colors",
+                recipientMode === "stealth"
+                  ? "bg-purple/20 border border-purple/40 text-purple"
+                  : "bg-muted border border-gray/20 text-gray hover:border-gray/40"
+              )}
+            >
+              Private (Stealth)
+            </button>
+          </div>
+
+          {/* Public Mode - Solana Address */}
+          {recipientMode === "public" && (
+            <>
+              {isEditingRecipient ? (
+                <div className="space-y-2">
+                  <div className="flex items-center gap-3">
+                    <input
+                      type="text"
+                      value={recipientAddress}
+                      onChange={(e) => {
+                        setRecipientAddress(e.target.value);
+                        setRecipientError(null);
+                      }}
+                      placeholder="Enter Solana address..."
+                      className={cn(
+                        "flex-1 px-4 py-3 bg-muted border rounded-[10px]",
+                        "text-body2 font-mono text-gray-light placeholder:text-gray/40",
+                        "outline-none transition-colors",
+                        recipientError
+                          ? "border-red-500/50"
+                          : "border-gray/20 focus:border-purple/40"
+                      )}
+                    />
+                    <button
+                      onClick={handleSaveRecipient}
+                      className="p-2.5 rounded-[10px] bg-privacy/10 hover:bg-privacy/20 text-privacy transition-colors"
+                      title="Save"
+                    >
+                      <Check className="w-4 h-4" />
+                    </button>
+                    <button
+                      onClick={() => {
+                        handleResetRecipient();
+                      }}
+                      className="p-2.5 rounded-[10px] bg-gray/10 hover:bg-gray/20 text-gray transition-colors"
+                      title="Cancel"
+                    >
+                      <X className="w-4 h-4" />
+                    </button>
+                  </div>
+                  {recipientError && (
+                    <p className="text-caption text-red-400 pl-2">{recipientError}</p>
+                  )}
+                  {publicKey && recipientAddress !== publicKey.toBase58() && (
+                    <button
+                      onClick={handleResetRecipient}
+                      className="text-caption text-purple hover:text-purple/80 pl-2 transition-colors"
+                    >
+                      Reset to my wallet
+                    </button>
+                  )}
+                </div>
+              ) : (
+                <div
+                  className={cn(
+                    "flex items-center gap-2 p-3 rounded-[12px] cursor-pointer transition-colors",
+                    "bg-muted border",
+                    isOwnWallet
+                      ? "border-privacy/20 hover:border-privacy/40"
+                      : "border-purple/20 hover:border-purple/40"
+                  )}
+                  onClick={() => setIsEditingRecipient(true)}
+                >
+                  <div className={cn(
+                    "w-2 h-2 rounded-full",
+                    isOwnWallet ? "bg-privacy" : "bg-purple"
+                  )} />
+                  <span className="flex-1 text-body2 font-mono text-gray-light truncate">
+                    {recipientAddress ? truncateMiddle(recipientAddress, 8) : "—"}
+                  </span>
+                  <Pencil className="w-3.5 h-3.5 text-gray" />
+                </div>
+              )}
+              <p className="text-caption text-gray mt-1 pl-2">
+                {isOwnWallet
+                  ? "zBTC will be sent to your connected wallet"
+                  : "zBTC will be sent to a custom address"}
+                {!isEditingRecipient && (
+                  <span className="text-gray/40"> • Click to edit</span>
+                )}
+              </p>
+            </>
+          )}
+
+          {/* Stealth Mode - .zkey or hex address */}
+          {recipientMode === "stealth" && (
+            <div className="space-y-2">
+              <StealthRecipientInput
+                onResolved={handleStealthResolved}
+                resolvedMeta={resolvedMeta}
+                resolvedName={resolvedName}
+                error={stealthError}
+                onError={setStealthError}
+              />
+              <p className="text-caption text-gray pl-2">
+                zkBTC will be sent privately to the stealth address
+              </p>
             </div>
           )}
-          <p className="text-caption text-gray mt-1 pl-2">
-            {isOwnWallet
-              ? "zBTC will be sent to your connected wallet"
-              : "zBTC will be sent to a custom address"}
-            {!isEditingRecipient && (
-              <span className="text-gray/40"> • Click to edit</span>
-            )}
-          </p>
         </div>
 
         {/* Privacy info */}
@@ -534,7 +587,7 @@ export function WithdrawFlow() {
         <div className="flex items-center gap-3 p-3 bg-muted border border-gray/15 rounded-[12px] mb-4">
           <Clock className="w-5 h-5 text-gray shrink-0" />
           <div className="text-caption text-gray">
-            <span className="text-gray-light">Processing time:</span> Instant • Minimum: {formatBtc(MIN_WITHDRAW_SATS)} zkBTC
+            <span className="text-gray-light">Processing time:</span> Instant
           </div>
         </div>
 
@@ -615,14 +668,8 @@ export function WithdrawFlow() {
             <span className="font-mono text-foreground text-xs">{truncateMiddle(requestId, 6)}</span>
           </div>
           <div className="flex justify-between items-center text-body2">
-            <span className="text-gray-light">Withdrawn</span>
-            <span className="text-foreground">{formatBtc(amountSats ?? 0)} zkBTC</span>
-          </div>
-          <div className="flex justify-between items-center text-body2">
-            <span className="text-gray-light">Received</span>
-            <span className="text-privacy flex items-center gap-2">
-              {formatBtc(receiveAmount)} zBTC
-            </span>
+            <span className="text-gray-light">Amount</span>
+            <span className="text-privacy">{formatBtc(amountSats ?? 0)} zBTC</span>
           </div>
           <div className="flex justify-between items-center text-body2 pt-2 border-t border-gray/15">
             <span className="text-gray-light">Destination</span>
