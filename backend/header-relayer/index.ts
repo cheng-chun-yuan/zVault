@@ -30,7 +30,7 @@ import {
 // Configuration from environment
 const SOLANA_RPC_URL = process.env.SOLANA_RPC_URL || 'https://api.devnet.solana.com';
 const PROGRAM_ID = new PublicKey(
-  process.env.PROGRAM_ID || '8GCjjPpzRP1DhWa9PLcRhSV7aLFkE8x7vf5royAQzUfG'
+  process.env.PROGRAM_ID || '95vWurTc9BhjBvEbBdUKoTZHMPPyB1iQZEuXEaR7wPpd'
 );
 const POLL_INTERVAL_MS = parseInt(process.env.POLL_INTERVAL_MS || '30000', 10);
 const POLL_AT_TIP_MS = parseInt(process.env.POLL_AT_TIP_MS || '300000', 10); // 5 min when at tip

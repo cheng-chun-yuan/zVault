@@ -9,7 +9,7 @@ services:
       - key: SOLANA_RPC_URL
         value: https://api.devnet.solana.com
       - key: PROGRAM_ID
-        value: 4k6UTCS9QBBsJigJoikqEqfsePUpfYh51v9S4yFTYSB4
+        value: 5S5ynMni8Pgd6tKkpYaXiPJiEXgw927s7T2txDtDivRK
       - key: BITCOIN_NETWORK
         value: testnet
       - key: START_BLOCK_HEIGHT
