@@ -11,7 +11,7 @@ if (typeof Buffer.prototype.subarray !== 'function') {
   Buffer.prototype.subarray = function (begin?: number, end?: number) {
     const result = Uint8Array.prototype.subarray.call(this, begin, end);
     Object.setPrototypeOf(result, Buffer.prototype);
-    return result as Buffer;
+    return result as unknown as Buffer;
   };
 }
 

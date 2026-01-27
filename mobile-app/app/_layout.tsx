@@ -1,7 +1,7 @@
 /**
  * Root Layout
  *
- * Simple app structure with Phantom wallet integration.
+ * Simple wallet app with Phantom integration and tab navigation.
  */
 
 // Import polyfills first
@@ -17,11 +17,12 @@ import 'react-native-reanimated';
 
 import { useColorScheme } from '@/components/useColorScheme';
 import { PhantomWalletProvider } from '@/contexts/PhantomContext';
+import { WalletProvider } from '@/contexts/WalletContext';
 
 export { ErrorBoundary } from 'expo-router';
 
 export const unstable_settings = {
-  initialRouteName: 'index',
+  initialRouteName: '(tabs)',
 };
 
 // Prevent the splash screen from auto-hiding before asset loading is complete.
@@ -32,21 +33,8 @@ function RootLayoutNav() {
 
   return (
     <ThemeProvider value={colorScheme === 'dark' ? DarkTheme : DefaultTheme}>
-      <Stack>
-        <Stack.Screen
-          name="index"
-          options={{
-            title: 'zVault',
-            headerLargeTitle: true,
-          }}
-        />
-        <Stack.Screen
-          name="sign"
-          options={{
-            title: 'Sign Message',
-            presentation: 'modal',
-          }}
-        />
+      <Stack screenOptions={{ headerShown: false }}>
+        <Stack.Screen name="(tabs)" />
       </Stack>
     </ThemeProvider>
   );
@@ -74,7 +62,9 @@ export default function RootLayout() {
 
   return (
     <PhantomWalletProvider>
-      <RootLayoutNav />
+      <WalletProvider>
+        <RootLayoutNav />
+      </WalletProvider>
     </PhantomWalletProvider>
   );
 }

@@ -7,10 +7,17 @@
 
 import React, { createContext, useContext, useMemo, ReactNode } from 'react';
 import * as Linking from 'expo-linking';
-import { PhantomProvider, usePhantom, type PhantomConfig } from '@phantom/react-native-wallet-sdk';
+import { PhantomProvider, usePhantom } from '@phantom/react-native-wallet-sdk';
 
 // Re-export the usePhantom hook for convenience
 export { usePhantom };
+
+// Config type based on PhantomProvider props
+interface PhantomConfig {
+  redirectURI: string;
+  sdkKey: string;
+  autoShowLoginIfNeeded?: boolean;
+}
 
 interface PhantomContextValue {
   config: PhantomConfig;
