@@ -1,6 +1,6 @@
 "use client";
 
-import { useZVaultKeys } from "@/hooks/use-zvault-keys";
+import { useZVaultKeys } from "@/hooks/use-zvault";
 import { useWallet } from "@solana/wallet-adapter-react";
 import { useCopyToClipboard } from "@/hooks/use-copy-to-clipboard";
 

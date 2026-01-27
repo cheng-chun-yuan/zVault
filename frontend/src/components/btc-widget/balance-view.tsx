@@ -42,9 +42,9 @@ StatusBadge.displayName = "StatusBadge";
 
 // Progress bar
 const ProgressBar = memo(({ current, total }: { current: number; total: number }) => (
-  <div className="w-full bg-[#0F0F12] rounded-full h-2">
+  <div className="w-full bg-background rounded-full h-2">
     <div
-      className="bg-gradient-to-r from-orange-500 to-orange-400 h-2 rounded-full transition-all"
+      className="bg-gradient-to-r from-btc to-btc-light h-2 rounded-full transition-all shadow-[0_0_10px_rgba(247,147,26,0.5)]"
       style={{ width: `${Math.min((current / total) * 100, 100)}%` }}
     />
   </div>
@@ -220,9 +220,9 @@ export function BalanceView() {
       {/* Deposit cards */}
       {sortedNotes.length > 0 ? (
         <div className="space-y-3">
-          {sortedNotes.map((note) => (
+          {sortedNotes.map((note, index) => (
             <DepositCard
-              key={note.commitment}
+              key={`${note.commitment}-${index}`}
               note={note}
               status={depositStatuses[note.commitment] || null}
               onRefresh={() => fetchStatus(note.commitment, note.taprootAddress)}

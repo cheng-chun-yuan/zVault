@@ -225,12 +225,12 @@ export function ManualVerify() {
     <div className="flex flex-col">
       {/* Header */}
       <div className="flex items-center gap-3 mb-4">
-        <div className="p-2 rounded-[10px] bg-[#14F1951A] border border-[#14F19533]">
-          <Shield className="w-5 h-5 text-[#14F195]" />
+        <div className="p-2 rounded-[10px] bg-privacy/10 border border-privacy/20 pulse-glow">
+          <Shield className="w-5 h-5 text-privacy privacy-glow" />
         </div>
         <div>
-          <p className="text-body2-semibold text-[#FFFFFF]">Manual SPV Verification</p>
-          <p className="text-caption text-[#8B8A9E]">Verify Bitcoin deposit with block header</p>
+          <p className="text-body2-semibold text-foreground">Manual SPV Verification</p>
+          <p className="text-caption text-gray terminal-text">Verify Bitcoin deposit with block header</p>
         </div>
       </div>
 

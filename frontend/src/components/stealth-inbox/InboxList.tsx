@@ -2,7 +2,7 @@
 
 import { RefreshCw } from "lucide-react";
 import { InboxItem } from "./InboxItem";
-import type { InboxNote } from "@/hooks/use-stealth-inbox";
+import type { InboxNote } from "@/hooks/use-zvault";
 
 interface InboxListProps {
   notes: InboxNote[];
@@ -15,13 +15,13 @@ export function InboxList({ notes, isLoading, onRefresh }: InboxListProps) {
     <div className="flex flex-col">
       {/* Header with refresh */}
       <div className="flex items-center justify-between mb-4">
-        <p className="text-body2-semibold text-[#C7C5D1]">
+        <p className="text-body2-semibold text-gray-light terminal-text">
           {notes.length} {notes.length === 1 ? "Deposit" : "Deposits"} Found
         </p>
         <button
           onClick={onRefresh}
           disabled={isLoading}
-          className="flex items-center gap-1 px-2 py-1 rounded-[6px] text-caption text-[#8B8A9E] hover:text-[#C7C5D1] hover:bg-[#8B8A9E1A] transition-colors disabled:opacity-50"
+          className="flex items-center gap-1 px-2 py-1 rounded-[6px] text-caption text-gray hover:text-gray-light hover:bg-gray/10 transition-colors disabled:opacity-50 hover-glow"
         >
           <RefreshCw className={`w-3.5 h-3.5 ${isLoading ? "animate-spin" : ""}`} />
           Refresh
