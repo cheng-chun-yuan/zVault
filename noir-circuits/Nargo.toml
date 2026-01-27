@@ -5,6 +5,7 @@ members = [
     "transfer",
     "split",
     "partial_withdraw",
+    "stealth_transfer",
     "helpers",
     "utils"
 ]

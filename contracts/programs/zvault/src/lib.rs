@@ -56,6 +56,7 @@ pub mod instruction {
     pub const SET_PAUSED: u8 = 7;
     pub const VERIFY_DEPOSIT: u8 = 8;
     pub const ANNOUNCE_STEALTH: u8 = 16;
+    pub const TRANSFER_STEALTH: u8 = 24;
 
     // Name registry
     pub const REGISTER_NAME: u8 = 17;
@@ -104,6 +105,9 @@ pub fn process_instruction(
         }
         instruction::ANNOUNCE_STEALTH => {
             instructions::process_announce_stealth(program_id, accounts, data)
+        }
+        instruction::TRANSFER_STEALTH => {
+            instructions::process_transfer_stealth(program_id, accounts, data)
         }
         // Name registry
         instruction::REGISTER_NAME => {
@@ -195,6 +199,7 @@ mod tests {
             instruction::SET_PAUSED,
             instruction::VERIFY_DEPOSIT,
             instruction::ANNOUNCE_STEALTH,
+            instruction::TRANSFER_STEALTH,
             instruction::REGISTER_NAME,
             instruction::UPDATE_NAME,
             instruction::TRANSFER_NAME,

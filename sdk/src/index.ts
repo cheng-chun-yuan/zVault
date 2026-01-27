@@ -6,13 +6,14 @@
  *
  * Networks: Solana Devnet + Bitcoin Testnet3
  *
- * ## 6 Main Functions
+ * ## 7 Main Functions
  * - **deposit**: Generate deposit credentials (taproot address + claim link)
  * - **withdraw**: Request BTC withdrawal (burn zBTC)
  * - **privateClaim**: Claim zBTC tokens with ZK proof
  * - **privateSplit**: Split one commitment into two outputs
  * - **sendLink**: Create global claim link (off-chain)
- * - **sendStealth**: Send to specific recipient via stealth ECDH
+ * - **sendStealth**: Send to specific recipient via stealth ECDH (for new deposits)
+ * - **transferStealth**: Transfer existing zkBTC to recipient's stealth address (with ZK proof)
  *
  * ## Quick Start
  * ```typescript
@@ -327,7 +328,7 @@ export {
 } from "./stealth-deposit";
 
 // ==========================================================================
-// Simplified API (6 Main Functions) - Node.js only
+// Simplified API (7 Main Functions) - Node.js only
 // ==========================================================================
 
 export type {
@@ -336,6 +337,7 @@ export type {
   ClaimResult as ApiClaimResult,
   SplitResult as ApiSplitResult,
   StealthResult,
+  StealthTransferResult,
   ApiClientConfig,
 } from "./api";
 
