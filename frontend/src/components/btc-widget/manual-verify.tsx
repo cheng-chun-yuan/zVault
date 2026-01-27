@@ -238,7 +238,7 @@ export function ManualVerify() {
       <div className="space-y-4 mb-4">
         {/* Taproot Address Input */}
         <div>
-          <label className="text-body2 text-[#C7C5D1] pl-2 mb-2 block">
+          <label className="text-body2 text-gray-light pl-2 mb-2 block">
             Taproot Address
           </label>
           <div className="flex gap-2">
@@ -248,9 +248,9 @@ export function ManualVerify() {
               onChange={(e) => setTaprootAddress(e.target.value)}
               placeholder="tb1p..."
               className={cn(
-                "flex-1 p-3 bg-[#16161B] border border-[#8B8A9E26] rounded-[12px]",
-                "text-body2 font-mono text-[#F1F0F3] placeholder:text-[#8B8A9E]",
-                "outline-none focus:border-[#14F19566] transition-colors"
+                "flex-1 p-3 bg-muted border border-gray/15 rounded-[12px]",
+                "text-body2 font-mono text-foreground placeholder:text-gray",
+                "outline-none focus:border-privacy/40 transition-colors"
               )}
             />
             <button
@@ -265,14 +265,14 @@ export function ManualVerify() {
 
         {/* OR divider */}
         <div className="flex items-center gap-3">
-          <div className="flex-1 h-px bg-[#8B8A9E26]" />
-          <span className="text-caption text-[#8B8A9E]">OR</span>
-          <div className="flex-1 h-px bg-[#8B8A9E26]" />
+          <div className="flex-1 h-px bg-gray/15" />
+          <span className="text-caption text-gray">OR</span>
+          <div className="flex-1 h-px bg-gray/15" />
         </div>
 
         {/* Transaction ID Input */}
         <div>
-          <label className="text-body2 text-[#C7C5D1] pl-2 mb-2 block">
+          <label className="text-body2 text-gray-light pl-2 mb-2 block">
             Transaction ID
           </label>
           <div className="flex gap-2">
@@ -282,9 +282,9 @@ export function ManualVerify() {
               onChange={(e) => setTxid(e.target.value)}
               placeholder="64-character hex txid"
               className={cn(
-                "flex-1 p-3 bg-[#16161B] border border-[#8B8A9E26] rounded-[12px]",
-                "text-body2 font-mono text-[#F1F0F3] placeholder:text-[#8B8A9E]",
-                "outline-none focus:border-[#14F19566] transition-colors"
+                "flex-1 p-3 bg-muted border border-gray/15 rounded-[12px]",
+                "text-body2 font-mono text-foreground placeholder:text-gray",
+                "outline-none focus:border-privacy/40 transition-colors"
               )}
             />
             <button
@@ -310,33 +310,33 @@ export function ManualVerify() {
       {verificationData && (
         <div className="space-y-4">
           {/* Transaction Info */}
-          <div className="gradient-bg-card p-4 rounded-[12px] border border-[#4ADE8033]">
+          <div className="gradient-bg-card p-4 rounded-[12px] border border-success/20">
             <div className="flex items-center gap-2 mb-3">
-              <CheckCircle2 className="w-4 h-4 text-[#4ADE80]" />
-              <span className="text-body2-semibold text-[#4ADE80]">Transaction Found</span>
+              <CheckCircle2 className="w-4 h-4 text-success" />
+              <span className="text-body2-semibold text-success">Transaction Found</span>
             </div>
             <div className="space-y-2 text-caption">
               <div className="flex justify-between">
-                <span className="text-[#8B8A9E]">TXID</span>
+                <span className="text-gray">TXID</span>
                 <div className="flex items-center gap-2">
-                  <span className="font-mono text-[#C7C5D1]">
+                  <span className="font-mono text-gray-light">
                     {txid.slice(0, 8)}...{txid.slice(-8)}
                   </span>
                   <button
                     onClick={() => copyToClipboard(txid, "txid")}
-                    className="p-1 hover:bg-[#8B8A9E1A] rounded"
+                    className="p-1 hover:bg-gray/10 rounded"
                   >
                     {copied === "txid" ? (
-                      <Check className="w-3 h-3 text-[#4ADE80]" />
+                      <Check className="w-3 h-3 text-success" />
                     ) : (
-                      <Copy className="w-3 h-3 text-[#8B8A9E]" />
+                      <Copy className="w-3 h-3 text-gray" />
                     )}
                   </button>
                 </div>
               </div>
               <div className="flex justify-between">
-                <span className="text-[#8B8A9E]">Confirmations</span>
-                <span className="font-mono text-[#14F195]">{verificationData.confirmations}</span>
+                <span className="text-gray">Confirmations</span>
+                <span className="font-mono text-privacy">{verificationData.confirmations}</span>
               </div>
             </div>
           </div>
@@ -344,48 +344,48 @@ export function ManualVerify() {
           {/* Block Header */}
           <div className="gradient-bg-card p-4 rounded-[12px]">
             <div className="flex items-center justify-between mb-3">
-              <span className="text-body2-semibold text-[#F7931A]">Block Header</span>
+              <span className="text-body2-semibold text-btc">Block Header</span>
               <button
                 onClick={() => copyToClipboard(verificationData.blockHeader.rawHeader, "header")}
-                className="p-1.5 rounded-[6px] bg-[#F7931A1A] hover:bg-[#F7931A33] transition-colors"
+                className="p-1.5 rounded-[6px] bg-btc/10 hover:bg-btc/20 transition-colors"
               >
                 {copied === "header" ? (
-                  <Check className="w-3.5 h-3.5 text-[#4ADE80]" />
+                  <Check className="w-3.5 h-3.5 text-success" />
                 ) : (
-                  <Copy className="w-3.5 h-3.5 text-[#F7931A]" />
+                  <Copy className="w-3.5 h-3.5 text-btc" />
                 )}
               </button>
             </div>
             <div className="space-y-2 text-caption">
               <div className="flex justify-between">
-                <span className="text-[#8B8A9E]">Height</span>
-                <span className="font-mono text-[#C7C5D1]">
+                <span className="text-gray">Height</span>
+                <span className="font-mono text-gray-light">
                   {verificationData.blockHeader.height.toLocaleString()}
                 </span>
               </div>
               <div className="flex justify-between">
-                <span className="text-[#8B8A9E]">Hash</span>
-                <span className="font-mono text-[#C7C5D1]">
+                <span className="text-gray">Hash</span>
+                <span className="font-mono text-gray-light">
                   {verificationData.blockHeader.hash.slice(0, 12)}...
                 </span>
               </div>
               <div className="flex justify-between">
-                <span className="text-[#8B8A9E]">Timestamp</span>
-                <span className="font-mono text-[#C7C5D1]">
+                <span className="text-gray">Timestamp</span>
+                <span className="font-mono text-gray-light">
                   {new Date(verificationData.blockHeader.timestamp * 1000).toLocaleString()}
                 </span>
               </div>
               <div className="flex justify-between">
-                <span className="text-[#8B8A9E]">Merkle Root</span>
-                <span className="font-mono text-[#C7C5D1]">
+                <span className="text-gray">Merkle Root</span>
+                <span className="font-mono text-gray-light">
                   {verificationData.blockHeader.merkleRoot.slice(0, 12)}...
                 </span>
               </div>
             </div>
             {/* Raw header */}
-            <div className="mt-3 p-2 bg-[#0F0F12] rounded-[8px]">
-              <p className="text-caption text-[#8B8A9E] mb-1">Raw Header (80 bytes)</p>
-              <code className="text-[10px] font-mono text-[#C7C5D1] break-all block">
+            <div className="mt-3 p-2 bg-background rounded-[8px]">
+              <p className="text-caption text-gray mb-1">Raw Header (80 bytes)</p>
+              <code className="text-[10px] font-mono text-gray-light break-all block">
                 {verificationData.blockHeader.rawHeader}
               </code>
             </div>
@@ -393,15 +393,15 @@ export function ManualVerify() {
             {/* Submit Block Header Button */}
             <div className="mt-3">
               {headerSubmitted ? (
-                <div className="flex items-center gap-2 p-2 bg-[#4ADE801A] border border-[#4ADE8033] rounded-[8px]">
-                  <CheckCircle2 className="w-4 h-4 text-[#4ADE80]" />
-                  <span className="text-caption text-[#4ADE80]">Header on Solana</span>
+                <div className="flex items-center gap-2 p-2 bg-success/10 border border-success/20 rounded-[8px]">
+                  <CheckCircle2 className="w-4 h-4 text-success" />
+                  <span className="text-caption text-success">Header on Solana</span>
                   {headerTxSig && (
                     <a
                       href={`https://explorer.solana.com/tx/${headerTxSig}?cluster=devnet`}
                       target="_blank"
                       rel="noopener noreferrer"
-                      className="text-[10px] font-mono text-[#14F195] ml-auto hover:underline"
+                      className="text-[10px] font-mono text-privacy ml-auto hover:underline"
                     >
                       {headerTxSig.slice(0, 12)}...
                     </a>
@@ -432,38 +432,38 @@ export function ManualVerify() {
           {/* Merkle Proof */}
           <div className="gradient-bg-card p-4 rounded-[12px]">
             <div className="flex items-center justify-between mb-3">
-              <span className="text-body2-semibold text-[#14F195]">Merkle Proof</span>
+              <span className="text-body2-semibold text-privacy">Merkle Proof</span>
               <button
                 onClick={() => copyToClipboard(
                   JSON.stringify(verificationData.merkleProof.merkleProof, null, 2),
                   "merkle"
                 )}
-                className="p-1.5 rounded-[6px] bg-[#14F1951A] hover:bg-[#14F19533] transition-colors"
+                className="p-1.5 rounded-[6px] bg-privacy/10 hover:bg-privacy/20 transition-colors"
               >
                 {copied === "merkle" ? (
-                  <Check className="w-3.5 h-3.5 text-[#4ADE80]" />
+                  <Check className="w-3.5 h-3.5 text-success" />
                 ) : (
-                  <Copy className="w-3.5 h-3.5 text-[#14F195]" />
+                  <Copy className="w-3.5 h-3.5 text-privacy" />
                 )}
               </button>
             </div>
             <div className="space-y-2 text-caption">
               <div className="flex justify-between">
-                <span className="text-[#8B8A9E]">TX Index</span>
-                <span className="font-mono text-[#C7C5D1]">{verificationData.merkleProof.txIndex}</span>
+                <span className="text-gray">TX Index</span>
+                <span className="font-mono text-gray-light">{verificationData.merkleProof.txIndex}</span>
               </div>
               <div className="flex justify-between">
-                <span className="text-[#8B8A9E]">Proof Length</span>
-                <span className="font-mono text-[#C7C5D1]">
+                <span className="text-gray">Proof Length</span>
+                <span className="font-mono text-gray-light">
                   {verificationData.merkleProof.merkleProof.length} siblings
                 </span>
               </div>
             </div>
             {/* Merkle siblings */}
-            <div className="mt-3 p-2 bg-[#0F0F12] rounded-[8px] max-h-32 overflow-y-auto">
-              <p className="text-caption text-[#8B8A9E] mb-1">Siblings (SHA256)</p>
+            <div className="mt-3 p-2 bg-background rounded-[8px] max-h-32 overflow-y-auto">
+              <p className="text-caption text-gray mb-1">Siblings (SHA256)</p>
               {verificationData.merkleProof.merkleProof.map((hash, i) => (
-                <code key={i} className="text-[10px] font-mono text-[#C7C5D1] block">
+                <code key={i} className="text-[10px] font-mono text-gray-light block">
                   [{i}] {hash}
                 </code>
               ))}
@@ -504,7 +504,7 @@ export function ManualVerify() {
 
       {/* Empty state */}
       {!verificationData && !loading && !error && (
-        <div className="text-center py-8 text-[#8B8A9E]">
+        <div className="text-center py-8 text-gray">
           <Search className="w-8 h-8 mx-auto mb-2 opacity-50" />
           <p className="text-body2">Enter an address or txid to fetch verification data</p>
         </div>

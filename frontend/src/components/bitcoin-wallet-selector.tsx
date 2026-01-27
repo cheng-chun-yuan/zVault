@@ -31,15 +31,15 @@ export function BitcoinWalletSelector({
   if (connected && address) {
     return (
       <div className={`flex items-center gap-3 ${className}`}>
-        <div className="flex items-center gap-2 px-3 py-2 bg-[#F7931A1A] border border-[#F7931A33] rounded-[8px]">
+        <div className="flex items-center gap-2 px-3 py-2 bg-btc/10 border border-btc/20 rounded-[8px]">
           <BitcoinIcon className="w-4 h-4" />
-          <span className="text-body2 font-mono text-[#F7931A]">
+          <span className="text-body2 font-mono text-btc">
             {truncateMiddle(address, 4)}
           </span>
         </div>
         <button
           onClick={disconnect}
-          className="px-3 py-2 text-caption text-[#8B8A9E] hover:text-[#F1F0F3] transition-colors"
+          className="px-3 py-2 text-caption text-gray hover:text-foreground transition-colors"
         >
           Disconnect
         </button>

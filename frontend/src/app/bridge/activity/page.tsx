@@ -63,14 +63,14 @@ function TabBar({
 function ClaimedTab() {
   return (
     <div className="flex flex-col items-center justify-center py-8 text-center">
-      <div className="rounded-full bg-[#8B8A9E1A] p-4 mb-4">
-        <CheckCircle2 className="h-10 w-10 text-[#8B8A9E]" />
+      <div className="rounded-full bg-gray/10 p-4 mb-4">
+        <CheckCircle2 className="h-10 w-10 text-gray" />
       </div>
       <p className="text-heading6 text-foreground mb-2">No Claimed Notes Yet</p>
-      <p className="text-body2 text-[#8B8A9E] mb-4">
+      <p className="text-body2 text-gray mb-4">
         When you claim notes from deposits or stealth transfers, they will appear here
       </p>
-      <p className="text-caption text-[#8B8A9E66]">
+      <p className="text-caption text-gray/40">
         Claimed notes can be used for payments or withdrawals
       </p>
     </div>
@@ -93,8 +93,8 @@ function ClaimableTab() {
       {/* Loading state */}
       {isLoading && hasKeys && (
         <div className="flex items-center justify-center py-8">
-          <div className="flex items-center gap-2 text-[#8B8A9E]">
-            <div className="w-5 h-5 border-2 border-[#14F195] border-t-transparent rounded-full animate-spin" />
+          <div className="flex items-center gap-2 text-gray">
+            <div className="w-5 h-5 border-2 border-privacy border-t-transparent rounded-full animate-spin" />
             <span className="text-body2">Scanning announcements...</span>
           </div>
         </div>
@@ -111,12 +111,12 @@ function ClaimableTab() {
       )}
 
       {/* Privacy info */}
-      <div className="p-3 bg-[#14F1950D] border border-[#14F19526] rounded-[12px]">
+      <div className="p-3 bg-privacy/5 border border-privacy/15 rounded-[12px]">
         <div className="flex items-center gap-2 mb-1">
-          <Shield className="w-4 h-4 text-[#14F195]" />
-          <span className="text-caption text-[#14F195]">Privacy Protected</span>
+          <Shield className="w-4 h-4 text-privacy" />
+          <span className="text-caption text-privacy">Privacy Protected</span>
         </div>
-        <p className="text-caption text-[#8B8A9E]">
+        <p className="text-caption text-gray">
           Only you can see deposits addressed to your stealth address. Scanning happens
           locally using your viewing key.
         </p>
@@ -212,7 +212,7 @@ export default function ActivityPage() {
         <Suspense
           fallback={
             <div className="flex items-center justify-center py-8">
-              <div className="w-8 h-8 border-2 border-[#14F195] border-t-transparent rounded-full animate-spin" />
+              <div className="w-8 h-8 border-2 border-privacy border-t-transparent rounded-full animate-spin" />
             </div>
           }
         >

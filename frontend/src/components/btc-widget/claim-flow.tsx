@@ -158,11 +158,11 @@ function ClaimFlowContent() {
     return (
       <div className="space-y-4">
         {/* Privacy info */}
-        <div className="flex items-center gap-3 p-3 bg-[#14F1951A] border border-[#14F19533] rounded-[12px]">
-          <Shield className="w-5 h-5 text-[#14F195]" />
+        <div className="flex items-center gap-3 p-3 bg-privacy/10 border border-privacy/20 rounded-[12px]">
+          <Shield className="w-5 h-5 text-privacy" />
           <div className="flex flex-col">
-            <span className="text-body2-semibold text-[#14F195]">Privacy Preserved</span>
-            <span className="text-caption text-[#14F195] opacity-80">
+            <span className="text-body2-semibold text-privacy">Privacy Preserved</span>
+            <span className="text-caption text-privacy opacity-80">
               Amount is looked up on-chain
             </span>
           </div>
@@ -170,20 +170,20 @@ function ClaimFlowContent() {
 
         {/* Nullifier Input */}
         <div>
-          <label className="text-body2 text-[#C7C5D1] pl-2 mb-2 block">
+          <label className="text-body2 text-gray-light pl-2 mb-2 block">
             Nullifier
           </label>
           <div className="relative">
-            <Key className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-[#8B8A9E]" />
+            <Key className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray" />
             <input
               type="text"
               value={nullifier}
               onChange={(e) => setNullifier(e.target.value)}
               placeholder="Enter your nullifier"
               className={cn(
-                "w-full p-3 pl-10 bg-[#16161B] border border-[#8B8A9E26] rounded-[12px]",
-                "text-body2 font-mono text-[#F1F0F3] placeholder:text-[#8B8A9E]",
-                "outline-none focus:border-[#14F19566] transition-colors"
+                "w-full p-3 pl-10 bg-muted border border-gray/15 rounded-[12px]",
+                "text-body2 font-mono text-foreground placeholder:text-gray",
+                "outline-none focus:border-privacy/40 transition-colors"
               )}
             />
           </div>
@@ -191,20 +191,20 @@ function ClaimFlowContent() {
 
         {/* Secret Input */}
         <div>
-          <label className="text-body2 text-[#C7C5D1] pl-2 mb-2 block">
+          <label className="text-body2 text-gray-light pl-2 mb-2 block">
             Secret
           </label>
           <div className="relative">
-            <Key className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-[#8B8A9E]" />
+            <Key className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray" />
             <input
               type="text"
               value={secret}
               onChange={(e) => setSecret(e.target.value)}
               placeholder="Enter your secret"
               className={cn(
-                "w-full p-3 pl-10 bg-[#16161B] border border-[#8B8A9E26] rounded-[12px]",
-                "text-body2 font-mono text-[#F1F0F3] placeholder:text-[#8B8A9E]",
-                "outline-none focus:border-[#14F19566] transition-colors"
+                "w-full p-3 pl-10 bg-muted border border-gray/15 rounded-[12px]",
+                "text-body2 font-mono text-foreground placeholder:text-gray",
+                "outline-none focus:border-privacy/40 transition-colors"
               )}
             />
           </div>
@@ -213,13 +213,13 @@ function ClaimFlowContent() {
         {/* Verification Result */}
         {verifyResult && (
           <div className="space-y-3">
-            <div className="flex items-center gap-2 p-3 bg-[#4ADE801A] border border-[#4ADE8033] rounded-[12px]">
-              <CheckCircle2 className="w-5 h-5 text-[#4ADE80]" />
-              <span className="text-body2 text-[#4ADE80]">Claim verified!</span>
+            <div className="flex items-center gap-2 p-3 bg-success/10 border border-success/20 rounded-[12px]">
+              <CheckCircle2 className="w-5 h-5 text-success" />
+              <span className="text-body2 text-success">Claim verified!</span>
             </div>
-            <div className="p-3 bg-[#16161B] border border-[#8B8A9E26] rounded-[12px]">
-              <p className="text-caption text-[#8B8A9E] mb-1">Amount to Claim</p>
-              <p className="text-heading6 text-[#14F195]">
+            <div className="p-3 bg-muted border border-gray/15 rounded-[12px]">
+              <p className="text-caption text-gray mb-1">Amount to Claim</p>
+              <p className="text-heading6 text-privacy">
                 {formatBtc(verifyResult.amountSats)} zkBTC
               </p>
             </div>
@@ -228,13 +228,13 @@ function ClaimFlowContent() {
 
         {/* Recipient Wallet */}
         <div>
-          <label className="text-body2 text-[#C7C5D1] pl-2 mb-2 block">
+          <label className="text-body2 text-gray-light pl-2 mb-2 block">
             Recipient Wallet
           </label>
           {connected && publicKey ? (
-            <div className="flex items-center gap-2 p-3 bg-[#16161B] border border-[#14F19533] rounded-[12px]">
-              <div className="w-2 h-2 rounded-full bg-[#14F195]" />
-              <span className="text-body2 font-mono text-[#C7C5D1]">
+            <div className="flex items-center gap-2 p-3 bg-muted border border-privacy/20 rounded-[12px]">
+              <div className="w-2 h-2 rounded-full bg-privacy" />
+              <span className="text-body2 font-mono text-gray-light">
                 {publicKey.toBase58().slice(0, 8)}...{publicKey.toBase58().slice(-8)}
               </span>
             </div>
@@ -245,7 +245,7 @@ function ClaimFlowContent() {
 
         {/* Error */}
         {error && (
-          <div className="flex items-center gap-2 p-3 bg-[#EF44441A] border border-[#EF444433] rounded-[12px] text-[#EF4444]">
+          <div className="flex items-center gap-2 p-3 bg-error/10 border border-error/20 rounded-[12px] text-error">
             <AlertCircle className="w-4 h-4 shrink-0" />
             <span className="text-caption">{error}</span>
           </div>
@@ -280,14 +280,14 @@ function ClaimFlowContent() {
     return (
       <div className="flex flex-col items-center py-8">
         <div className="relative w-16 h-16 mb-4">
-          <div className="absolute inset-0 rounded-full border-4 border-[#8B8A9E26]" />
-          <div className="absolute inset-0 rounded-full border-4 border-[#14F195] border-t-transparent animate-spin" />
+          <div className="absolute inset-0 rounded-full border-4 border-gray/15" />
+          <div className="absolute inset-0 rounded-full border-4 border-privacy border-t-transparent animate-spin" />
           <div className="absolute inset-0 flex items-center justify-center">
-            <Shield className="w-6 h-6 text-[#14F195]" />
+            <Shield className="w-6 h-6 text-privacy" />
           </div>
         </div>
-        <p className="text-body2 text-[#C7C5D1]">Verifying claim...</p>
-        <p className="text-caption text-[#8B8A9E]">Looking up deposit on-chain</p>
+        <p className="text-body2 text-gray-light">Verifying claim...</p>
+        <p className="text-caption text-gray">Looking up deposit on-chain</p>
       </div>
     );
   }
@@ -296,14 +296,14 @@ function ClaimFlowContent() {
     return (
       <div className="flex flex-col items-center py-8">
         <div className="relative w-16 h-16 mb-4">
-          <div className="absolute inset-0 rounded-full border-4 border-[#8B8A9E26]" />
-          <div className="absolute inset-0 rounded-full border-4 border-[#FFABFE] border-t-transparent animate-spin" />
+          <div className="absolute inset-0 rounded-full border-4 border-gray/15" />
+          <div className="absolute inset-0 rounded-full border-4 border-purple border-t-transparent animate-spin" />
           <div className="absolute inset-0 flex items-center justify-center">
-            <Coins className="w-6 h-6 text-[#FFABFE]" />
+            <Coins className="w-6 h-6 text-purple" />
           </div>
         </div>
-        <p className="text-body2 text-[#C7C5D1]">Claiming tokens...</p>
-        <p className="text-caption text-[#8B8A9E]">Minting zkBTC to your wallet</p>
+        <p className="text-body2 text-gray-light">Claiming tokens...</p>
+        <p className="text-caption text-gray">Minting zkBTC to your wallet</p>
       </div>
     );
   }
@@ -311,30 +311,30 @@ function ClaimFlowContent() {
   if (step === "success") {
     return (
       <div className="space-y-4">
-        <div className="flex items-center gap-3 p-3 bg-[#4ADE801A] border border-[#4ADE8033] rounded-[12px]">
-          <CheckCircle2 className="w-5 h-5 text-[#4ADE80]" />
-          <span className="text-body2 text-[#4ADE80]">Tokens claimed successfully!</span>
+        <div className="flex items-center gap-3 p-3 bg-success/10 border border-success/20 rounded-[12px]">
+          <CheckCircle2 className="w-5 h-5 text-success" />
+          <span className="text-body2 text-success">Tokens claimed successfully!</span>
         </div>
 
         {/* Claim Details */}
         <div className="space-y-3">
           {claimedAmount && (
-            <div className="p-3 bg-[#16161B] border border-[#8B8A9E26] rounded-[12px]">
-              <p className="text-caption text-[#8B8A9E] mb-1">Amount Claimed</p>
-              <p className="text-heading6 text-[#14F195]">
+            <div className="p-3 bg-muted border border-gray/15 rounded-[12px]">
+              <p className="text-caption text-gray mb-1">Amount Claimed</p>
+              <p className="text-heading6 text-privacy">
                 {formatBtc(claimedAmount)} zkBTC
               </p>
             </div>
           )}
 
           {txSignature && (
-            <div className="p-3 bg-[#16161B] border border-[#8B8A9E26] rounded-[12px]">
-              <p className="text-caption text-[#8B8A9E] mb-1">Transaction</p>
+            <div className="p-3 bg-muted border border-gray/15 rounded-[12px]">
+              <p className="text-caption text-gray mb-1">Transaction</p>
               <a
                 href={`https://explorer.solana.com/tx/${txSignature}?cluster=devnet`}
                 target="_blank"
                 rel="noopener noreferrer"
-                className="text-caption font-mono text-[#14F195] hover:underline break-all flex items-center gap-1"
+                className="text-caption font-mono text-privacy hover:underline break-all flex items-center gap-1"
               >
                 {txSignature.slice(0, 16)}...{txSignature.slice(-16)}
                 <ExternalLink className="w-3 h-3 shrink-0" />
@@ -354,15 +354,15 @@ function ClaimFlowContent() {
   if (step === "error") {
     return (
       <div className="space-y-4">
-        <div className="flex items-center gap-3 p-3 bg-[#EF44441A] border border-[#EF444433] rounded-[12px]">
-          <AlertCircle className="w-5 h-5 text-[#EF4444]" />
-          <span className="text-body2 text-[#EF4444]">Claim failed</span>
+        <div className="flex items-center gap-3 p-3 bg-error/10 border border-error/20 rounded-[12px]">
+          <AlertCircle className="w-5 h-5 text-error" />
+          <span className="text-body2 text-error">Claim failed</span>
         </div>
 
         {error && (
-          <div className="p-3 bg-[#16161B] border border-[#8B8A9E26] rounded-[12px]">
-            <p className="text-caption text-[#8B8A9E] mb-1">Error</p>
-            <p className="text-body2 text-[#EF4444]">{error}</p>
+          <div className="p-3 bg-muted border border-gray/15 rounded-[12px]">
+            <p className="text-caption text-gray mb-1">Error</p>
+            <p className="text-body2 text-error">{error}</p>
           </div>
         )}
 
@@ -380,7 +380,7 @@ export function ClaimFlow() {
   return (
     <Suspense fallback={
       <div className="flex flex-col items-center py-8">
-        <div className="w-16 h-16 rounded-full border-4 border-[#8B8A9E26] border-t-[#14F195] animate-spin" />
+        <div className="w-16 h-16 rounded-full border-4 border-gray/15 border-t-privacy animate-spin" />
       </div>
     }>
       <ClaimFlowContent />

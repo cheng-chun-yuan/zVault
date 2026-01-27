@@ -42,14 +42,14 @@ export function Providers({ children }: { children: React.ReactNode }) {
                   position="top-right"
                   toastOptions={{
                     style: {
-                      background: "#16161B",
+                      background: "var(--muted)",
                       border: "1px solid rgba(139, 138, 158, 0.15)",
-                      color: "#C7C5D1",
+                      color: "var(--color-gray-light)",
                     },
                     classNames: {
-                      success: "!border-[#14F195]/30 !bg-[#14F195]/10",
-                      error: "!border-red-500/30 !bg-red-500/10",
-                      warning: "!border-[#FFA726]/30 !bg-[#FFA726]/10",
+                      success: "!border-privacy/30 !bg-privacy/10",
+                      error: "!border-error/30 !bg-error/10",
+                      warning: "!border-warning-alt/30 !bg-warning-alt/10",
                     },
                   }}
                 />

@@ -217,11 +217,11 @@ export function WithdrawFlow() {
     if (connected && !hasKeys) {
       return (
         <div className="flex flex-col items-center justify-center py-8">
-          <div className="rounded-full bg-[#FFABFE1A] p-4 mb-4">
-            <Key className="h-10 w-10 text-[#FFABFE]" />
+          <div className="rounded-full bg-purple/10 p-4 mb-4">
+            <Key className="h-10 w-10 text-purple" />
           </div>
           <p className="text-heading6 text-foreground mb-2">Derive Your Keys</p>
-          <p className="text-body2 text-[#8B8A9E] text-center mb-6">
+          <p className="text-body2 text-gray text-center mb-6">
             Sign a message to derive your stealth keys and scan for deposits
           </p>
           <button
@@ -239,11 +239,11 @@ export function WithdrawFlow() {
     if (connected && hasKeys && availableNotes.length === 0) {
       return (
         <div className="flex flex-col items-center justify-center py-8">
-          <div className="rounded-full bg-[#8B8A9E1A] p-4 mb-4">
-            <Key className="h-10 w-10 text-[#8B8A9E]" />
+          <div className="rounded-full bg-gray/10 p-4 mb-4">
+            <Key className="h-10 w-10 text-gray" />
           </div>
           <p className="text-heading6 text-foreground mb-2">No Notes Available</p>
-          <p className="text-body2 text-[#8B8A9E] text-center mb-4">
+          <p className="text-body2 text-gray text-center mb-4">
             {inboxLoading ? "Scanning for deposits..." : "You need to receive a stealth deposit first."}
           </p>
           <div className="privacy-box mb-4 w-full">
@@ -269,11 +269,11 @@ export function WithdrawFlow() {
     // Not connected
     return (
       <div className="flex flex-col items-center justify-center py-8">
-        <div className="rounded-full bg-[#FFABFE1A] p-4 mb-4">
-          <Wallet className="h-10 w-10 text-[#FFABFE]" />
+        <div className="rounded-full bg-purple/10 p-4 mb-4">
+          <Wallet className="h-10 w-10 text-purple" />
         </div>
         <p className="text-heading6 text-foreground mb-2">Connect Your Wallet</p>
-        <p className="text-body2 text-[#8B8A9E] text-center mb-6">
+        <p className="text-body2 text-gray text-center mb-6">
           Connect your Solana wallet to withdraw to zBTC
         </p>
         <WalletButton className="btn-primary w-full justify-center" />
@@ -287,12 +287,12 @@ export function WithdrawFlow() {
       <div className="flex flex-col">
         {/* Header */}
         <div className="flex items-center gap-3 mb-4">
-          <div className="p-2 rounded-[10px] bg-[#FFABFE1A] border border-[#FFABFE33]">
-            <Key className="w-5 h-5 text-[#FFABFE]" />
+          <div className="p-2 rounded-[10px] bg-purple/10 border border-purple/20">
+            <Key className="w-5 h-5 text-purple" />
           </div>
           <div>
             <p className="text-body2-semibold text-foreground">Select Note to Withdraw</p>
-            <p className="text-caption text-[#8B8A9E]">Choose a note from your deposits</p>
+            <p className="text-caption text-gray">Choose a note from your deposits</p>
           </div>
         </div>
 
@@ -315,19 +315,19 @@ export function WithdrawFlow() {
               onClick={() => handleSelectNote(note)}
               className={cn(
                 "w-full p-4 rounded-[12px] text-left transition-all",
-                "bg-[#16161B] border border-[#8B8A9E26]",
-                "hover:border-[#FFABFE66] hover:bg-[#FFABFE0D]"
+                "bg-muted border border-gray/15",
+                "hover:border-purple/40 hover:bg-purple/5"
               )}
             >
               <div className="flex justify-between items-center mb-2">
                 <span className="text-body2-semibold text-foreground">
                   {formatBtc(Number(note.amount))} zkBTC
                 </span>
-                <span className="text-caption text-[#8B8A9E]">
+                <span className="text-caption text-gray">
                   {Number(note.amount).toLocaleString()} sats
                 </span>
               </div>
-              <div className="text-caption text-[#8B8A9E] font-mono truncate">
+              <div className="text-caption text-gray font-mono truncate">
                 {truncateMiddle(note.commitmentHex, 8)}
               </div>
             </button>
@@ -335,9 +335,9 @@ export function WithdrawFlow() {
         </div>
 
         {/* Info */}
-        <div className="flex items-center gap-3 p-3 bg-[#16161B] border border-[#8B8A9E26] rounded-[12px]">
-          <AlertCircle className="w-5 h-5 text-[#8B8A9E] shrink-0" />
-          <p className="text-caption text-[#8B8A9E]">
+        <div className="flex items-center gap-3 p-3 bg-muted border border-gray/15 rounded-[12px]">
+          <AlertCircle className="w-5 h-5 text-gray shrink-0" />
+          <p className="text-caption text-gray">
             You can withdraw any amount up to the note balance (minus fees).
           </p>
         </div>
@@ -355,8 +355,8 @@ export function WithdrawFlow() {
     return (
       <div className="flex flex-col text-start">
         {/* Selected note info */}
-        <div className="flex items-center gap-3 p-3 mb-4 bg-[#FFABFE0D] border border-[#FFABFE33] rounded-[12px]">
-          <Key className="w-5 h-5 text-[#FFABFE] shrink-0" />
+        <div className="flex items-center gap-3 p-3 mb-4 bg-purple/5 border border-purple/20 rounded-[12px]">
+          <Key className="w-5 h-5 text-purple shrink-0" />
           <div className="flex-1">
             <div className="flex justify-between items-center">
               <span className="text-body2-semibold text-foreground">
@@ -364,12 +364,12 @@ export function WithdrawFlow() {
               </span>
               <button
                 onClick={() => setStep("select_note")}
-                className="text-caption text-[#FFABFE] hover:text-[#C7C5D1] transition-colors"
+                className="text-caption text-purple hover:text-gray-light transition-colors"
               >
                 Change
               </button>
             </div>
-            <span className="text-caption text-[#8B8A9E]">
+            <span className="text-caption text-gray">
               Max withdraw: {formatBtc(maxWithdrawSats)} zkBTC (after fee)
             </span>
           </div>
@@ -377,14 +377,14 @@ export function WithdrawFlow() {
 
         {/* Header */}
         <div className="mb-4">
-          <p className="text-body2 text-[#C7C5D1] pl-2">Enter Amount</p>
+          <p className="text-body2 text-gray-light pl-2">Enter Amount</p>
         </div>
 
         {/* Amount Input */}
-        <div className="w-full flex flex-col bg-[#0F0F1280] rounded-[12px] text-start mb-4">
-          <div className="flex flex-row border border-solid border-[#8B8A9E33] p-[6px] pr-4 rounded-[inherit]">
+        <div className="w-full flex flex-col bg-background/50 rounded-[12px] text-start mb-4">
+          <div className="flex flex-row border border-solid border-gray/20 p-[6px] pr-4 rounded-[inherit]">
             {/* zkBTC Badge */}
-            <div className="w-[135px] h-[72px] flex items-center gap-2 border border-solid border-[#8B8A9E26] bg-[#202027] rounded-[8px] text-body1 text-[#F1F0F3] p-3 shrink-0">
+            <div className="w-[135px] h-[72px] flex items-center gap-2 border border-solid border-gray/15 bg-card rounded-[8px] text-body1 text-foreground p-3 shrink-0">
               <div className="w-6 h-6 rounded-full bg-gradient-to-r from-violet-500 to-purple-500 flex items-center justify-center text-[10px] font-bold text-white">zk</div>
               zkBTC
             </div>
@@ -400,15 +400,15 @@ export function WithdrawFlow() {
                 max={noteAmountSats}
                 className={cn(
                   "px-4 py-1 w-full flex-1 text-heading5 outline-none",
-                  "bg-transparent text-[#F1F0F3] placeholder:text-[#8B8A9E]",
+                  "bg-transparent text-foreground placeholder:text-gray",
                   "[appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
                 )}
                 style={{
                   boxShadow:
-                    "0px -1px 0px 0px #8B8A9E40 inset, 0px -2px 0px 0px #0F0F12 inset",
+                    "0px -1px 0px 0px rgba(139, 138, 158, 0.25) inset, 0px -2px 0px 0px var(--background) inset",
                 }}
               />
-              <div className="px-4 py-[6px] text-body2 text-[#8B8A9E]">
+              <div className="px-4 py-[6px] text-body2 text-gray">
                 sats to withdraw
               </div>
             </div>
@@ -419,17 +419,17 @@ export function WithdrawFlow() {
             "flex flex-col items-stretch gap-2 px-4 py-3 text-body2-semibold",
             !isValidAmount && "blur-[4px]"
           )}>
-            <div className="flex justify-between text-[#FFF]">
+            <div className="flex justify-between text-white">
               <span>You Will Receive</span>
-              <span className="flex items-center gap-2 text-[#14F195]">
+              <span className="flex items-center gap-2 text-privacy">
                 {formatBtc(receiveAmount)} zBTC
               </span>
             </div>
-            <div className="flex justify-between text-[#C7C5D1]">
+            <div className="flex justify-between text-gray-light">
               <span>Service Fee</span>
               <span>{formatBtc(SERVICE_FEE_SATS)} sats</span>
             </div>
-            <div className="flex justify-between text-[#8B8A9E]">
+            <div className="flex justify-between text-gray">
               <span>Change (kept private)</span>
               <span>{formatBtc(changeAmount)} zkBTC</span>
             </div>
@@ -438,7 +438,7 @@ export function WithdrawFlow() {
 
         {/* Recipient Wallet */}
         <div className="mb-4">
-          <p className="text-body2 text-[#C7C5D1] pl-2 mb-2">Recipient Wallet</p>
+          <p className="text-body2 text-gray-light pl-2 mb-2">Recipient Wallet</p>
           {isEditingRecipient ? (
             <div className="space-y-2">
               <div className="flex items-center gap-2">
@@ -451,17 +451,17 @@ export function WithdrawFlow() {
                   }}
                   placeholder="Enter Solana address..."
                   className={cn(
-                    "flex-1 px-3 py-2.5 bg-[#16161B] border rounded-[10px]",
-                    "text-body2 font-mono text-[#C7C5D1] placeholder:text-[#8B8A9E66]",
+                    "flex-1 px-3 py-2.5 bg-muted border rounded-[10px]",
+                    "text-body2 font-mono text-gray-light placeholder:text-gray/40",
                     "outline-none transition-colors",
                     recipientError
                       ? "border-red-500/50"
-                      : "border-[#8B8A9E33] focus:border-[#FFABFE66]"
+                      : "border-gray/20 focus:border-purple/40"
                   )}
                 />
                 <button
                   onClick={handleSaveRecipient}
-                  className="p-2.5 rounded-[10px] bg-[#14F1951A] hover:bg-[#14F19533] text-[#14F195] transition-colors"
+                  className="p-2.5 rounded-[10px] bg-privacy/10 hover:bg-privacy/20 text-privacy transition-colors"
                   title="Save"
                 >
                   <Check className="w-4 h-4" />
@@ -470,7 +470,7 @@ export function WithdrawFlow() {
                   onClick={() => {
                     handleResetRecipient();
                   }}
-                  className="p-2.5 rounded-[10px] bg-[#8B8A9E1A] hover:bg-[#8B8A9E33] text-[#8B8A9E] transition-colors"
+                  className="p-2.5 rounded-[10px] bg-gray/10 hover:bg-gray/20 text-gray transition-colors"
                   title="Cancel"
                 >
                   <X className="w-4 h-4" />
@@ -482,7 +482,7 @@ export function WithdrawFlow() {
               {publicKey && recipientAddress !== publicKey.toBase58() && (
                 <button
                   onClick={handleResetRecipient}
-                  className="text-caption text-[#FFABFE] hover:text-[#FFABFE]/80 pl-2 transition-colors"
+                  className="text-caption text-purple hover:text-purple/80 pl-2 transition-colors"
                 >
                   Reset to my wallet
                 </button>
@@ -492,29 +492,29 @@ export function WithdrawFlow() {
             <div
               className={cn(
                 "flex items-center gap-2 p-3 rounded-[12px] cursor-pointer transition-colors",
-                "bg-[#16161B] border",
+                "bg-muted border",
                 isOwnWallet
-                  ? "border-[#14F19533] hover:border-[#14F19566]"
-                  : "border-[#FFABFE33] hover:border-[#FFABFE66]"
+                  ? "border-privacy/20 hover:border-privacy/40"
+                  : "border-purple/20 hover:border-purple/40"
               )}
               onClick={() => setIsEditingRecipient(true)}
             >
               <div className={cn(
                 "w-2 h-2 rounded-full",
-                isOwnWallet ? "bg-[#14F195]" : "bg-[#FFABFE]"
+                isOwnWallet ? "bg-privacy" : "bg-purple"
               )} />
-              <span className="flex-1 text-body2 font-mono text-[#C7C5D1] truncate">
+              <span className="flex-1 text-body2 font-mono text-gray-light truncate">
                 {recipientAddress ? truncateMiddle(recipientAddress, 8) : "—"}
               </span>
-              <Pencil className="w-3.5 h-3.5 text-[#8B8A9E]" />
+              <Pencil className="w-3.5 h-3.5 text-gray" />
             </div>
           )}
-          <p className="text-caption text-[#8B8A9E] mt-1 pl-2">
+          <p className="text-caption text-gray mt-1 pl-2">
             {isOwnWallet
               ? "zBTC will be sent to your connected wallet"
               : "zBTC will be sent to a custom address"}
             {!isEditingRecipient && (
-              <span className="text-[#8B8A9E66]"> • Click to edit</span>
+              <span className="text-gray/40"> • Click to edit</span>
             )}
           </p>
         </div>
@@ -524,17 +524,17 @@ export function WithdrawFlow() {
           <Shield className="w-5 h-5 shrink-0" />
           <div className="flex flex-col">
             <span className="text-body2-semibold">Zero-Knowledge Withdrawal</span>
-            <span className="text-caption text-[#4ADE80]/80">
+            <span className="text-caption text-success/80">
               Your withdrawal amount and original deposit are hidden on-chain
             </span>
           </div>
         </div>
 
         {/* Processing info */}
-        <div className="flex items-center gap-3 p-3 bg-[#16161B] border border-[#8B8A9E26] rounded-[12px] mb-4">
-          <Clock className="w-5 h-5 text-[#8B8A9E] shrink-0" />
-          <div className="text-caption text-[#8B8A9E]">
-            <span className="text-[#C7C5D1]">Processing time:</span> Instant • Minimum: {formatBtc(MIN_WITHDRAW_SATS)} zkBTC
+        <div className="flex items-center gap-3 p-3 bg-muted border border-gray/15 rounded-[12px] mb-4">
+          <Clock className="w-5 h-5 text-gray shrink-0" />
+          <div className="text-caption text-gray">
+            <span className="text-gray-light">Processing time:</span> Instant • Minimum: {formatBtc(MIN_WITHDRAW_SATS)} zkBTC
           </div>
         </div>
 
@@ -565,18 +565,18 @@ export function WithdrawFlow() {
       <div className="flex flex-col items-center py-6">
         {/* Progress circle */}
         <div className="relative w-20 h-20 mb-4">
-          <div className="absolute inset-0 rounded-full border-4 border-[#8B8A9E26]" />
+          <div className="absolute inset-0 rounded-full border-4 border-gray/15" />
           <div
-            className="absolute inset-0 rounded-full border-4 border-[#FFABFE] border-t-transparent animate-spin"
+            className="absolute inset-0 rounded-full border-4 border-purple border-t-transparent animate-spin"
             style={{ animationDuration: "2s" }}
           />
           <div className="absolute inset-0 flex items-center justify-center">
-            <Shield className="w-8 h-8 text-[#FFABFE]" />
+            <Shield className="w-8 h-8 text-purple" />
           </div>
         </div>
 
         <p className="text-heading6 text-foreground mb-2">Generating ZK Proof</p>
-        <p className="text-body2 text-[#8B8A9E] text-center mb-4">
+        <p className="text-body2 text-gray text-center mb-4">
           Creating your zero-knowledge withdrawal proof...
         </p>
 
@@ -599,36 +599,36 @@ export function WithdrawFlow() {
     return (
       <div className="flex flex-col items-center">
         {/* Success icon */}
-        <div className="rounded-full bg-[#4ADE801A] p-4 mb-4">
-          <CheckCircle2 className="h-12 w-12 text-[#4ADE80]" />
+        <div className="rounded-full bg-success/10 p-4 mb-4">
+          <CheckCircle2 className="h-12 w-12 text-success" />
         </div>
 
         <p className="text-heading6 text-foreground mb-2">Withdrawal Complete!</p>
-        <p className="text-body2 text-[#8B8A9E] text-center mb-6">
+        <p className="text-body2 text-gray text-center mb-6">
           Your zBTC has been sent to your wallet
         </p>
 
         {/* Details card */}
         <div className="w-full gradient-bg-card p-4 rounded-[12px] mb-4 space-y-3">
           <div className="flex justify-between items-center text-body2">
-            <span className="text-[#C7C5D1]">Request ID</span>
+            <span className="text-gray-light">Request ID</span>
             <span className="font-mono text-foreground text-xs">{truncateMiddle(requestId, 6)}</span>
           </div>
           <div className="flex justify-between items-center text-body2">
-            <span className="text-[#C7C5D1]">Withdrawn</span>
+            <span className="text-gray-light">Withdrawn</span>
             <span className="text-foreground">{formatBtc(amountSats ?? 0)} zkBTC</span>
           </div>
           <div className="flex justify-between items-center text-body2">
-            <span className="text-[#C7C5D1]">Received</span>
-            <span className="text-[#14F195] flex items-center gap-2">
+            <span className="text-gray-light">Received</span>
+            <span className="text-privacy flex items-center gap-2">
               {formatBtc(receiveAmount)} zBTC
             </span>
           </div>
-          <div className="flex justify-between items-center text-body2 pt-2 border-t border-[#8B8A9E26]">
-            <span className="text-[#C7C5D1]">Destination</span>
+          <div className="flex justify-between items-center text-body2 pt-2 border-t border-gray/15">
+            <span className="text-gray-light">Destination</span>
             <span className={cn(
               "font-mono text-xs",
-              isOwnWallet ? "text-foreground" : "text-[#FFABFE]"
+              isOwnWallet ? "text-foreground" : "text-purple"
             )}>
               {recipientAddress ? truncateMiddle(recipientAddress, 6) : "—"}
               {!isOwnWallet && " (custom)"}
@@ -638,42 +638,42 @@ export function WithdrawFlow() {
 
         {/* Change Claim Link - for partial withdrawals */}
         {changeClaimLink && changeAmountSats > 0 && (
-          <div className="w-full gradient-bg-card p-4 rounded-[12px] mb-4 border border-[#14F19533]">
+          <div className="w-full gradient-bg-card p-4 rounded-[12px] mb-4 border border-privacy/20">
             <div className="flex items-center justify-between mb-2">
               <div className="flex items-center gap-2">
-                <Key className="w-4 h-4 text-[#14F195]" />
-                <span className="text-body2-semibold text-[#14F195]">Change Claim Link</span>
+                <Key className="w-4 h-4 text-privacy" />
+                <span className="text-body2-semibold text-privacy">Change Claim Link</span>
               </div>
               <button
                 onClick={copyChangeClaimLink}
-                className="p-1.5 rounded-[6px] bg-[#14F1951A] hover:bg-[#14F19533] transition-colors"
+                className="p-1.5 rounded-[6px] bg-privacy/10 hover:bg-privacy/20 transition-colors"
               >
                 {changeClaimCopied ? (
-                  <Check className="w-3.5 h-3.5 text-[#4ADE80]" />
+                  <Check className="w-3.5 h-3.5 text-success" />
                 ) : (
-                  <Copy className="w-3.5 h-3.5 text-[#14F195]" />
+                  <Copy className="w-3.5 h-3.5 text-privacy" />
                 )}
               </button>
             </div>
-            <div className="mb-2 p-2 bg-[#0F0F12] rounded-[8px]">
+            <div className="mb-2 p-2 bg-background rounded-[8px]">
               <div className="flex justify-between items-center text-body2">
-                <span className="text-[#8B8A9E]">Remaining Balance</span>
-                <span className="text-[#14F195] font-semibold">{formatBtc(changeAmountSats)} zkBTC</span>
+                <span className="text-gray">Remaining Balance</span>
+                <span className="text-privacy font-semibold">{formatBtc(changeAmountSats)} zkBTC</span>
               </div>
             </div>
-            <code className="text-caption font-mono text-[#C7C5D1] break-all block mb-2">
+            <code className="text-caption font-mono text-gray-light break-all block mb-2">
               {`${typeof window !== 'undefined' ? window.location.origin : ''}/claim?note=${changeClaimLink}`}
             </code>
-            <p className="text-caption text-[#8B8A9E]">
+            <p className="text-caption text-gray">
               Save this link to claim your remaining balance later!
             </p>
           </div>
         )}
 
         {/* Info box */}
-        <div className="w-full flex items-center gap-3 p-3 bg-[#14F1951A] border border-[#14F19533] rounded-[12px] mb-6">
-          <CheckCircle2 className="w-5 h-5 text-[#14F195] shrink-0" />
-          <p className="text-caption text-[#C7C5D1]">
+        <div className="w-full flex items-center gap-3 p-3 bg-privacy/10 border border-privacy/20 rounded-[12px] mb-6">
+          <CheckCircle2 className="w-5 h-5 text-privacy shrink-0" />
+          <p className="text-caption text-gray-light">
             Your zBTC is now a public SPL token in your wallet.
           </p>
         </div>

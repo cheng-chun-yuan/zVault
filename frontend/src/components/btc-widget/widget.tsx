@@ -36,7 +36,7 @@ const TabButton = memo(function TabButton({
       className={cn(
         "flex-1 p-[10px] flex items-center justify-center gap-2",
         "text-sm font-semibold rounded-xl cursor-pointer h-10 transition-colors",
-        isActive ? "text-[#FFABFE] bg-[#FD82FF1A]" : "text-[#8B8A9E] hover:text-[#C7C5D1]"
+        isActive ? "text-purple bg-purple/10" : "text-gray hover:text-gray-light"
       )}
       onClick={onClick}
     >
@@ -49,12 +49,12 @@ const TabButton = memo(function TabButton({
 // Footer
 const Footer = memo(function Footer() {
   return (
-    <div className="flex justify-between items-center gap-2 mt-4 text-[#8B8A9E] px-2 text-xs">
+    <div className="flex justify-between items-center gap-2 mt-4 text-gray px-2 text-xs">
       <div className="flex items-center gap-4">
-        <a href="https://zVault.xyz" target="_blank" rel="noopener noreferrer" className="hover:text-[#C7C5D1]">
+        <a href="https://zVault.xyz" target="_blank" rel="noopener noreferrer" className="hover:text-gray-light">
           zVault
         </a>
-        <a href="https://github.com/zVault" target="_blank" rel="noopener noreferrer" className="hover:text-[#C7C5D1]">
+        <a href="https://github.com/zVault" target="_blank" rel="noopener noreferrer" className="hover:text-gray-light">
           GitHub
         </a>
       </div>
@@ -107,7 +107,7 @@ export function IntegratedWidget({
     <div
       {...props}
       className={cn(
-        "bg-[#202027] border border-[#8B8A9E4D] p-3 w-[420px] max-w-[calc(100vw-32px)] rounded-2xl max-h-[85vh] overflow-y-auto",
+        "bg-card border border-gray/30 p-3 w-[420px] max-w-[calc(100vw-32px)] rounded-2xl max-h-[85vh] overflow-y-auto",
         className
       )}
     >
@@ -133,13 +133,13 @@ export function zkBTCWidget({ trigger, defaultTab = "deposit" }: {
         <Dialog.Overlay className="fixed inset-0 bg-black/50 backdrop-blur-sm" />
         <Dialog.Content className={cn(
           "fixed left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2",
-          "bg-[#202027] border border-[#8B8A9E4D] p-3 w-[420px] max-w-[calc(100vw-32px)] rounded-2xl",
+          "bg-card border border-gray/30 p-3 w-[420px] max-w-[calc(100vw-32px)] rounded-2xl",
           "max-h-[calc(100vh-32px)] overflow-y-auto"
         )}>
           <div className="flex justify-end mb-2">
             <Dialog.Title hidden>zVault</Dialog.Title>
             <Dialog.Close asChild>
-              <button className="rounded-lg p-2 text-[#8B8A9E] hover:text-white hover:bg-[#16161B]" aria-label="Close">
+              <button className="rounded-lg p-2 text-gray hover:text-white hover:bg-muted" aria-label="Close">
                 <X className="h-5 w-5" />
               </button>
             </Dialog.Close>

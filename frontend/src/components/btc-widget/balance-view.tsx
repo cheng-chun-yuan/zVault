@@ -62,7 +62,7 @@ const DepositCard = memo(({ note, status, onRefresh, isRefreshing }: {
   const escrowStatus = (status?.escrow_status as EscrowStatus) || "waiting_payment";
 
   return (
-    <div className="p-4 bg-[#16161B] border border-[#8B8A9E26] rounded-xl space-y-3">
+    <div className="p-4 bg-muted border border-gray/15 rounded-xl space-y-3">
       {/* Header */}
       <div className="flex items-center justify-between">
         <span className="text-sm text-white flex items-center gap-2">
@@ -70,8 +70,8 @@ const DepositCard = memo(({ note, status, onRefresh, isRefreshing }: {
           {formatBtc(note.amountSats)} BTC
         </span>
         <div className="flex items-center gap-2">
-          <button onClick={onRefresh} disabled={isRefreshing} className="p-1.5 rounded bg-[#8B8A9E1A] hover:bg-[#8B8A9E33]">
-            <RefreshCw className={cn("w-3 h-3 text-[#8B8A9E]", isRefreshing && "animate-spin")} />
+          <button onClick={onRefresh} disabled={isRefreshing} className="p-1.5 rounded bg-gray/10 hover:bg-gray/20">
+            <RefreshCw className={cn("w-3 h-3 text-gray", isRefreshing && "animate-spin")} />
           </button>
           <StatusBadge status={escrowStatus} />
         </div>
@@ -79,7 +79,7 @@ const DepositCard = memo(({ note, status, onRefresh, isRefreshing }: {
 
       {/* Address */}
       <div className="space-y-1">
-        <span className="text-xs text-[#8B8A9E]">Deposit Address</span>
+        <span className="text-xs text-gray">Deposit Address</span>
         <div className="flex items-center gap-2">
           <code className="flex-1 text-xs font-mono text-orange-500 break-all">{note.taprootAddress}</code>
           <button onClick={() => copy(note.taprootAddress)} className="p-1.5 rounded bg-orange-500/10 hover:bg-orange-500/20">
@@ -92,16 +92,16 @@ const DepositCard = memo(({ note, status, onRefresh, isRefreshing }: {
       {note.secretNote && (
         <div className="flex items-center gap-2 text-xs">
           <Key className="w-3 h-3 text-emerald-400" />
-          <span className="text-[#8B8A9E]">Secret saved locally</span>
+          <span className="text-gray">Secret saved locally</span>
         </div>
       )}
 
       {/* Confirmations */}
       {status?.btc_txid && (
-        <div className="space-y-2 pt-2 border-t border-[#8B8A9E26]">
+        <div className="space-y-2 pt-2 border-t border-gray/15">
           <div className="flex justify-between text-xs">
-            <span className="text-[#8B8A9E]">Confirmations</span>
-            <span className="text-[#C7C5D1]">{status.confirmations} / {status.required_confirmations}</span>
+            <span className="text-gray">Confirmations</span>
+            <span className="text-gray-light">{status.confirmations} / {status.required_confirmations}</span>
           </div>
           <ProgressBar current={status.confirmations} total={status.required_confirmations} />
           <a
@@ -120,7 +120,7 @@ const DepositCard = memo(({ note, status, onRefresh, isRefreshing }: {
         href={`https://mempool.space/testnet/address/${note.taprootAddress}`}
         target="_blank"
         rel="noopener noreferrer"
-        className="flex items-center justify-center gap-2 text-xs text-[#8B8A9E] hover:text-[#C7C5D1] pt-2"
+        className="flex items-center justify-center gap-2 text-xs text-gray hover:text-gray-light pt-2"
       >
         View on Mempool <ExternalLink className="w-3 h-3" />
       </a>
@@ -188,8 +188,8 @@ export function BalanceView() {
   if (!mounted || !isLoaded) {
     return (
       <div className="flex flex-col items-center py-12">
-        <div className="w-12 h-12 mb-4 border-4 border-[#8B8A9E26] border-t-pink-400 rounded-full animate-spin" />
-        <p className="text-sm text-[#8B8A9E]">Loading...</p>
+        <div className="w-12 h-12 mb-4 border-4 border-gray/15 border-t-pink-400 rounded-full animate-spin" />
+        <p className="text-sm text-gray">Loading...</p>
       </div>
     );
   }
@@ -203,8 +203,8 @@ export function BalanceView() {
           <p className="text-lg font-semibold text-white">Bitcoin Deposits</p>
         </div>
         {notes.length > 0 && (
-          <button onClick={fetchAll} disabled={refreshing.size > 0} className="p-2 rounded-lg bg-[#16161B] border border-[#8B8A9E26] hover:bg-[#202027]">
-            <RefreshCw className={cn("h-4 w-4 text-[#8B8A9E]", refreshing.size > 0 && "animate-spin")} />
+          <button onClick={fetchAll} disabled={refreshing.size > 0} className="p-2 rounded-lg bg-muted border border-gray/15 hover:bg-card">
+            <RefreshCw className={cn("h-4 w-4 text-gray", refreshing.size > 0 && "animate-spin")} />
           </button>
         )}
       </div>
@@ -235,19 +235,19 @@ export function BalanceView() {
           <div className="rounded-full bg-orange-500/10 p-4 w-fit mx-auto mb-4">
             <BitcoinIcon className="h-8 w-8" />
           </div>
-          <p className="text-sm text-[#8B8A9E]">No deposits yet</p>
-          <p className="text-xs text-[#8B8A9E66] mt-1">Create a deposit to see your Bitcoin activity</p>
+          <p className="text-sm text-gray">No deposits yet</p>
+          <p className="text-xs text-gray/40 mt-1">Create a deposit to see your Bitcoin activity</p>
         </div>
       )}
 
       {/* Simple address lookup */}
-      <div className="border-t border-[#8B8A9E26] pt-4">
+      <div className="border-t border-gray/15 pt-4">
         <button onClick={() => setShowLookup(!showLookup)} className="flex items-center justify-between w-full">
           <div className="flex items-center gap-2">
             <Search className="w-4 h-4 text-orange-500" />
-            <span className="text-sm text-[#C7C5D1]">Check Address Status</span>
+            <span className="text-sm text-gray-light">Check Address Status</span>
           </div>
-          <ChevronDown className={cn("w-4 h-4 text-[#8B8A9E] transition-transform", showLookup && "rotate-180")} />
+          <ChevronDown className={cn("w-4 h-4 text-gray transition-transform", showLookup && "rotate-180")} />
         </button>
 
         {showLookup && (
@@ -257,7 +257,7 @@ export function BalanceView() {
               value={lookupAddress}
               onChange={(e) => setLookupAddress(e.target.value)}
               placeholder="tb1p... or bc1p..."
-              className="w-full p-2.5 bg-[#16161B] border border-[#8B8A9E26] rounded-lg text-xs font-mono text-white placeholder:text-[#8B8A9E66] outline-none focus:border-orange-500/50"
+              className="w-full p-2.5 bg-muted border border-gray/15 rounded-lg text-xs font-mono text-white placeholder:text-gray/40 outline-none focus:border-orange-500/50"
             />
             {lookupError && (
               <div className="flex items-center gap-2 p-2 bg-red-500/10 border border-red-500/30 rounded-lg text-red-500 text-xs">
@@ -273,14 +273,14 @@ export function BalanceView() {
             </button>
 
             {lookupResult && (
-              <div className="p-3 bg-[#16161B] border border-[#8B8A9E26] rounded-lg space-y-2">
+              <div className="p-3 bg-muted border border-gray/15 rounded-lg space-y-2">
                 <div className="flex justify-between">
-                  <span className="text-xs text-[#8B8A9E]">Status</span>
+                  <span className="text-xs text-gray">Status</span>
                   <StatusBadge status={lookupResult.escrow_status || "unknown"} />
                 </div>
                 {lookupResult.found && lookupResult.amount_sats && (
                   <div className="flex justify-between">
-                    <span className="text-xs text-[#8B8A9E]">Amount</span>
+                    <span className="text-xs text-gray">Amount</span>
                     <span className="text-xs text-orange-500">{formatBtc(lookupResult.amount_sats)} BTC</span>
                   </div>
                 )}
@@ -294,7 +294,7 @@ export function BalanceView() {
                     View tx <ExternalLink className="w-3 h-3" />
                   </a>
                 )}
-                <button onClick={() => { setLookupResult(null); setLookupAddress(""); }} className="text-xs text-[#8B8A9E] hover:text-[#C7C5D1]">
+                <button onClick={() => { setLookupResult(null); setLookupAddress(""); }} className="text-xs text-gray hover:text-gray-light">
                   Clear
                 </button>
               </div>

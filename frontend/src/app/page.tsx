@@ -19,23 +19,23 @@ const FeatureCard = memo(function FeatureCard({
 }) {
   const variantStyles = {
     default: {
-      iconBg: "bg-[#FFABFE1A]",
-      iconColor: "text-[#FFABFE]",
+      iconBg: "bg-purple/10",
+      iconColor: "text-purple",
       cardClass: "gradient-bg-card",
     },
     bitcoin: {
-      iconBg: "bg-[#F7931A1A]",
-      iconColor: "text-[#F7931A] btc-glow",
+      iconBg: "bg-btc/10",
+      iconColor: "text-btc btc-glow",
       cardClass: "gradient-bg-bitcoin",
     },
     privacy: {
-      iconBg: "bg-[#14F1951A]",
-      iconColor: "text-[#14F195] privacy-glow",
+      iconBg: "bg-privacy/10",
+      iconColor: "text-privacy privacy-glow",
       cardClass: "gradient-bg-card privacy-lines",
     },
     cyber: {
-      iconBg: "bg-[#00FFFF1A]",
-      iconColor: "text-[#00FFFF]",
+      iconBg: "bg-cyan/10",
+      iconColor: "text-cyan",
       cardClass: "gradient-bg-cyber",
     },
   };
@@ -50,7 +50,7 @@ const FeatureCard = memo(function FeatureCard({
         </div>
       </div>
       <h3 className="text-heading6 text-foreground">{title}</h3>
-      <p className="text-body2 text-[#8B8A9E]">{description}</p>
+      <p className="text-body2 text-gray">{description}</p>
     </div>
   );
 });
@@ -67,7 +67,7 @@ const StatsDisplay = memo(function StatsDisplay({
   if (isLoading) {
     return (
       <div className="flex items-center justify-center py-4">
-        <Loader2 className="w-6 h-6 animate-spin text-[#8B8A9E]" />
+        <Loader2 className="w-6 h-6 animate-spin text-gray" />
       </div>
     );
   }
@@ -85,28 +85,28 @@ const StatsDisplay = memo(function StatsDisplay({
       <div className="space-y-2 text-center">
         <div className="flex items-center justify-center gap-2">
           <BitcoinIcon className="w-5 h-5 btc-glow" />
-          <span className="text-heading5 text-[#F7931A]">{totalBridgedBtc}</span>
+          <span className="text-heading5 text-btc">{totalBridgedBtc}</span>
         </div>
-        <div className="text-caption text-[#8B8A9E]">Total Bridged (BTC)</div>
+        <div className="text-caption text-gray">Total Bridged (BTC)</div>
       </div>
       <div className="space-y-2 text-center">
         <div className="flex items-center justify-center gap-2">
-          <Shield className="w-5 h-5 text-[#14F195] privacy-glow" />
-          <span className="text-heading5 text-[#14F195]">{vaultHeldBtc}</span>
+          <Shield className="w-5 h-5 text-privacy privacy-glow" />
+          <span className="text-heading5 text-privacy">{vaultHeldBtc}</span>
         </div>
-        <div className="text-caption text-[#8B8A9E]">Vault Held (BTC)</div>
+        <div className="text-caption text-gray">Vault Held (BTC)</div>
       </div>
       <div className="space-y-2 text-center">
         <div className="text-heading5 text-foreground">
           {totalDeposits}
         </div>
-        <div className="text-caption text-[#8B8A9E]">Total Deposits</div>
+        <div className="text-caption text-gray">Total Deposits</div>
       </div>
       <div className="space-y-2 text-center">
         <div className="text-heading5 text-foreground">
           {pendingCount}
         </div>
-        <div className="text-caption text-[#8B8A9E]">Pending</div>
+        <div className="text-caption text-gray">Pending</div>
       </div>
     </div>
   );
@@ -119,15 +119,15 @@ export default function Home() {
   const { stats, isLoading } = usePoolStats();
 
   return (
-    <main className="min-h-screen bg-[#0F0F12] hacker-bg noise-overlay">
+    <main className="min-h-screen bg-background hacker-bg noise-overlay">
       <div className="container mx-auto px-4 py-8 relative z-10">
         {/* Header */}
         <header className="flex items-center justify-between mb-8">
           <div className="flex items-center gap-3">
-            <div className="p-2 rounded-[12px] bg-gradient-to-br from-[#F7931A33] to-[#14F19533] border border-[#F7931A33]">
+            <div className="p-2 rounded-[12px] bg-gradient-to-br from-btc/20 to-privacy/20 border border-btc/20">
               <div className="relative">
                 <BitcoinIcon className="h-6 w-6 btc-glow" />
-                <Shield className="h-3 w-3 text-[#14F195] absolute -bottom-1 -right-1" />
+                <Shield className="h-3 w-3 text-privacy absolute -bottom-1 -right-1" />
               </div>
             </div>
             <span className="text-heading6 text-foreground">zVault</span>
@@ -137,7 +137,7 @@ export default function Home() {
               href="https://docs.zVault.xyz"
               target="_blank"
               rel="noopener noreferrer"
-              className="text-body2 text-[#8B8A9E] hover:text-[#C7C5D1] transition-colors flex items-center gap-1"
+              className="text-body2 text-gray hover:text-gray-light transition-colors flex items-center gap-1"
             >
               Docs
               <ExternalLink className="w-3 h-3" />
@@ -146,7 +146,7 @@ export default function Home() {
               href="https://github.com/zVault"
               target="_blank"
               rel="noopener noreferrer"
-              className="text-body2 text-[#8B8A9E] hover:text-[#C7C5D1] transition-colors flex items-center gap-1"
+              className="text-body2 text-gray hover:text-gray-light transition-colors flex items-center gap-1"
             >
               GitHub
               <ExternalLink className="w-3 h-3" />
@@ -162,44 +162,44 @@ export default function Home() {
             <div className="space-y-6">
               {/* Bitcoin + Privacy badge */}
               <div className="flex items-center justify-center gap-4">
-                <div className="flex items-center gap-2 px-3 py-1.5 rounded-full bg-[#F7931A1A] border border-[#F7931A33]">
+                <div className="flex items-center gap-2 px-3 py-1.5 rounded-full bg-btc/10 border border-btc/20">
                   <BitcoinIcon className="w-4 h-4" />
-                  <span className="text-caption text-[#F7931A]">Bitcoin Native</span>
+                  <span className="text-caption text-btc">Bitcoin Native</span>
                 </div>
-                <div className="flex items-center gap-2 px-3 py-1.5 rounded-full bg-[#14F1951A] border border-[#14F19533]">
-                  <Shield className="w-4 h-4 text-[#14F195]" />
-                  <span className="text-caption text-[#14F195]">ZK Privacy</span>
+                <div className="flex items-center gap-2 px-3 py-1.5 rounded-full bg-privacy/10 border border-privacy/20">
+                  <Shield className="w-4 h-4 text-privacy" />
+                  <span className="text-caption text-privacy">ZK Privacy</span>
                 </div>
               </div>
 
               {/* Main headline */}
               <h1 className="text-4xl lg:text-6xl font-bold text-foreground leading-tight">
-                <span className="bg-gradient-to-r from-[#F7931A] to-[#FFA940] bg-clip-text text-transparent">
+                <span className="bg-gradient-to-r from-btc to-btc-light bg-clip-text text-transparent">
                   Bitcoin
                 </span>{" "}
                 Meets<br />
-                <span className="bg-gradient-to-r from-[#14F195] to-[#9945FF] bg-clip-text text-transparent">
+                <span className="bg-gradient-to-r from-privacy to-sol bg-clip-text text-transparent">
                   Zero-Knowledge Privacy
                 </span>
               </h1>
 
-              <p className="text-body1 text-[#C7C5D1] max-w-xl mx-auto">
+              <p className="text-body1 text-gray-light max-w-xl mx-auto">
                 Bridge your BTC to Solana with complete privacy. Zero-knowledge proofs ensure
                 your transactions remain confidential while maintaining full Bitcoin backing.
               </p>
 
               {/* Privacy features inline */}
-              <div className="flex flex-wrap items-center justify-center gap-4 text-caption text-[#8B8A9E]">
+              <div className="flex flex-wrap items-center justify-center gap-4 text-caption text-gray">
                 <div className="flex items-center gap-1.5">
-                  <EyeOff className="w-4 h-4 text-[#14F195]" />
+                  <EyeOff className="w-4 h-4 text-privacy" />
                   <span>Hidden Amounts</span>
                 </div>
                 <div className="flex items-center gap-1.5">
-                  <Fingerprint className="w-4 h-4 text-[#9945FF]" />
+                  <Fingerprint className="w-4 h-4 text-sol" />
                   <span>Anonymous Transfers</span>
                 </div>
                 <div className="flex items-center gap-1.5">
-                  <ShieldCheck className="w-4 h-4 text-[#F7931A]" />
+                  <ShieldCheck className="w-4 h-4 text-btc" />
                   <span>1:1 BTC Backed</span>
                 </div>
               </div>
@@ -255,7 +255,7 @@ export default function Home() {
 
             {/* Stats */}
             <div className="gradient-bg-card p-6 rounded-[16px] w-full">
-              <h3 className="text-caption text-[#8B8A9E] uppercase tracking-wide mb-4 text-center">
+              <h3 className="text-caption text-gray uppercase tracking-wide mb-4 text-center">
                 Bridge Statistics
               </h3>
               <StatsDisplay stats={stats} isLoading={isLoading} />
@@ -267,34 +267,34 @@ export default function Home() {
               <div className="grid md:grid-cols-3 gap-6">
                 {/* Step 1 - Bitcoin */}
                 <div className="flex flex-col items-center text-center gap-3 p-5 gradient-bg-bitcoin rounded-[12px]">
-                  <div className="w-12 h-12 rounded-full bg-[#F7931A1A] border border-[#F7931A33] flex items-center justify-center">
-                    <Bitcoin className="w-6 h-6 text-[#F7931A] btc-glow" />
+                  <div className="w-12 h-12 rounded-full bg-btc/10 border border-btc/20 flex items-center justify-center">
+                    <Bitcoin className="w-6 h-6 text-btc btc-glow" />
                   </div>
                   <div>
                     <h3 className="text-body2-semibold text-foreground mb-1">Deposit BTC</h3>
-                    <p className="text-caption text-[#8B8A9E]">Connect your wallet and send Bitcoin to your unique deposit address</p>
+                    <p className="text-caption text-gray">Connect your wallet and send Bitcoin to your unique deposit address</p>
                   </div>
                 </div>
 
                 {/* Step 2 - Privacy */}
                 <div className="flex flex-col items-center text-center gap-3 p-5 gradient-bg-card privacy-lines rounded-[12px]">
-                  <div className="w-12 h-12 rounded-full bg-[#14F1951A] border border-[#14F19533] flex items-center justify-center">
-                    <Shield className="w-6 h-6 text-[#14F195] privacy-glow" />
+                  <div className="w-12 h-12 rounded-full bg-privacy/10 border border-privacy/20 flex items-center justify-center">
+                    <Shield className="w-6 h-6 text-privacy privacy-glow" />
                   </div>
                   <div>
                     <h3 className="text-body2-semibold text-foreground mb-1">Shield with ZK</h3>
-                    <p className="text-caption text-[#8B8A9E]">Your deposit is shielded using zero-knowledge proofs for privacy</p>
+                    <p className="text-caption text-gray">Your deposit is shielded using zero-knowledge proofs for privacy</p>
                   </div>
                 </div>
 
                 {/* Step 3 - Mint */}
                 <div className="flex flex-col items-center text-center gap-3 p-5 gradient-bg-card rounded-[12px]">
-                  <div className="w-12 h-12 rounded-full bg-gradient-to-br from-[#F7931A33] to-[#14F19533] border border-[#9945FF33] flex items-center justify-center">
-                    <Lock className="w-6 h-6 text-[#9945FF]" />
+                  <div className="w-12 h-12 rounded-full bg-gradient-to-br from-btc/20 to-privacy/20 border border-sol/20 flex items-center justify-center">
+                    <Lock className="w-6 h-6 text-sol" />
                   </div>
                   <div>
                     <h3 className="text-body2-semibold text-foreground mb-1">Mint zkBTC</h3>
-                    <p className="text-caption text-[#8B8A9E]">Receive privacy-protected zkBTC tokens on Solana</p>
+                    <p className="text-caption text-gray">Receive privacy-protected zkBTC tokens on Solana</p>
                   </div>
                 </div>
               </div>
@@ -303,18 +303,18 @@ export default function Home() {
         </div>
 
         {/* Footer */}
-        <footer className="mt-16 pt-8 border-t border-[#8B8A9E26]">
+        <footer className="mt-16 pt-8 border-t border-gray/15">
           <div className="flex flex-col md:flex-row justify-between items-center gap-4">
             <div className="flex items-center gap-2">
               <BitcoinIcon className="w-4 h-4" />
-              <span className="text-caption text-[#F7931A]">Bitcoin</span>
-              <span className="text-caption text-[#8B8A9E]">+</span>
-              <Shield className="w-4 h-4 text-[#14F195]" />
-              <span className="text-caption text-[#14F195]">Privacy</span>
-              <span className="text-caption text-[#8B8A9E]">=</span>
+              <span className="text-caption text-btc">Bitcoin</span>
+              <span className="text-caption text-gray">+</span>
+              <Shield className="w-4 h-4 text-privacy" />
+              <span className="text-caption text-privacy">Privacy</span>
+              <span className="text-caption text-gray">=</span>
               <span className="text-caption text-foreground">zVault</span>
             </div>
-            <p className="text-caption text-[#8B8A9E]">
+            <p className="text-caption text-gray">
               Demo Version - Testnet Only
             </p>
           </div>

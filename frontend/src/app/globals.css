@@ -87,6 +87,9 @@
   --color-warning-alt: #ffa726;
   --color-error: #ef4444;
 
+  /* Cyber colors */
+  --color-cyan: #00ffff;
+
   /* Disabled state colors - use disabled:bg-disabled, disabled:text-disabled */
   --color-disabled: #8b8a9e;
   --color-disabled-bg: rgb(139 138 158 / 0.2);
@@ -101,9 +104,13 @@
  *   bg-background      (#0f0f12)
  *   bg-muted           (#16161b)
  *   bg-card            (#202027)
+ *   bg-secondary       (#2c2c36)
  *   bg-privacy/10      (privacy with 10% opacity)
  *   bg-btc/10          (btc with 10% opacity)
  *   bg-gray/10         (gray with 10% opacity)
+ *   bg-purple/10       (purple with 10% opacity)
+ *   bg-success/10      (success with 10% opacity)
+ *   bg-cyan/10         (cyan with 10% opacity)
  *
  * Text:
  *   text-foreground    (#f1f0f3)
@@ -111,17 +118,25 @@
  *   text-gray-light    (#c7c5d1)
  *   text-privacy       (#14f195)
  *   text-btc           (#f7931a)
+ *   text-btc-light     (#ffa940)
  *   text-purple        (#ffabfe)
  *   text-sol           (#9945ff)
  *   text-success       (#4ade80)
  *   text-warning       (#ffb546)
  *   text-error         (#ef4444)
+ *   text-cyan          (#00ffff)
  *
  * Borders:
  *   border-border      (default border color)
  *   border-gray/15     (gray with 15% opacity)
+ *   border-gray/20     (gray with 20% opacity)
  *   border-privacy/20  (privacy with 20% opacity)
  *   border-btc/20      (btc with 20% opacity)
+ *   border-purple/20   (purple with 20% opacity)
+ *   border-success/20  (success with 20% opacity)
+ *
+ * Opacity shortcuts (hex suffix → Tailwind):
+ *   1a = /10, 26 = /15, 33 = /20, 40 = /25, 4D = /30, 66 = /40, 80 = /50
  */
 
 body {
