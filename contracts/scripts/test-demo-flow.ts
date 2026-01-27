@@ -47,9 +47,11 @@ const __dirname = path.dirname(__filename);
 // Use devnet by default (localnet requires solana-test-validator)
 const RPC_URL = process.env.RPC_URL || "https://api.devnet.solana.com";
 
-// Program ID - update after deployment
+// Program ID - load from config.json
+const configPath = path.join(__dirname, "..", "config.json");
+const config = JSON.parse(fs.readFileSync(configPath, "utf-8"));
 const PROGRAM_ID = new PublicKey(
-  process.env.PROGRAM_ID || "CBzbSQPcUXMYdmSvnA24HPZrDQPuEpq4qq2mcmErrWPR"
+  process.env.PROGRAM_ID || config.programs.devnet.zVault
 );
 
 // Instruction discriminators

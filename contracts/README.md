@@ -7,12 +7,12 @@ Solana smart contracts for zVault - a privacy-preserving Bitcoin to Solana bridg
 ### zVault (Pinocchio)
 Main privacy bridge program - optimized with [Pinocchio](https://github.com/febo/pinocchio).
 
-**Program ID (devnet):** `CBzbSQPcUXMYdmSvnA24HPZrDQPuEpq4qq2mcmErrWPR`
+**Program ID (devnet):** `5S5ynMni8Pgd6tKkpYaXiPJiEXgw927s7T2txDtDivRK`
 
 ### BTC Light Client
 Tracks Bitcoin block headers for SPV verification.
 
-**Program ID (devnet):** `8GCjjPpzRP1DhWa9PLcRhSV7aLFkE8x7vf5royAQzUfG`
+**Program ID (devnet):** `95vWurTc9BhjBvEbBdUKoTZHMPPyB1iQZEuXEaR7wPpd`
 
 ## Commands
 
