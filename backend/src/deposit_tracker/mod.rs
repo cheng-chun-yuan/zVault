@@ -23,7 +23,7 @@
 //! 3. Service polls Esplora for incoming transactions
 //! 4. After 6 confirmations, service sweeps UTXO to pool wallet
 //! 5. After 2 sweep confirmations, service submits SPV proof to Solana
-//! 6. User can claim sbBTC once status is "ready"
+//! 6. User can claim zkBTC once status is "ready"
 //!
 //! ## API Endpoints
 //!

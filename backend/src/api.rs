@@ -163,7 +163,7 @@ async fn handle_withdrawal_status(
 async fn handle_health() -> impl IntoResponse {
     Json(serde_json::json!({
         "status": "ok",
-        "service": "sbbtc-api",
+        "service": "zkbtc-api",
         "version": env!("CARGO_PKG_VERSION")
     }))
 }
@@ -311,7 +311,7 @@ pub async fn start_server(service: RedemptionService, port: u16) -> Result<(), s
     let app = create_router(service);
     let addr = std::net::SocketAddr::from(([0, 0, 0, 0], port));
 
-    println!("=== sbBTC Redemption API ===");
+    println!("=== zkBTC Redemption API ===");
     println!("Listening on http://{}", addr);
     println!();
     println!("Endpoints:");
@@ -332,7 +332,7 @@ pub async fn start_combined_server(
     let app = create_combined_router(redemption, stealth);
     let addr = std::net::SocketAddr::from(([0, 0, 0, 0], port));
 
-    println!("=== sbBTC Combined API ===");
+    println!("=== zkBTC Combined API ===");
     println!("Listening on http://{}", addr);
     println!();
     println!("Endpoints:");

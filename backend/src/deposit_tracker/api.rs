@@ -162,7 +162,7 @@ async fn handle_list_deposits(State(state): State<SharedAppState>) -> impl IntoR
 async fn handle_health() -> impl IntoResponse {
     Json(serde_json::json!({
         "status": "ok",
-        "service": "sbbtc-deposit-tracker",
+        "service": "zkbtc-deposit-tracker",
         "version": env!("CARGO_PKG_VERSION")
     }))
 }
@@ -402,7 +402,7 @@ pub async fn start_tracker_server(
     let app = create_deposit_router(tracker);
     let addr = std::net::SocketAddr::from(([0, 0, 0, 0], port));
 
-    println!("=== sbBTC Deposit Tracker API ===");
+    println!("=== zkBTC Deposit Tracker API ===");
     println!("Listening on http://{}", addr);
     println!();
     println!("Deposit Endpoints:");

@@ -28,7 +28,7 @@ COPY src ./src
 RUN touch src/main.rs src/lib.rs src/bin/redemption.rs
 
 # Build the actual binary
-RUN cargo build --release --bin sbbtc-api
+RUN cargo build --release --bin zkbtc-api
 
 # Stage 2: Create minimal runtime image
 FROM debian:bookworm-slim
@@ -42,7 +42,7 @@ RUN apt-get update && apt-get install -y \
     && rm -rf /var/lib/apt/lists/*
 
 # Copy the binary from builder
-COPY --from=builder /app/target/release/sbbtc-api /app/sbbtc-api
+COPY --from=builder /app/target/release/zkbtc-api /app/zkbtc-api
 
 # Create non-root user for security
 RUN useradd -m -u 1000 appuser && chown -R appuser:appuser /app
@@ -54,4 +54,4 @@ ENV SOLANA_RPC_URL=https://api.devnet.solana.com
 ENV ESPLORA_URL=https://blockstream.info/testnet/api
 
 # Run the redemption service
-CMD ["/app/sbbtc-api", "redemption", "--interval", "30"]
+CMD ["/app/zkbtc-api", "redemption", "--interval", "30"]

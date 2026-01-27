@@ -1,4 +1,4 @@
-# sbBTC Backend
+# zkBTC Backend
 
 Rust backend for the privacy-preserving BTC to Solana bridge.
 
@@ -35,7 +35,7 @@ cargo build
 ### Run API Server
 
 ```bash
-cargo run --bin sbbtc-api
+cargo run --bin zkbtc-api
 ```
 
 The API server starts on `http://localhost:8080`.
@@ -43,7 +43,7 @@ The API server starts on `http://localhost:8080`.
 ### Run Demo
 
 ```bash
-cargo run --bin sbbtc-api -- demo
+cargo run --bin zkbtc-api -- demo
 ```
 
 ## API Endpoints
@@ -59,10 +59,10 @@ cargo run --bin sbbtc-api -- demo
 - `GET /api/deposit/status/:commitment` - Check deposit status
 
 ### Claim Flow
-- `POST /api/claim` - Claim sbBTC with nullifier + secret
+- `POST /api/claim` - Claim zkBTC with nullifier + secret
 - `POST /api/claim/verify` - Verify claim would succeed
 
-### Redemption Flow (sbBTC → BTC)
+### Redemption Flow (zkBTC → BTC)
 - `POST /api/redeem` - Submit withdrawal request
 - `GET /api/withdrawal/status/:id` - Check withdrawal status
 

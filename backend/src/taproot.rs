@@ -62,7 +62,7 @@ impl PoolKeys {
         let secp = Secp256k1::new();
 
         // Deterministic seed for POC (in production: FROST DKG)
-        let seed = sha256(b"sbbtc_pool_internal_key_v1");
+        let seed = sha256(b"zkbtc_pool_internal_key_v1");
         let secret_key = SecretKey::from_slice(&seed)
             .expect("32 bytes, within curve order");
 

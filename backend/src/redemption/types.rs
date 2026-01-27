@@ -48,7 +48,7 @@ impl std::fmt::Display for WithdrawalStatus {
 pub struct WithdrawalRequest {
     /// Unique request ID
     pub id: String,
-    /// Solana transaction that burned sbBTC
+    /// Solana transaction that burned zkBTC
     pub solana_burn_tx: String,
     /// User's Solana address
     pub user_solana_address: String,

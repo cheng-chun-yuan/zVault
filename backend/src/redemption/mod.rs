@@ -35,7 +35,7 @@
 //! # Usage
 //!
 //! ```rust,ignore
-//! use sbbtc::redemption::RedemptionService;
+//! use zkbtc::redemption::RedemptionService;
 //!
 //! #[tokio::main]
 //! async fn main() {
