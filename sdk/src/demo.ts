@@ -214,6 +214,9 @@ export function buildAddDemoStealthDataFromParams(params: AddDemoStealthParams):
  * 1. Pool State (writable)
  * 2. Commitment Tree (writable)
  * 3. Payer (signer)
+ * 4. zBTC Mint (writable)
+ * 5. Pool Vault (writable)
+ * 6. Token-2022 Program
  */
 export function getDemoNoteAccountMetas(): {
   name: string;
@@ -224,6 +227,9 @@ export function getDemoNoteAccountMetas(): {
     { name: "poolState", writable: true, signer: false },
     { name: "commitmentTree", writable: true, signer: false },
     { name: "payer", writable: false, signer: true },
+    { name: "zbtcMint", writable: true, signer: false },
+    { name: "poolVault", writable: true, signer: false },
+    { name: "tokenProgram", writable: false, signer: false },
   ];
 }
 
@@ -236,6 +242,9 @@ export function getDemoNoteAccountMetas(): {
  * 3. Stealth Announcement (writable)
  * 4. Payer (signer, writable for rent)
  * 5. System Program
+ * 6. zBTC Mint (writable)
+ * 7. Pool Vault (writable)
+ * 8. Token-2022 Program
  */
 export function getDemoStealthAccountMetas(): {
   name: string;
@@ -248,6 +257,9 @@ export function getDemoStealthAccountMetas(): {
     { name: "stealthAnnouncement", writable: true, signer: false },
     { name: "payer", writable: true, signer: true },
     { name: "systemProgram", writable: false, signer: false },
+    { name: "zbtcMint", writable: true, signer: false },
+    { name: "poolVault", writable: true, signer: false },
+    { name: "tokenProgram", writable: false, signer: false },
   ];
 }
 

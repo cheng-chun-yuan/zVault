@@ -293,8 +293,8 @@ export async function lookupZkeyName(
       return null;
     }
 
-    // Combine spending + viewing into stealth meta-address
-    const stealthMetaAddress = new Uint8Array(65);
+    // Combine spending + viewing into stealth meta-address (33 + 33 = 66 bytes)
+    const stealthMetaAddress = new Uint8Array(66);
     stealthMetaAddress.set(entry.spendingPubKey, 0);
     stealthMetaAddress.set(entry.viewingPubKey, 33);
 
@@ -338,7 +338,7 @@ export async function lookupZkeyNameWithPDA(
       return null;
     }
 
-    const stealthMetaAddress = new Uint8Array(65);
+    const stealthMetaAddress = new Uint8Array(66);
     stealthMetaAddress.set(entry.spendingPubKey, 0);
     stealthMetaAddress.set(entry.viewingPubKey, 33);
 

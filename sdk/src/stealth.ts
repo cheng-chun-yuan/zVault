@@ -36,8 +36,9 @@
 
 // ========== Constants (defined before imports to ensure availability) ==========
 
-/** StealthAnnouncement account size (98 bytes - single ephemeral key) */
-export const STEALTH_ANNOUNCEMENT_SIZE = 98;
+/** StealthAnnouncement account size (91 bytes - single ephemeral key)
+ * Layout: 1 (disc) + 1 (bump) + 33 (ephemeral) + 8 (amount) + 32 (commitment) + 8 (leaf_idx) + 8 (created_at) */
+export const STEALTH_ANNOUNCEMENT_SIZE = 91;
 
 /** Discriminator for StealthAnnouncement */
 export const STEALTH_ANNOUNCEMENT_DISCRIMINATOR = 0x08;
