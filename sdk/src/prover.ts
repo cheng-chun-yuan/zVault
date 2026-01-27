@@ -21,7 +21,14 @@ export interface ProofData {
   verificationKey?: Uint8Array;
 }
 
-export type CircuitType = "claim" | "transfer" | "split" | "partial_withdraw";
+export type CircuitType =
+  | "claim"
+  | "transfer"
+  | "split"
+  | "partial_withdraw"
+  | "pool_deposit"
+  | "pool_withdraw"
+  | "pool_claim_yield";
 
 // Environment detection
 const isBrowser = typeof window !== "undefined";
@@ -52,6 +59,9 @@ const CIRCUIT_NAMES: Record<CircuitType, string> = {
   transfer: "zvault_transfer.json",
   split: "zvault_split.json",
   partial_withdraw: "zvault_partial_withdraw.json",
+  pool_deposit: "zvault_pool_deposit.json",
+  pool_withdraw: "zvault_pool_withdraw.json",
+  pool_claim_yield: "zvault_pool_claim_yield.json",
 };
 
 // Lazy-loaded modules
@@ -483,6 +493,178 @@ export async function generateWithdrawProof(inputs: WithdrawInputs): Promise<Pro
   };
 
   return generateProof("partial_withdraw", circuitInputs);
+}
+
+// ==========================================================================
+// Pool Circuit Proof Generation
+// ==========================================================================
+
+/**
+ * Pool deposit proof inputs
+ *
+ * Proves ownership of zkBTC note and creates pool position commitment.
+ */
+export interface PoolDepositInputs {
+  // Private inputs - zkBTC note being deposited
+  inputNullifier: bigint;
+  inputSecret: bigint;
+  inputAmount: bigint;
+  merkleProof: MerkleProofInput;
+
+  // Public inputs
+  merkleRoot: bigint;
+  inputNullifierHash: bigint;
+  stealthPubX: bigint;
+  poolCommitment: bigint;
+  depositEpoch: bigint;
+}
+
+/**
+ * Generate a pool deposit proof
+ *
+ * Spends zkBTC note and creates stealth pool position commitment.
+ */
+export async function generatePoolDepositProof(inputs: PoolDepositInputs): Promise<ProofData> {
+  const pathElements = inputs.merkleProof.siblings.map((s) => s.toString());
+  const pathIndices = inputs.merkleProof.indices;
+
+  const circuitInputs: InputMap = {
+    // Private inputs
+    input_nullifier: inputs.inputNullifier.toString(),
+    input_secret: inputs.inputSecret.toString(),
+    input_amount: inputs.inputAmount.toString(),
+    input_merkle_path: pathElements,
+    input_path_indices: pathIndices,
+
+    // Public inputs
+    input_merkle_root: inputs.merkleRoot.toString(),
+    input_nullifier_hash: inputs.inputNullifierHash.toString(),
+    stealth_pub_x: inputs.stealthPubX.toString(),
+    pool_commitment: inputs.poolCommitment.toString(),
+    deposit_epoch: inputs.depositEpoch.toString(),
+  };
+
+  return generateProof("pool_deposit", circuitInputs);
+}
+
+/**
+ * Pool withdraw proof inputs
+ *
+ * Proves ownership of pool position and calculates yield for withdrawal.
+ */
+export interface PoolWithdrawInputs {
+  // Private inputs
+  stealthPriv: bigint;
+  principal: bigint;
+  depositEpoch: bigint;
+  leafIndex: bigint;
+  poolMerkleProof: MerkleProofInput;
+  outputNullifier: bigint;
+  outputSecret: bigint;
+
+  // Public inputs
+  poolMerkleRoot: bigint;
+  poolNullifierHash: bigint;
+  stealthPubX: bigint;
+  outputCommitment: bigint;
+  currentEpoch: bigint;
+  yieldRateBps: bigint;
+  poolId: bigint;
+}
+
+/**
+ * Generate a pool withdraw proof
+ *
+ * Exits pool position, calculates yield, and creates output zkBTC note.
+ */
+export async function generatePoolWithdrawProof(inputs: PoolWithdrawInputs): Promise<ProofData> {
+  const pathElements = inputs.poolMerkleProof.siblings.map((s) => s.toString());
+  const pathIndices = inputs.poolMerkleProof.indices;
+
+  const circuitInputs: InputMap = {
+    // Private inputs
+    stealth_priv: inputs.stealthPriv.toString(),
+    principal: inputs.principal.toString(),
+    deposit_epoch: inputs.depositEpoch.toString(),
+    leaf_index: inputs.leafIndex.toString(),
+    pool_merkle_path: pathElements,
+    pool_path_indices: pathIndices,
+    output_nullifier: inputs.outputNullifier.toString(),
+    output_secret: inputs.outputSecret.toString(),
+
+    // Public inputs
+    pool_merkle_root: inputs.poolMerkleRoot.toString(),
+    pool_nullifier_hash: inputs.poolNullifierHash.toString(),
+    stealth_pub_x: inputs.stealthPubX.toString(),
+    output_commitment: inputs.outputCommitment.toString(),
+    current_epoch: inputs.currentEpoch.toString(),
+    yield_rate_bps: inputs.yieldRateBps.toString(),
+    pool_id: inputs.poolId.toString(),
+  };
+
+  return generateProof("pool_withdraw", circuitInputs);
+}
+
+/**
+ * Pool claim yield proof inputs
+ *
+ * Claims earned yield while keeping principal staked with new stealth key.
+ */
+export interface PoolClaimYieldInputs {
+  // Private inputs - old position
+  oldStealthPriv: bigint;
+  principal: bigint;
+  depositEpoch: bigint;
+  leafIndex: bigint;
+  poolMerkleProof: MerkleProofInput;
+  yieldNullifier: bigint;
+  yieldSecret: bigint;
+
+  // Public inputs
+  poolMerkleRoot: bigint;
+  oldNullifierHash: bigint;
+  oldStealthPubX: bigint;
+  newStealthPubX: bigint;
+  newPoolCommitment: bigint;
+  yieldCommitment: bigint;
+  currentEpoch: bigint;
+  yieldRateBps: bigint;
+  poolId: bigint;
+}
+
+/**
+ * Generate a pool claim yield proof
+ *
+ * Claims yield as zkBTC note and creates new pool position with new stealth key.
+ */
+export async function generatePoolClaimYieldProof(inputs: PoolClaimYieldInputs): Promise<ProofData> {
+  const pathElements = inputs.poolMerkleProof.siblings.map((s) => s.toString());
+  const pathIndices = inputs.poolMerkleProof.indices;
+
+  const circuitInputs: InputMap = {
+    // Private inputs
+    old_stealth_priv: inputs.oldStealthPriv.toString(),
+    principal: inputs.principal.toString(),
+    deposit_epoch: inputs.depositEpoch.toString(),
+    leaf_index: inputs.leafIndex.toString(),
+    pool_merkle_path: pathElements,
+    pool_path_indices: pathIndices,
+    yield_nullifier: inputs.yieldNullifier.toString(),
+    yield_secret: inputs.yieldSecret.toString(),
+
+    // Public inputs
+    pool_merkle_root: inputs.poolMerkleRoot.toString(),
+    old_nullifier_hash: inputs.oldNullifierHash.toString(),
+    old_stealth_pub_x: inputs.oldStealthPubX.toString(),
+    new_stealth_pub_x: inputs.newStealthPubX.toString(),
+    new_pool_commitment: inputs.newPoolCommitment.toString(),
+    yield_commitment: inputs.yieldCommitment.toString(),
+    current_epoch: inputs.currentEpoch.toString(),
+    yield_rate_bps: inputs.yieldRateBps.toString(),
+    pool_id: inputs.poolId.toString(),
+  };
+
+  return generateProof("pool_claim_yield", circuitInputs);
 }
 
 /**

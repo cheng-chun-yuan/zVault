@@ -6,36 +6,39 @@
  *
  * Networks: Solana Devnet + Bitcoin Testnet3
  *
- * ## 7 Main Functions
+ * ## Function Categories
+ *
+ * ### DEPOSIT (BTC → zkBTC)
  * - **deposit**: Generate deposit credentials (taproot address + claim link)
- * - **withdraw**: Request BTC withdrawal (burn zBTC)
- * - **privateClaim**: Claim zBTC tokens with ZK proof
- * - **privateSplit**: Split one commitment into two outputs
- * - **sendLink**: Create global claim link (off-chain)
+ * - **claimNote**: Claim zkBTC tokens with ZK proof
  * - **sendStealth**: Send to specific recipient via stealth ECDH (for new deposits)
- * - **transferStealth**: Transfer existing zkBTC to recipient's stealth address (with ZK proof)
+ *
+ * ### TRANSFER (zkBTC → Someone)
+ * - **splitNote**: Split one note into two outputs
+ * - **createClaimLinkFromNote**: Create shareable claim URL (off-chain)
+ * - **sendPrivate**: Transfer existing zkBTC to recipient's stealth address (with ZK proof)
+ *
+ * ### WITHDRAW (zkBTC → BTC)
+ * - **withdraw**: Request BTC withdrawal (burn zkBTC)
  *
  * ## Quick Start
  * ```typescript
- * import { createClient } from '@zvault/sdk';
- *
- * const client = createClient(connection);
- * client.setPayer(myKeypair);
+ * import { deposit, claimNote, splitNote, createClaimLinkFromNote, sendPrivate } from '@zvault/sdk';
  *
  * // 1. DEPOSIT: Generate credentials
- * const deposit = await client.deposit(100_000n); // 0.001 BTC
- * console.log('Send BTC to:', deposit.taprootAddress);
- * console.log('Save this link:', deposit.claimLink);
+ * const result = await deposit(100_000n); // 0.001 BTC
+ * console.log('Send BTC to:', result.taprootAddress);
+ * console.log('Save this link:', result.claimLink);
  *
  * // 2. CLAIM: After BTC is confirmed
- * const result = await client.privateClaim(deposit.claimLink);
+ * const claimed = await claimNote(config, result.claimLink);
  *
  * // 3. SPLIT: Divide into two outputs
- * const { output1, output2 } = await client.privateSplit(deposit.note, 50_000n);
+ * const { output1, output2 } = await splitNote(config, result.note, 50_000n);
  *
  * // 4. SEND: Via link or stealth
- * const link = client.sendLink(output1);
- * await client.sendStealth(output2, recipientPubKey);
+ * const link = createClaimLinkFromNote(output1);
+ * await sendPrivate(config, output2, recipientMeta);
  * ```
  */
 
@@ -239,6 +242,10 @@ export {
   generateSplitProof as generateSplitProofWasm,
   generateTransferProof as generateTransferProofWasm,
   generateWithdrawProof as generateWithdrawProofWasm,
+  // Pool proof generation
+  generatePoolDepositProof,
+  generatePoolWithdrawProof,
+  generatePoolClaimYieldProof,
   verifyProof as verifyProofWasm,
   setCircuitPath,
   getCircuitPath,
@@ -251,6 +258,10 @@ export {
   type SplitInputs,
   type TransferInputs,
   type WithdrawInputs,
+  // Pool proof input types
+  type PoolDepositInputs,
+  type PoolWithdrawInputs,
+  type PoolClaimYieldInputs,
 } from "./prover";
 
 // ==========================================================================
@@ -328,16 +339,40 @@ export {
 } from "./stealth-deposit";
 
 // ==========================================================================
-// Simplified API (7 Main Functions) - Node.js only
+// Simplified API - Node.js only
 // ==========================================================================
+//
+// DEPOSIT (BTC → zkBTC):
+//   deposit, claimNote, sendStealth
+//
+// TRANSFER (zkBTC → Someone):
+//   splitNote, createClaimLinkFromNote, sendPrivate
+//
+// WITHDRAW (zkBTC → BTC):
+//   withdraw
+//
+// ==========================================================================
+
+export {
+  // Deposit functions
+  deposit,
+  claimNote,
+  sendStealth,
+  // Transfer functions
+  splitNote,
+  createClaimLinkFromNote,
+  sendPrivate,
+  // Withdraw function
+  withdraw,
+} from "./api";
 
 export type {
   DepositResult,
   WithdrawResult,
-  ClaimResult as ApiClaimResult,
-  SplitResult as ApiSplitResult,
+  ClaimResult as ClaimNoteResult,
+  SplitResult as SplitNoteResult,
   StealthResult,
-  StealthTransferResult,
+  StealthTransferResult as SendPrivateResult,
   ApiClientConfig,
 } from "./api";
 
@@ -449,3 +484,88 @@ export {
   type AddDemoStealthParams,
   type PDASeed,
 } from "./demo";
+
+// ==========================================================================
+// Yield Pool (zkEarn) - Stealth Address Based Privacy Yield
+// ==========================================================================
+
+export {
+  // Stealth position creation
+  createStealthPoolDeposit,
+  createSelfStealthPoolDeposit,
+  // Stealth position scanning (viewing key)
+  scanPoolAnnouncements,
+  // Claim preparation (spending key)
+  prepareStealthPoolClaimInputs,
+  // Position serialization
+  serializePoolPosition,
+  deserializePoolPosition,
+  // Yield calculation
+  calculateYield,
+  calculateTotalValue,
+  // Instruction data builders
+  buildCreateYieldPoolData,
+  buildDepositToPoolData,
+  buildWithdrawFromPoolData,
+  buildClaimPoolYieldData,
+  buildCompoundYieldData,
+  buildUpdateYieldRateData,
+  buildHarvestYieldData,
+  // PDA seeds
+  getYieldPoolPDASeeds,
+  getPoolCommitmentTreePDASeeds,
+  getPoolNullifierPDASeeds,
+  getStealthPoolAnnouncementPDASeeds,
+  // Account parsing
+  parseYieldPool,
+  parseStealthPoolAnnouncement,
+  // Circuit input preparation
+  preparePoolDepositInputs,
+  preparePoolWithdrawInputs,
+  preparePoolClaimYieldInputs,
+  // Formatting
+  formatYieldRate,
+  formatBtcAmount,
+  formatEpochDuration,
+  // Constants
+  CREATE_YIELD_POOL_DISCRIMINATOR,
+  DEPOSIT_TO_POOL_DISCRIMINATOR,
+  WITHDRAW_FROM_POOL_DISCRIMINATOR,
+  CLAIM_POOL_YIELD_DISCRIMINATOR,
+  COMPOUND_YIELD_DISCRIMINATOR,
+  UPDATE_YIELD_RATE_DISCRIMINATOR,
+  HARVEST_YIELD_DISCRIMINATOR,
+  YIELD_POOL_SEED,
+  POOL_COMMITMENT_TREE_SEED,
+  POOL_NULLIFIER_SEED,
+  STEALTH_POOL_ANNOUNCEMENT_SEED,
+  YIELD_POOL_DISCRIMINATOR,
+  POOL_COMMITMENT_TREE_DISCRIMINATOR,
+  STEALTH_POOL_ANNOUNCEMENT_DISCRIMINATOR,
+  STEALTH_POOL_ANNOUNCEMENT_SIZE,
+  // Stealth Types
+  type StealthPoolPosition,
+  type ScannedPoolPosition,
+  type StealthPoolClaimInputs,
+  type SerializedStealthPoolPosition,
+  type OnChainStealthPoolAnnouncement,
+  // Types
+  type YieldPoolConfig,
+  type DepositToPoolResult,
+  type WithdrawFromPoolResult,
+  type ClaimPoolYieldResult,
+  type CompoundYieldResult,
+  // High-level pool operations with proof generation
+  generateDepositProof as generatePoolDepositProofWithProgress,
+  generateWithdrawProof as generatePoolWithdrawProofWithProgress,
+  generateClaimYieldProof as generatePoolClaimYieldProofWithProgress,
+  // Operation status types
+  type PoolOperationStep,
+  type PoolOperationStatus,
+  type PoolOperationProgressCallback,
+  // Legacy (deprecated - use stealth functions)
+  type PoolPosition,
+  type SerializedPoolPosition,
+  generatePoolPosition,
+  createPoolPositionFromSecrets,
+} from "./yield-pool";
