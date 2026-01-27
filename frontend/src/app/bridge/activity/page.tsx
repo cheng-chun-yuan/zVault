@@ -50,7 +50,7 @@ function TabBar({
           {tab.icon}
           <span>{tab.label}</span>
           {tab.id === "claimable" && claimableCount > 0 && (
-            <span className="px-1.5 py-0.5 text-xs rounded-full bg-[#14F195] text-[#0F0F12] font-medium">
+            <span className="min-w-[22px] h-[22px] px-2 flex items-center justify-center text-sm rounded-full bg-privacy text-background font-bold shadow-[0_0_8px_rgba(20,241,149,0.5)]">
               {claimableCount}
             </span>
           )}
