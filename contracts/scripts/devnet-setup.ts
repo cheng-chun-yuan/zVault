@@ -3,7 +3,7 @@
  *
  * This script:
  * 1. Initializes the pool state
- * 2. Creates the sbBTC mint (Token-2022)
+ * 2. Creates the zkBTC mint (Token-2022)
  * 3. Records test deposits with commitments
  * 4. Saves test notes for frontend claiming
  *
@@ -159,7 +159,7 @@ async function generateTestNote(
 function buildInitializeInstruction(
   poolState: PublicKey,
   commitmentTree: PublicKey,
-  sbbtcMint: PublicKey,
+  zkbtcMint: PublicKey,
   poolVault: PublicKey,
   frostVault: PublicKey,
   privacyCashPool: PublicKey,
@@ -176,7 +176,7 @@ function buildInitializeInstruction(
     keys: [
       { pubkey: poolState, isSigner: false, isWritable: true },
       { pubkey: commitmentTree, isSigner: false, isWritable: true },
-      { pubkey: sbbtcMint, isSigner: false, isWritable: false },
+      { pubkey: zkbtcMint, isSigner: false, isWritable: false },
       { pubkey: poolVault, isSigner: false, isWritable: false },
       { pubkey: frostVault, isSigner: false, isWritable: false },
       { pubkey: privacyCashPool, isSigner: false, isWritable: false },
@@ -274,7 +274,7 @@ async function main() {
   } else {
     console.log("\n[INIT] Initializing pool...");
 
-    // Create sbBTC mint (Token-2022)
+    // Create zkBTC mint (Token-2022)
     const mintKeypair = Keypair.generate();
     const mintLen = getMintLen([ExtensionType.MetadataPointer]);
     const mintLamports = await connection.getMinimumBalanceForRentExemption(mintLen);
@@ -366,7 +366,7 @@ async function main() {
     try {
       const sig = await sendAndConfirmTransaction(connection, tx, [authority, mintKeypair]);
       console.log("Pool initialized:", sig);
-      console.log("sbBTC Mint:", mintKeypair.publicKey.toString());
+      console.log("zkBTC Mint:", mintKeypair.publicKey.toString());
 
       // Save mint info
       const mintInfo = {

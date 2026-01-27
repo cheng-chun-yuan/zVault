@@ -149,7 +149,7 @@ function buildInitializeIx(
   payer: PublicKey,
   poolState: PublicKey,
   commitmentTree: PublicKey,
-  sbbtcMint: PublicKey,
+  zkbtcMint: PublicKey,
   poolVault: PublicKey,
 ): TransactionInstruction {
   // Instruction data: [discriminator (1 byte)]
@@ -162,7 +162,7 @@ function buildInitializeIx(
       { pubkey: payer, isSigner: true, isWritable: true },
       { pubkey: poolState, isSigner: false, isWritable: true },
       { pubkey: commitmentTree, isSigner: false, isWritable: true },
-      { pubkey: sbbtcMint, isSigner: false, isWritable: false },
+      { pubkey: zkbtcMint, isSigner: false, isWritable: false },
       { pubkey: poolVault, isSigner: false, isWritable: false },
       { pubkey: SystemProgram.programId, isSigner: false, isWritable: false },
     ],
@@ -242,22 +242,22 @@ async function main() {
   let isInitialized = poolStateInfo !== null && poolStateInfo.data.length > 0;
 
   // ============================================================
-  // STEP 1: Create sbBTC Mint (if needed)
+  // STEP 1: Create zkBTC Mint (if needed)
   // ============================================================
   console.log("\n" + "-".repeat(70));
-  console.log("STEP 1: Setup sbBTC Mint");
+  console.log("STEP 1: Setup zkBTC Mint");
   console.log("-".repeat(70));
 
-  let sbbtcMint: PublicKey;
+  let zkbtcMint: PublicKey;
   const mintStatePath = path.join(__dirname, "../.devnet-mint.json");
 
   if (fs.existsSync(mintStatePath)) {
     const mintState = JSON.parse(fs.readFileSync(mintStatePath, "utf-8"));
-    sbbtcMint = new PublicKey(mintState.mint);
-    console.log("Using existing mint:", sbbtcMint.toBase58());
+    zkbtcMint = new PublicKey(mintState.mint);
+    console.log("Using existing mint:", zkbtcMint.toBase58());
 
     try {
-      await getMint(connection, sbbtcMint, undefined, TOKEN_2022_PROGRAM_ID);
+      await getMint(connection, zkbtcMint, undefined, TOKEN_2022_PROGRAM_ID);
       console.log("  ✓ Mint verified");
     } catch {
       console.log("  Mint not found, creating new one...");
@@ -266,8 +266,8 @@ async function main() {
   }
 
   if (!fs.existsSync(mintStatePath)) {
-    console.log("Creating new sbBTC mint (Token-2022)...");
-    sbbtcMint = await createMint(
+    console.log("Creating new zkBTC mint (Token-2022)...");
+    zkbtcMint = await createMint(
       connection,
       wallet,
       poolStatePda,  // mint authority = pool PDA
@@ -277,18 +277,18 @@ async function main() {
       undefined,
       TOKEN_2022_PROGRAM_ID,
     );
-    fs.writeFileSync(mintStatePath, JSON.stringify({ mint: sbbtcMint.toBase58() }));
-    console.log("  ✓ Mint created:", sbbtcMint.toBase58());
+    fs.writeFileSync(mintStatePath, JSON.stringify({ mint: zkbtcMint.toBase58() }));
+    console.log("  ✓ Mint created:", zkbtcMint.toBase58());
   }
 
-  sbbtcMint = new PublicKey(JSON.parse(fs.readFileSync(mintStatePath, "utf-8")).mint);
+  zkbtcMint = new PublicKey(JSON.parse(fs.readFileSync(mintStatePath, "utf-8")).mint);
 
   // Create pool vault
   console.log("\nCreating pool vault...");
   const poolVault = await getOrCreateAssociatedTokenAccount(
     connection,
     wallet,
-    sbbtcMint,
+    zkbtcMint,
     poolStatePda,
     true,
     undefined,
@@ -312,7 +312,7 @@ async function main() {
       wallet.publicKey,
       poolStatePda,
       commitmentTreePda,
-      sbbtcMint,
+      zkbtcMint,
       poolVault.address,
     );
 
@@ -396,7 +396,7 @@ async function main() {
   console.log("         SETUP COMPLETE");
   console.log("=".repeat(70));
   console.log("\nProgram ID:", PROGRAM_ID.toBase58());
-  console.log("sbBTC Mint:", sbbtcMint.toBase58());
+  console.log("zkBTC Mint:", zkbtcMint.toBase58());
   console.log("Pool State:", poolStatePda.toBase58());
   console.log("Commitment Tree:", commitmentTreePda.toBase58());
   console.log("Demo Notes:", demoNotes.length);

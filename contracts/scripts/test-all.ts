@@ -201,7 +201,7 @@ function parseCommitmentTree(data: Buffer): CommitmentTreeData | null {
 function buildInitializeIx(
   poolState: PublicKey,
   commitmentTree: PublicKey,
-  sbbtcMint: PublicKey,
+  zkbtcMint: PublicKey,
   poolVault: PublicKey,
   frostVault: PublicKey,
   privacyCashPool: PublicKey,
@@ -218,7 +218,7 @@ function buildInitializeIx(
     keys: [
       { pubkey: poolState, isSigner: false, isWritable: true },
       { pubkey: commitmentTree, isSigner: false, isWritable: true },
-      { pubkey: sbbtcMint, isSigner: false, isWritable: false },
+      { pubkey: zkbtcMint, isSigner: false, isWritable: false },
       { pubkey: poolVault, isSigner: false, isWritable: false },
       { pubkey: frostVault, isSigner: false, isWritable: false },
       { pubkey: privacyCashPool, isSigner: false, isWritable: false },
@@ -397,8 +397,8 @@ async function testInitialize(
     const [poolState, poolBump] = derivePoolStatePDA();
     const [commitmentTree, treeBump] = deriveCommitmentTreePDA();
 
-    // Create Token-2022 mint for sbBTC
-    const sbbtcMint = await createMint(
+    // Create Token-2022 mint for zkBTC
+    const zkbtcMint = await createMint(
       connection,
       authority,
       authority.publicKey,
@@ -413,7 +413,7 @@ async function testInitialize(
     const poolVault = await getOrCreateAssociatedTokenAccount(
       connection,
       authority,
-      sbbtcMint,
+      zkbtcMint,
       poolState,
       true, // allowOwnerOffCurve
       undefined,
@@ -424,7 +424,7 @@ async function testInitialize(
     const frostVault = await getOrCreateAssociatedTokenAccount(
       connection,
       authority,
-      sbbtcMint,
+      zkbtcMint,
       authority.publicKey,
       false,
       undefined,
@@ -438,7 +438,7 @@ async function testInitialize(
     const ix = buildInitializeIx(
       poolState,
       commitmentTree,
-      sbbtcMint,
+      zkbtcMint,
       poolVault.address,
       frostVault.address,
       privacyCashPool,
@@ -469,7 +469,7 @@ async function testInitialize(
       return { name: testName, passed: false, message: "Invalid commitment tree" };
     }
 
-    return { name: testName, passed: true, message: `TX: ${sig.slice(0, 16)}... mint: ${sbbtcMint.toBase58().slice(0, 8)}...` };
+    return { name: testName, passed: true, message: `TX: ${sig.slice(0, 16)}... mint: ${zkbtcMint.toBase58().slice(0, 8)}...` };
   } catch (err: any) {
     return { name: testName, passed: false, message: err.message.slice(0, 80) };
   }

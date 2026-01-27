@@ -5,7 +5,7 @@
  * This script:
  * 1. Deploys both zVault and BTC Light Client programs (optional)
  * 2. Initializes the BTC Light Client with a real testnet block
- * 3. Creates the sbBTC Token-2022 mint
+ * 3. Creates the zkBTC Token-2022 mint
  * 4. Initializes the zVault pool state and commitment tree
  * 5. Adds demo notes for testing
  *
@@ -108,7 +108,7 @@ interface InitResult {
   poolStatePda: PublicKey;
   commitmentTreePda: PublicKey;
   btcLightClientPda: PublicKey;
-  sbbtcMint: PublicKey;
+  zkbtcMint: PublicKey;
   poolVault: PublicKey;
   authority: PublicKey;
 }
@@ -269,7 +269,7 @@ function buildBTCLCInitializeIx(
 function buildZVaultInitializeIx(
   poolState: PublicKey,
   commitmentTree: PublicKey,
-  sbbtcMint: PublicKey,
+  zkbtcMint: PublicKey,
   poolVault: PublicKey,
   frostVault: PublicKey,
   privacyCashPool: PublicKey,
@@ -287,7 +287,7 @@ function buildZVaultInitializeIx(
     keys: [
       { pubkey: poolState, isSigner: false, isWritable: true },
       { pubkey: commitmentTree, isSigner: false, isWritable: true },
-      { pubkey: sbbtcMint, isSigner: false, isWritable: false },
+      { pubkey: zkbtcMint, isSigner: false, isWritable: false },
       { pubkey: poolVault, isSigner: false, isWritable: false },
       { pubkey: frostVault, isSigner: false, isWritable: false },
       { pubkey: privacyCashPool, isSigner: false, isWritable: false },
@@ -389,15 +389,15 @@ async function initializeZVault(
       poolStatePda,
       commitmentTreePda,
       btcLightClientPda: PublicKey.default,
-      sbbtcMint: mintPubkey,
+      zkbtcMint: mintPubkey,
       poolVault: PublicKey.default,
       authority: authority.publicKey,
     };
   }
 
-  // Create sbBTC Token-2022 mint
-  log("Creating sbBTC Token-2022 mint...");
-  const sbbtcMint = await createMint(
+  // Create zkBTC Token-2022 mint
+  log("Creating zkBTC Token-2022 mint...");
+  const zkbtcMint = await createMint(
     connection,
     authority,
     authority.publicKey, // mint authority (will be transferred to pool PDA)
@@ -407,14 +407,14 @@ async function initializeZVault(
     undefined,
     TOKEN_2022_PROGRAM_ID
   );
-  log(`sbBTC Mint: ${sbbtcMint.toBase58()}`);
+  log(`zkBTC Mint: ${zkbtcMint.toBase58()}`);
 
   // Create pool vault (ATA for pool PDA)
   log("Creating pool vault...");
   const poolVault = await getOrCreateAssociatedTokenAccount(
     connection,
     authority,
-    sbbtcMint,
+    zkbtcMint,
     poolStatePda,
     true, // allowOwnerOffCurve (PDA)
     undefined,
@@ -428,7 +428,7 @@ async function initializeZVault(
   const frostVault = await getOrCreateAssociatedTokenAccount(
     connection,
     authority,
-    sbbtcMint,
+    zkbtcMint,
     authority.publicKey,
     false,
     undefined,
@@ -445,7 +445,7 @@ async function initializeZVault(
   const ix = buildZVaultInitializeIx(
     poolStatePda,
     commitmentTreePda,
-    sbbtcMint,
+    zkbtcMint,
     poolVault.address,
     frostVault.address,
     privacyCashPool,
@@ -466,7 +466,7 @@ async function initializeZVault(
     poolStatePda,
     commitmentTreePda,
     btcLightClientPda: PublicKey.default,
-    sbbtcMint,
+    zkbtcMint,
     poolVault: poolVault.address,
     authority: authority.publicKey,
   };
@@ -540,7 +540,7 @@ function saveDevnetConfig(
     accounts: {
       poolState: initResult.poolStatePda.toBase58(),
       commitmentTree: initResult.commitmentTreePda.toBase58(),
-      sbbtcMint: initResult.sbbtcMint.toBase58(),
+      zkbtcMint: initResult.zkbtcMint.toBase58(),
       poolVault: initResult.poolVault.toBase58(),
       authority: initResult.authority.toBase58(),
     },
@@ -566,7 +566,7 @@ function saveDevnetConfig(
   console.log(`NEXT_PUBLIC_BTC_LIGHT_CLIENT=${deployResult.btcLightClientProgramId.toBase58()}`);
   console.log(`NEXT_PUBLIC_POOL_STATE=${initResult.poolStatePda.toBase58()}`);
   console.log(`NEXT_PUBLIC_COMMITMENT_TREE=${initResult.commitmentTreePda.toBase58()}`);
-  console.log(`NEXT_PUBLIC_SBBTC_MINT=${initResult.sbbtcMint.toBase58()}`);
+  console.log(`NEXT_PUBLIC_ZBTC_MINT=${initResult.zkbtcMint.toBase58()}`);
   console.log("");
 }
 
@@ -654,7 +654,7 @@ async function main() {
   console.log(`  BTC Light Client:     ${deployResult.btcLightClientProgramId.toBase58()}`);
   console.log(`  Pool State PDA:       ${initResult.poolStatePda.toBase58()}`);
   console.log(`  Commitment Tree PDA:  ${initResult.commitmentTreePda.toBase58()}`);
-  console.log(`  sbBTC Mint:           ${initResult.sbbtcMint.toBase58()}`);
+  console.log(`  zkBTC Mint:           ${initResult.zkbtcMint.toBase58()}`);
   console.log(`  BTC LC PDA:           ${btcLightClientPda.toBase58()}`);
   console.log("");
 }

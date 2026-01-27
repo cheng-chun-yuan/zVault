@@ -135,7 +135,7 @@ async function initializeProgram(
   console.log("Initializing pool...");
 
   // Create mock addresses for init
-  const sbbtcMint = Keypair.generate().publicKey;
+  const zkbtcMint = Keypair.generate().publicKey;
   const poolVault = Keypair.generate().publicKey;
   const frostVault = Keypair.generate().publicKey;
   const privacyCashPool = Keypair.generate().publicKey;
@@ -151,7 +151,7 @@ async function initializeProgram(
     keys: [
       { pubkey: poolState, isSigner: false, isWritable: true },
       { pubkey: commitmentTree, isSigner: false, isWritable: true },
-      { pubkey: sbbtcMint, isSigner: false, isWritable: false },
+      { pubkey: zkbtcMint, isSigner: false, isWritable: false },
       { pubkey: poolVault, isSigner: false, isWritable: false },
       { pubkey: frostVault, isSigner: false, isWritable: false },
       { pubkey: privacyCashPool, isSigner: false, isWritable: false },

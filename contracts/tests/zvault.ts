@@ -109,7 +109,7 @@ export interface PoolStateLayout {
   flags: number;             // 1 byte (bit 0 = paused)
   _padding: number;          // 1 byte
   authority: Uint8Array;     // 32 bytes
-  sbbtcMint: Uint8Array;     // 32 bytes
+  zkbtcMint: Uint8Array;     // 32 bytes
   privacyCashPool: Uint8Array; // 32 bytes
   poolVault: Uint8Array;     // 32 bytes
   frostVault: Uint8Array;    // 32 bytes
@@ -144,7 +144,7 @@ export function parsePoolState(data: Buffer): PoolStateLayout {
     flags: data[2],
     _padding: data[3],
     authority: data.subarray(4, 36),
-    sbbtcMint: data.subarray(36, 68),
+    zkbtcMint: data.subarray(36, 68),
     privacyCashPool: data.subarray(68, 100),
     poolVault: data.subarray(100, 132),
     frostVault: data.subarray(132, 164),
@@ -183,7 +183,7 @@ export function buildInitializeInstruction(
   programId: PublicKey,
   poolState: PublicKey,
   commitmentTree: PublicKey,
-  sbbtcMint: PublicKey,
+  zkbtcMint: PublicKey,
   poolVault: PublicKey,
   frostVault: PublicKey,
   privacyCashPool: PublicKey,
@@ -200,7 +200,7 @@ export function buildInitializeInstruction(
     keys: [
       { pubkey: poolState, isSigner: false, isWritable: true },
       { pubkey: commitmentTree, isSigner: false, isWritable: true },
-      { pubkey: sbbtcMint, isSigner: false, isWritable: false },
+      { pubkey: zkbtcMint, isSigner: false, isWritable: false },
       { pubkey: poolVault, isSigner: false, isWritable: false },
       { pubkey: frostVault, isSigner: false, isWritable: false },
       { pubkey: privacyCashPool, isSigner: false, isWritable: false },
@@ -249,7 +249,7 @@ export function buildClaimDirectInstruction(
   poolState: PublicKey,
   commitmentTree: PublicKey,
   nullifierRecord: PublicKey,
-  sbbtcMint: PublicKey,
+  zkbtcMint: PublicKey,
   userTokenAccount: PublicKey,
   user: PublicKey,
   proof: Uint8Array,
@@ -270,7 +270,7 @@ export function buildClaimDirectInstruction(
       { pubkey: poolState, isSigner: false, isWritable: true },
       { pubkey: commitmentTree, isSigner: false, isWritable: false },
       { pubkey: nullifierRecord, isSigner: false, isWritable: true },
-      { pubkey: sbbtcMint, isSigner: false, isWritable: true },
+      { pubkey: zkbtcMint, isSigner: false, isWritable: true },
       { pubkey: userTokenAccount, isSigner: false, isWritable: true },
       { pubkey: user, isSigner: true, isWritable: true },
       { pubkey: TOKEN_2022_PROGRAM_ID, isSigner: false, isWritable: false },
@@ -360,7 +360,7 @@ export function buildRequestRedemptionInstruction(
   programId: PublicKey,
   poolState: PublicKey,
   redemptionRequest: PublicKey,
-  sbbtcMint: PublicKey,
+  zkbtcMint: PublicKey,
   userTokenAccount: PublicKey,
   user: PublicKey,
   amountSats: bigint,
@@ -383,7 +383,7 @@ export function buildRequestRedemptionInstruction(
     keys: [
       { pubkey: poolState, isSigner: false, isWritable: true },
       { pubkey: redemptionRequest, isSigner: false, isWritable: true },
-      { pubkey: sbbtcMint, isSigner: false, isWritable: true },
+      { pubkey: zkbtcMint, isSigner: false, isWritable: true },
       { pubkey: userTokenAccount, isSigner: false, isWritable: true },
       { pubkey: user, isSigner: true, isWritable: true },
       { pubkey: TOKEN_2022_PROGRAM_ID, isSigner: false, isWritable: false },
@@ -434,7 +434,7 @@ export function buildClaimNoirInstruction(
   poolState: PublicKey,
   commitmentTree: PublicKey,
   nullifierRecord: PublicKey,
-  sbbtcMint: PublicKey,
+  zkbtcMint: PublicKey,
   userTokenAccount: PublicKey,
   user: PublicKey,
   proofHash: Uint8Array,
@@ -492,7 +492,7 @@ export function buildClaimNoirInstruction(
       { pubkey: poolState, isSigner: false, isWritable: true },
       { pubkey: commitmentTree, isSigner: false, isWritable: false },
       { pubkey: nullifierRecord, isSigner: false, isWritable: true },
-      { pubkey: sbbtcMint, isSigner: false, isWritable: true },
+      { pubkey: zkbtcMint, isSigner: false, isWritable: true },
       { pubkey: userTokenAccount, isSigner: false, isWritable: true },
       { pubkey: user, isSigner: true, isWritable: true },
       { pubkey: TOKEN_2022_PROGRAM_ID, isSigner: false, isWritable: false },
@@ -893,7 +893,7 @@ describe("zVault Pinocchio Program", function() {
   let commitmentTreeBump: number;
 
   // Token accounts
-  let sbbtcMint: PublicKey;
+  let zkbtcMint: PublicKey;
   let poolVault: PublicKey;
   let userTokenAccount: PublicKey;
 
@@ -1216,7 +1216,7 @@ describe("zVault Pinocchio Program", function() {
       console.log("\n5. User generates ZK proof:");
       console.log("   Proof valid:", proofResult.isValid);
 
-      // 6. User claims sbBTC
+      // 6. User claims zkBTC
       const [nullifierPda] = deriveNullifierRecordPda(PROGRAM_ID, note.nullifierHashBytes);
       const claimIx = buildClaimDirectInstruction(
         PROGRAM_ID,
@@ -1231,13 +1231,13 @@ describe("zVault Pinocchio Program", function() {
         note.nullifierHashBytes,
         note.amount,
       );
-      console.log("\n6. User claims sbBTC:");
+      console.log("\n6. User claims zkBTC:");
       console.log("   Nullifier PDA:", nullifierPda.toString());
       console.log("   Instruction size:", claimIx.data.length, "bytes");
 
       // 7. Summary
       console.log("\n=== Flow Complete ===");
-      console.log("User received:", note.amount.toString(), "sbBTC (sats)");
+      console.log("User received:", note.amount.toString(), "zkBTC (sats)");
       console.log("Nullifier recorded to prevent double-spend");
     });
 
@@ -1358,7 +1358,7 @@ describe("zVault Pinocchio Program", function() {
       const mockAuthority = Keypair.generate().publicKey.toBytes();
       data.set(mockAuthority, 4);
 
-      // sbbtcMint
+      // zkbtcMint
       const mockMint = Keypair.generate().publicKey.toBytes();
       data.set(mockMint, 36);
 

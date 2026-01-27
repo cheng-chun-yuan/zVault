@@ -225,7 +225,7 @@ function deriveNameRegistryPda(nameHash: Uint8Array): [PublicKey, number] {
 function buildInitializeInstruction(
   poolState: PublicKey,
   commitmentTree: PublicKey,
-  sbbtcMint: PublicKey,
+  zkbtcMint: PublicKey,
   authority: PublicKey,
   poolBump: number,
   treeBump: number,
@@ -240,7 +240,7 @@ function buildInitializeInstruction(
     keys: [
       { pubkey: poolState, isSigner: false, isWritable: true },
       { pubkey: commitmentTree, isSigner: false, isWritable: true },
-      { pubkey: sbbtcMint, isSigner: false, isWritable: false },
+      { pubkey: zkbtcMint, isSigner: false, isWritable: false },
       { pubkey: Keypair.generate().publicKey, isSigner: false, isWritable: false }, // poolVault
       { pubkey: Keypair.generate().publicKey, isSigner: false, isWritable: false }, // frostVault
       { pubkey: Keypair.generate().publicKey, isSigner: false, isWritable: false }, // privacyCashPool
@@ -681,7 +681,7 @@ async function main() {
   console.log("1. Derive nullifier from note secret");
   console.log("2. Generate ZK proof of knowledge");
   console.log("3. Submit CLAIM instruction with proof");
-  console.log("4. Receive sbBTC to their wallet");
+  console.log("4. Receive zkBTC to their wallet");
 
   console.log("\nClaim data for Note 1:");
   console.log("  Secret:", Buffer.from(note1.secret).toString("hex"));

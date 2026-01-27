@@ -53,7 +53,7 @@ contracts/
 |----|------|-------------|----|
 | 0 | INITIALIZE | Create pool state | ~5k |
 | 8 | VERIFY_DEPOSIT | Record BTC deposit (SPV) | ~50k |
-| 9 | CLAIM | Mint sbBTC with ZK proof | ~95k |
+| 9 | CLAIM | Mint zkBTC with ZK proof | ~95k |
 | 4 | SPLIT_COMMITMENT | Split 1→2 notes | ~100k |
 | 5 | REQUEST_REDEMPTION | Burn for BTC withdrawal | ~20k |
 | 12 | ANNOUNCE_STEALTH | Stealth address send | ~15k |
