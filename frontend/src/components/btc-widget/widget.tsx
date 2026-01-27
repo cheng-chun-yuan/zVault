@@ -54,7 +54,7 @@ const Footer = memo(function Footer() {
         <a href="https://zVault.xyz" target="_blank" rel="noopener noreferrer" className="hover:text-gray-light">
           zVault
         </a>
-        <a href="https://github.com/zVault" target="_blank" rel="noopener noreferrer" className="hover:text-gray-light">
+        <a href="https://github.com/cheng-chun-yuan/zVault" target="_blank" rel="noopener noreferrer" className="hover:text-gray-light">
           GitHub
         </a>
       </div>

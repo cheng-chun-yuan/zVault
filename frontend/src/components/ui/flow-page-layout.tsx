@@ -111,7 +111,7 @@ function Footer() {
           zVault
         </a>
         <a
-          href="https://github.com/zVault"
+          href="https://github.com/cheng-chun-yuan/zVault"
           target="_blank"
           rel="noopener noreferrer"
           className="hover:text-gray-light transition-colors text-caption"

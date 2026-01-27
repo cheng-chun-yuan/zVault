@@ -143,7 +143,7 @@ export default function Home() {
               <ExternalLink className="w-3 h-3" />
             </a>
             <a
-              href="https://github.com/zVault"
+              href="https://github.com/cheng-chun-yuan/zVault"
               target="_blank"
               rel="noopener noreferrer"
               className="text-body2 text-gray hover:text-gray-light transition-colors flex items-center gap-1"
