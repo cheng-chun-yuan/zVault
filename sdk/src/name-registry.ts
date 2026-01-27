@@ -35,7 +35,7 @@ export const NAME_REGISTRY_DISCRIMINATOR = 0x09;
 export const NAME_REGISTRY_SIZE = 180;
 
 /** Default program ID (devnet) */
-export const ZVAULT_PROGRAM_ID = "BDH9iTYp2nBptboCcSmTn7GTkzYTzaMr7MMG5D5sXXRp";
+export const ZVAULT_PROGRAM_ID = "5S5ynMni8Pgd6tKkpYaXiPJiEXgw927s7T2txDtDivRK";
 
 // ========== Types ==========
 

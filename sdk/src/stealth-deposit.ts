@@ -74,7 +74,7 @@ export const VERIFY_STEALTH_DEPOSIT_DISCRIMINATOR = 20;
 
 // Program ID (Solana Devnet)
 const ZVAULT_PROGRAM_ID = new PublicKey(
-  "AtztELZfz3GHA8hFQCv7aT9Mt47Xhknv3ZCNb3fmXsgf"
+  "5S5ynMni8Pgd6tKkpYaXiPJiEXgw927s7T2txDtDivRK"
 );
 
 /** Domain separator for stealth key derivation */

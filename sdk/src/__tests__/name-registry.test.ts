@@ -40,7 +40,7 @@ describe("Name Registry SDK", () => {
 
   describe("Constants", () => {
     test("ZVAULT_PROGRAM_ID should be valid", () => {
-      expect(ZVAULT_PROGRAM_ID).toBe("BDH9iTYp2nBptboCcSmTn7GTkzYTzaMr7MMG5D5sXXRp");
+      expect(ZVAULT_PROGRAM_ID).toBe("5S5ynMni8Pgd6tKkpYaXiPJiEXgw927s7T2txDtDivRK");
       // Verify it's a valid public key
       const pubkey = new PublicKey(ZVAULT_PROGRAM_ID);
       expect(pubkey.toBase58()).toBe(ZVAULT_PROGRAM_ID);

@@ -14,7 +14,7 @@ import { prepareVerifyDeposit, bytesToHex } from "./chadbuffer";
 
 // Program ID (Solana Devnet)
 const ZVAULT_PROGRAM_ID = new PublicKey(
-  "AtztELZfz3GHA8hFQCv7aT9Mt47Xhknv3ZCNb3fmXsgf"
+  "5S5ynMni8Pgd6tKkpYaXiPJiEXgw927s7T2txDtDivRK"
 );
 
 /**
