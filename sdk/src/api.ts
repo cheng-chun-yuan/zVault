@@ -370,7 +370,7 @@ export async function withdraw(
  * @example
  * ```typescript
  * // Claim from link
- * const result = await privateClaim(config, 'https://sbbtc.app/claim?note=...');
+ * const result = await privateClaim(config, 'https://zkbtc.app/claim?note=...');
  *
  * // Claim from note
  * const result = await privateClaim(config, myNote);
@@ -553,7 +553,7 @@ export async function privateSplit(
  * @example
  * ```typescript
  * const link = sendLink(myNote);
- * // => "https://sbbtc.app/claim?note=eyJhbW91bnQ..."
+ * // => "https://zkbtc.app/claim?note=eyJhbW91bnQ..."
  *
  * // Share link with recipient
  * // Recipient calls: await privateClaim(config, link);

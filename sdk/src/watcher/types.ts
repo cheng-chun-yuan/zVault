@@ -147,7 +147,7 @@ export interface WatcherConfig {
   confirmationPollInterval?: number;
 
   /**
-   * Storage key prefix (default: 'sbbtc_')
+   * Storage key prefix (default: 'zkbtc_')
    */
   storageKeyPrefix?: string;
 
@@ -176,7 +176,7 @@ export const DEFAULT_WATCHER_CONFIG: Required<WatcherConfig> = {
   wsUrl: "wss://mempool.space/testnet/api/v1/ws",
   requiredConfirmations: 6,
   confirmationPollInterval: 30000,
-  storageKeyPrefix: "sbbtc_",
+  storageKeyPrefix: "zkbtc_",
   autoVerify: true,
   useWebSocket: true,
   pollingInterval: 10000,
