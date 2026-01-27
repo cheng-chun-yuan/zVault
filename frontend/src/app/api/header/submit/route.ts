@@ -110,7 +110,7 @@ export async function POST(request: NextRequest) {
     }
 
     // Connect to Solana
-    const rpcUrl = process.env.NEXT_PUBLIC_SOLANA_RPC || "https://api.devnet.solana.com";
+    const rpcUrl = process.env.NEXT_PUBLIC_SOLANA_RPC_URL || "https://api.devnet.solana.com";
     const connection = new Connection(rpcUrl, "confirmed");
 
     console.log("[Header API] Relayer:", relayer.publicKey.toBase58());

@@ -16,7 +16,7 @@ import "@solana/wallet-adapter-react-ui/styles.css";
 export function Providers({ children }: { children: React.ReactNode }) {
   // Helius primary (supports getProgramAccounts), fallback to configured RPC
   const endpoint = useMemo(
-    () => HELIUS_RPC_DEVNET || process.env.NEXT_PUBLIC_SOLANA_RPC || "https://api.devnet.solana.com",
+    () => HELIUS_RPC_DEVNET || process.env.NEXT_PUBLIC_SOLANA_RPC_URL || "https://api.devnet.solana.com",
     []
   );
 

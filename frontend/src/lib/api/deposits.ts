@@ -12,7 +12,7 @@ import { ApiError } from "./errors";
 // API base URL for deposit tracker
 const getTrackerApiUrl = () =>
   process.env.NEXT_PUBLIC_TRACKER_API_URL ||
-  process.env.NEXT_PUBLIC_zkBTC_API_URL ||
+  process.env.NEXT_PUBLIC_ZKBTC_API_URL ||
   "http://localhost:3001";
 
 // =============================================================================

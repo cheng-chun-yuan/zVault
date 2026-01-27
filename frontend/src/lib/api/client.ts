@@ -36,7 +36,7 @@ class zBTCApiClient {
   private baseUrl: string;
 
   constructor(baseUrl?: string) {
-    this.baseUrl = baseUrl || process.env.NEXT_PUBLIC_zBTC_API_URL || DEFAULT_API_URL;
+    this.baseUrl = baseUrl || process.env.NEXT_PUBLIC_ZKBTC_API_URL || DEFAULT_API_URL;
   }
 
   private async request<T>(
