@@ -16,7 +16,7 @@ import {
   ZVAULT_PROGRAM_ID,
   type NameRegistryEntry,
 } from "@zvault/sdk";
-import { useZVaultKeys } from "./use-zvault-keys";
+import { useZVaultKeys } from "./use-zvault";
 
 // Program ID for zVault (from SDK - single source of truth)
 const PROGRAM_ID = new PublicKey(ZVAULT_PROGRAM_ID);
@@ -26,12 +26,15 @@ interface UseZkeyNameReturn {
   registeredName: string | null;
   isLoading: boolean;
   isRegistering: boolean;
+  isCheckingAvailability: boolean;
+  isNameTaken: boolean;
   error: string | null;
 
   // Actions
   lookupMyName: () => Promise<void>;
   registerName: (name: string) => Promise<boolean>;
   lookupName: (name: string) => Promise<NameRegistryEntry | null>;
+  checkAvailability: (name: string) => Promise<boolean>;
 
   // Validation (from SDK)
   validateName: (name: string) => string | null;
@@ -51,6 +54,8 @@ export function useZkeyName(): UseZkeyNameReturn {
   const [registeredName, setRegisteredName] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [isRegistering, setIsRegistering] = useState(false);
+  const [isCheckingAvailability, setIsCheckingAvailability] = useState(false);
+  const [isNameTaken, setIsNameTaken] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   /**
@@ -93,6 +98,35 @@ export function useZkeyName(): UseZkeyNameReturn {
       }
     },
     [connection, deriveNamePDA]
+  );
+
+  /**
+   * Check if a name is available (not taken)
+   * Returns true if available, false if taken
+   */
+  const checkAvailability = useCallback(
+    async (name: string): Promise<boolean> => {
+      const normalized = normalizeName(name);
+      if (!isValidName(normalized)) {
+        setIsNameTaken(false);
+        return true;
+      }
+
+      setIsCheckingAvailability(true);
+      try {
+        const existing = await lookupName(normalized);
+        const taken = existing !== null;
+        setIsNameTaken(taken);
+        return !taken;
+      } catch (err) {
+        console.error("Failed to check name availability:", err);
+        setIsNameTaken(false);
+        return true;
+      } finally {
+        setIsCheckingAvailability(false);
+      }
+    },
+    [lookupName]
   );
 
   /**
@@ -233,10 +267,13 @@ export function useZkeyName(): UseZkeyNameReturn {
     registeredName,
     isLoading,
     isRegistering,
+    isCheckingAvailability,
+    isNameTaken,
     error,
     lookupMyName,
     registerName,
     lookupName,
+    checkAvailability,
     validateName: getNameValidationError,
     formatName: formatZkeyName,
   };

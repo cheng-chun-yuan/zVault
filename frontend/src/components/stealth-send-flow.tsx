@@ -3,6 +3,7 @@
 import { useState, useCallback } from "react";
 import { useWallet } from "@solana/wallet-adapter-react";
 import { useWalletModal } from "@solana/wallet-adapter-react-ui";
+import { Connection } from "@solana/web3.js";
 import {
   AlertCircle,
   Check,
@@ -14,15 +15,20 @@ import {
   Key,
   RefreshCw,
   User,
+  Tag,
+  Inbox,
+  Loader2,
 } from "lucide-react";
 import { QRCodeSVG } from "qrcode.react";
 import { cn } from "@/lib/utils";
 import { useCopyToClipboard } from "@/hooks/use-copy-to-clipboard";
-import { useZVaultKeys } from "@/hooks/use-zvault-keys";
+import { useZVaultKeys } from "@/hooks/use-zvault";
+import { useStealthInbox } from "@/hooks/use-zvault";
 import {
   decodeStealthMetaAddress,
   createStealthDeposit,
   deriveTaprootAddress,
+  lookupZkeyName,
   type StealthMetaAddress,
   type StealthDeposit,
 } from "@zvault/sdk";
@@ -39,38 +45,87 @@ export function StealthSendFlow() {
   const { setVisible } = useWalletModal();
   const { keys, deriveKeys, isLoading: keysLoading } = useZVaultKeys();
   const { copied, copy } = useCopyToClipboard();
+  const { totalAmountSats, depositCount, isLoading: inboxLoading } = useStealthInbox();
 
   // Form state
-  const [recipientAddress, setRecipientAddress] = useState("");
+  const [recipientInput, setRecipientInput] = useState("");
   const [amountBtc, setAmountBtc] = useState("");
   const [showQR, setShowQR] = useState(false);
 
   // Process state
   const [loading, setLoading] = useState(false);
+  const [resolving, setResolving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [depositData, setDepositData] = useState<DepositData | null>(null);
+  const [resolvedMeta, setResolvedMeta] = useState<StealthMetaAddress | null>(null);
+  const [resolvedName, setResolvedName] = useState<string | null>(null);
 
   const amountSats = amountBtc ? BigInt(Math.floor(parseFloat(amountBtc) * 100_000_000)) : 0n;
   const isValidAmount = amountSats > 0n && amountSats <= 21_000_000n * 100_000_000n;
 
-  const validateRecipientAddress = useCallback((address: string): StealthMetaAddress | null => {
-    try {
-      // Remove any whitespace
-      const cleaned = address.trim();
-      if (cleaned.length !== 130) {
-        return null; // 65 bytes = 130 hex chars
-      }
-      return decodeStealthMetaAddress(cleaned);
-    } catch {
-      return null;
-    }
-  }, []);
+  // Resolve recipient - supports both zkey names and raw hex addresses
+  const resolveRecipient = useCallback(async () => {
+    const input = recipientInput.trim();
+    if (!input) return;
 
-  const isValidRecipient = validateRecipientAddress(recipientAddress) !== null;
+    setResolving(true);
+    setError(null);
+    setResolvedMeta(null);
+    setResolvedName(null);
+
+    try {
+      // Check if it looks like hex (long, only hex chars)
+      const isLikelyHex = /^[0-9a-fA-F]{100,}$/.test(input);
+
+      if (isLikelyHex) {
+        // Try to decode as hex stealth address
+        const meta = decodeStealthMetaAddress(input);
+        if (meta) {
+          setResolvedMeta(meta);
+          return;
+        }
+        setError("Invalid stealth address format (expected 130 hex characters)");
+      } else {
+        // Try as zkey name
+        const name = input.replace(/\.zkey$/i, "");
+        const connection = new Connection(
+          process.env.NEXT_PUBLIC_SOLANA_RPC_URL || "https://api.devnet.solana.com"
+        );
+        const connectionAdapter = {
+          getAccountInfo: async (pubkey: { toBytes(): Uint8Array }) => {
+            const { PublicKey } = await import("@solana/web3.js");
+            const pk = new PublicKey(pubkey.toBytes());
+            const info = await connection.getAccountInfo(pk);
+            return info ? { data: new Uint8Array(info.data) } : null;
+          },
+        };
+        const result = await lookupZkeyName(connectionAdapter, name);
+        if (result) {
+          setResolvedMeta({
+            spendingPubKey: result.spendingPubKey,
+            viewingPubKey: result.viewingPubKey,
+          });
+          setResolvedName(name);
+          return;
+        }
+        // If zkey lookup fails, try as hex one more time
+        const meta = decodeStealthMetaAddress(input);
+        if (meta) {
+          setResolvedMeta(meta);
+          return;
+        }
+        setError(`"${name}.zkey" not found`);
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to resolve recipient");
+    } finally {
+      setResolving(false);
+    }
+  }, [recipientInput]);
 
   const handleCreateDeposit = async () => {
-    if (!isValidRecipient || !isValidAmount) {
-      setError("Invalid recipient address or amount");
+    if (!resolvedMeta || !isValidAmount) {
+      setError("Please resolve recipient and enter a valid amount");
       return;
     }
 
@@ -78,10 +133,8 @@ export function StealthSendFlow() {
     setError(null);
 
     try {
-      const recipientMeta = decodeStealthMetaAddress(recipientAddress.trim());
-
       // Create stealth deposit
-      const stealthDeposit = await createStealthDeposit(recipientMeta, amountSats);
+      const stealthDeposit = await createStealthDeposit(resolvedMeta, amountSats);
 
       // Generate taproot address from commitment
       const { address } = await deriveTaprootAddress(
@@ -92,7 +145,7 @@ export function StealthSendFlow() {
       setDepositData({
         taprootAddress: address,
         stealthDeposit,
-        recipientAddress: recipientAddress.trim(),
+        recipientAddress: resolvedName ? `${resolvedName}.zkey` : recipientInput.trim(),
         amountSats,
       });
     } catch (err) {
@@ -104,9 +157,11 @@ export function StealthSendFlow() {
   };
 
   const resetFlow = () => {
-    setRecipientAddress("");
+    setRecipientInput("");
     setAmountBtc("");
     setDepositData(null);
+    setResolvedMeta(null);
+    setResolvedName(null);
     setError(null);
     setShowQR(false);
   };
@@ -288,43 +343,82 @@ export function StealthSendFlow() {
   // Show form
   return (
     <div className="flex flex-col gap-4">
-      {/* Recipient address input */}
+      {/* Your balance summary */}
+      <div className="p-3 bg-btc/5 border border-btc/20 rounded-[10px]">
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <Inbox className="w-4 h-4 text-btc" />
+            <span className="text-caption text-gray">Your Received zBTC</span>
+          </div>
+          {inboxLoading ? (
+            <Loader2 className="w-4 h-4 animate-spin text-btc" />
+          ) : (
+            <div className="flex items-center gap-2">
+              <span className="text-body2 text-btc font-mono">
+                {(Number(totalAmountSats) / 100_000_000).toFixed(8)} BTC
+              </span>
+              {depositCount > 0 && (
+                <span className="text-caption text-gray">({depositCount})</span>
+              )}
+            </div>
+          )}
+        </div>
+      </div>
+
+      {/* Recipient input - supports zkey or hex */}
       <div>
         <label className="text-body2 text-gray-light pl-2 mb-2 block">
-          Recipient Stealth Address
+          Recipient (.zkey or stealth address)
         </label>
-        <textarea
-          value={recipientAddress}
-          onChange={(e) => setRecipientAddress(e.target.value)}
-          placeholder="Paste recipient's stealth address (130 hex characters)"
-          rows={3}
-          className={cn(
-            "w-full p-3 bg-muted border rounded-[10px] resize-none",
-            "text-caption font-mono text-foreground placeholder:text-gray",
-            "outline-none transition-colors",
-            recipientAddress && !isValidRecipient
-              ? "border-red-500/50 focus:border-red-500"
-              : "border-gray/30 focus:border-privacy/50"
-          )}
-        />
-        {recipientAddress && !isValidRecipient && (
-          <p className="text-caption text-red-400 mt-1 pl-2">
-            Invalid stealth address format (expected 130 hex characters)
-          </p>
-        )}
-        {isValidRecipient && (
+        <div className="flex gap-2">
+          <input
+            value={recipientInput}
+            onChange={(e) => {
+              setRecipientInput(e.target.value);
+              setResolvedMeta(null);
+              setResolvedName(null);
+              setError(null);
+            }}
+            placeholder="alice.zkey or 130 hex chars"
+            className={cn(
+              "flex-1 p-3 bg-muted border rounded-[10px]",
+              "text-body2 font-mono text-foreground placeholder:text-gray",
+              "outline-none transition-colors",
+              error ? "border-red-500/50" : "border-gray/30 focus:border-privacy/50"
+            )}
+          />
+          <button
+            onClick={resolveRecipient}
+            disabled={!recipientInput.trim() || resolving}
+            className={cn(
+              "px-4 py-2 rounded-[10px] text-body2 transition-colors",
+              "bg-privacy hover:bg-privacy/80 text-background",
+              "disabled:bg-gray/30 disabled:text-gray disabled:cursor-not-allowed"
+            )}
+          >
+            {resolving ? <Loader2 className="w-4 h-4 animate-spin" /> : "Resolve"}
+          </button>
+        </div>
+        {resolvedMeta && (
           <p className="text-caption text-privacy mt-1 pl-2 flex items-center gap-1">
             <Check className="w-3 h-3" />
-            Valid stealth address
+            {resolvedName ? (
+              <>
+                <Tag className="w-3 h-3" />
+                {resolvedName}.zkey resolved
+              </>
+            ) : (
+              "Valid stealth address"
+            )}
           </p>
         )}
       </div>
 
       {/* Amount input */}
       <div>
-        <label className="text-body2 text-gray-light pl-2 mb-2 block">
-          Amount (BTC)
-        </label>
+        <div className="flex items-center justify-between pl-2 mb-2">
+          <label className="text-body2 text-gray-light">Amount (BTC)</label>
+        </div>
         <input
           type="number"
           value={amountBtc}
@@ -356,7 +450,7 @@ export function StealthSendFlow() {
       {/* Create button */}
       <button
         onClick={handleCreateDeposit}
-        disabled={loading || !isValidRecipient || !isValidAmount}
+        disabled={loading || !resolvedMeta || !isValidAmount}
         className={cn(
           "flex items-center justify-center gap-2 p-3 rounded-[10px]",
           "bg-privacy hover:bg-privacy/80 text-background",

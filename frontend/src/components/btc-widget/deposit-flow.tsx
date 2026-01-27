@@ -5,14 +5,15 @@ import { useWallet } from "@solana/wallet-adapter-react";
 import { Connection } from "@solana/web3.js";
 import {
   Copy, Check, AlertCircle, AlertTriangle, Key, Eye, EyeOff,
-  RefreshCw, QrCode, ExternalLink, Shield, Send, User, Tag
+  RefreshCw, QrCode, ExternalLink, Shield, Send, User, Tag, Info,
+  Zap, Loader2, CheckCircle2
 } from "lucide-react";
 import { QRCodeSVG } from "qrcode.react";
 import { cn } from "@/lib/utils";
 import { useNoteStorage } from "@/hooks/use-note-storage";
 import { useCopyToClipboard } from "@/hooks/use-copy-to-clipboard";
-import { useZVaultKeys } from "@/hooks/use-zvault-keys";
-import { notifyDepositConfirmed, notifyDepositDetected, notifyCopied } from "@/lib/notifications";
+import { useZVaultKeys } from "@/hooks/use-zvault";
+import { notifyDepositConfirmed, notifyDepositDetected, notifyCopied, notifySuccess, notifyError } from "@/lib/notifications";
 import {
   createDepositFromSeed,
   serializeNote,
@@ -25,6 +26,8 @@ import {
   lookupZkeyName,
   decodeStealthMetaAddress,
   bytesToHex,
+  deriveNote,
+  createStealthDeposit,
   type StealthMetaAddress,
   type PreparedStealthDeposit,
 } from "@zvault/sdk";
@@ -76,6 +79,16 @@ export function DepositFlow() {
     isLoading: keysLoading,
   } = useZVaultKeys();
   const [stealthCopied, setStealthCopied] = useState(false);
+
+  // Demo mode state
+  const [demoMode, setDemoMode] = useState(false);
+  const [demoAmount, setDemoAmount] = useState("10000");
+  const [demoSubmitting, setDemoSubmitting] = useState(false);
+  const [demoResult, setDemoResult] = useState<{
+    signature: string;
+    secret?: string;
+    ephemeralPubKey?: string;
+  } | null>(null);
 
   const copyStealthAddress = async () => {
     if (!stealthAddressEncoded) return;
@@ -266,9 +279,103 @@ export function DepositFlow() {
     setRecipient("");
     setResolvedMeta(null);
     setStealthDeposit(null);
+    // Demo mode reset
+    setDemoAmount("10000");
+    setDemoResult(null);
   };
 
-  // Resolve recipient (zkey name or stealth address)
+  // Demo mode: Submit mock deposit via backend relayer (keeps user anonymous)
+  const submitDemoDeposit = async () => {
+    if (mode === "note" && secretNote.trim().length < 8) {
+      notifyError("Please enter or generate a secret (8+ chars)");
+      return;
+    }
+
+    if (mode === "stealth" && !resolvedMeta) {
+      notifyError("Please resolve recipient first");
+      return;
+    }
+
+    const amount = BigInt(demoAmount || "10000");
+    if (amount <= 0n) {
+      notifyError("Amount must be positive");
+      return;
+    }
+
+    setDemoSubmitting(true);
+    setDemoResult(null);
+    setError(null);
+
+    try {
+      if (mode === "note") {
+        // Derive note from secret (index 0)
+        const note = deriveNote(secretNote.trim(), 0, amount);
+
+        // Call API - relayer submits transaction (keeps user anonymous)
+        const response = await fetch("/api/demo", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            type: "note",
+            secret: bytesToHex(note.secretBytes),
+          }),
+        });
+
+        const result = await response.json();
+        if (!result.success) {
+          throw new Error(result.error || "Failed to submit demo deposit");
+        }
+
+        setDemoResult({
+          signature: result.signature,
+          secret: secretNote.trim(),
+        });
+
+        notifySuccess("Mock deposit added on-chain!");
+      } else {
+        // Stealth mode
+        if (!resolvedMeta) {
+          notifyError("Please resolve recipient first");
+          setDemoSubmitting(false);
+          return;
+        }
+
+        // Create stealth deposit (single ephemeral key pattern)
+        const stealthDepositData = await createStealthDeposit(resolvedMeta, amount);
+
+        // Call API - relayer submits transaction (keeps user anonymous)
+        const response = await fetch("/api/demo", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            type: "stealth",
+            ephemeralPub: bytesToHex(stealthDepositData.ephemeralPub),
+            commitment: bytesToHex(stealthDepositData.commitment),
+            amountSats: amount.toString(),
+          }),
+        });
+
+        const result = await response.json();
+        if (!result.success) {
+          throw new Error(result.error || "Failed to submit demo stealth deposit");
+        }
+
+        setDemoResult({
+          signature: result.signature,
+          ephemeralPubKey: bytesToHex(stealthDepositData.ephemeralPub),
+        });
+
+        notifySuccess("Mock stealth deposit added on-chain!");
+      }
+    } catch (err) {
+      console.error("Demo deposit error:", err);
+      setError(err instanceof Error ? err.message : "Failed to submit demo deposit");
+    } finally {
+      setDemoSubmitting(false);
+    }
+  };
+
+  // Resolve recipient (zkey name or stealth address - auto-detect)
   const resolveRecipient = async () => {
     if (!recipient.trim()) {
       setError("Please enter a recipient");
@@ -279,9 +386,17 @@ export function DepositFlow() {
     setError(null);
     setResolvedMeta(null);
 
+    const trimmed = recipient.trim();
+
     try {
-      if (recipientType === "zkey") {
+      // Auto-detect: if it looks like hex (long, only hex chars), try as address first
+      // Otherwise try as zkey name
+      const isLikelyHex = /^[0-9a-fA-F]{100,}$/.test(trimmed);
+
+      if (recipientType === "zkey" || (!isLikelyHex && recipientType === "address")) {
         // Lookup .zkey name on-chain
+        // Remove .zkey suffix if user included it
+        const name = trimmed.replace(/\.zkey$/i, "");
         const connection = new Connection(
           process.env.NEXT_PUBLIC_SOLANA_RPC_URL || "https://api.devnet.solana.com"
         );
@@ -294,9 +409,17 @@ export function DepositFlow() {
             return info ? { data: new Uint8Array(info.data) } : null;
           },
         };
-        const result = await lookupZkeyName(connectionAdapter, recipient.trim());
+        const result = await lookupZkeyName(connectionAdapter, name);
         if (!result) {
-          setError(`Name "${recipient.trim()}.zkey" not found`);
+          // If in address mode, also try as hex
+          if (recipientType === "address") {
+            const meta = decodeStealthMetaAddress(trimmed);
+            if (meta) {
+              setResolvedMeta(meta);
+              return;
+            }
+          }
+          setError(`Name "${name}.zkey" not found`);
           return;
         }
         // Convert to StealthMetaAddress format
@@ -307,11 +430,10 @@ export function DepositFlow() {
         setResolvedMeta(meta);
       } else {
         // Parse raw stealth address (hex encoded)
-        const trimmed = recipient.trim();
         // Try to decode as hex stealth meta-address
         const meta = decodeStealthMetaAddress(trimmed);
         if (!meta) {
-          setError("Invalid stealth address format. Expected 132 hex characters (66 bytes).");
+          setError("Invalid stealth address format. Expected 130 hex characters (65 bytes).");
           return;
         }
         setResolvedMeta(meta);
@@ -371,6 +493,33 @@ export function DepositFlow() {
 
   return (
     <div className="flex flex-col">
+      {/* Demo Mode Toggle */}
+      <div className="flex items-center justify-between mb-4 p-3 bg-warning/5 border border-warning/20 rounded-[12px]">
+        <div className="flex items-center gap-2">
+          <Zap className="w-4 h-4 text-warning" />
+          <span className="text-body2 text-warning">Demo Mode</span>
+          <Tooltip content="Skip BTC deposit - add mock commitment directly to Solana for testing">
+            <Info className="w-3.5 h-3.5 text-warning/60" />
+          </Tooltip>
+        </div>
+        <button
+          onClick={() => { setDemoMode(!demoMode); setDemoResult(null); }}
+          className={cn(
+            "relative w-11 h-6 rounded-full transition-colors",
+            demoMode ? "bg-warning" : "bg-gray/30"
+          )}
+          role="switch"
+          aria-checked={demoMode}
+        >
+          <span
+            className={cn(
+              "absolute top-1 left-1 w-4 h-4 rounded-full bg-white transition-transform",
+              demoMode && "translate-x-5"
+            )}
+          />
+        </button>
+      </div>
+
       {/* Mode Toggle */}
       <div className="flex gap-2 mb-4 p-1 bg-muted rounded-[10px] border border-gray/15" role="tablist" aria-label="Deposit mode">
         <button
@@ -473,10 +622,10 @@ export function DepositFlow() {
               )}
             >
               <Tag className="w-3.5 h-3.5" />
-              <TooltipText
-                text=".zkey Name"
-                tooltip="A human-readable name (like alice.zkey) that maps to a stealth address on Solana."
-              />
+              .zkey Name
+              <Tooltip content="A human-readable name (like alice.zkey) that maps to a stealth address on Solana.">
+                <Info className="w-3 h-3 opacity-60" />
+              </Tooltip>
             </button>
             <button
               onClick={() => { setRecipientType("address"); setRecipient(""); setResolvedMeta(null); }}
@@ -503,7 +652,7 @@ export function DepositFlow() {
                   type="text"
                   value={recipient}
                   onChange={(e) => { setRecipient(e.target.value); setResolvedMeta(null); setStealthDeposit(null); }}
-                  placeholder={recipientType === "zkey" ? "alice" : "Paste stealth meta-address (132 hex chars)"}
+                  placeholder={recipientType === "zkey" ? "alice" : "alice.zkey or 130 hex chars"}
                   className={cn(
                     "w-full p-3 bg-muted border border-gray/15 rounded-[12px]",
                     "text-body2 font-mono text-foreground placeholder:text-gray",
@@ -541,36 +690,111 @@ export function DepositFlow() {
 
           {/* Resolved recipient info */}
           {resolvedMeta && (
-            <div className="mb-4 p-4 bg-sol/5 border border-sol/15 rounded-[12px]">
-              <div className="flex items-center gap-2 mb-3">
+            <div className="mb-4 p-3 bg-sol/5 border border-sol/15 rounded-[12px]">
+              <div className="flex items-center gap-2">
                 <Check className="w-4 h-4 text-success" />
                 <span className="text-body2-semibold text-success">Recipient Found</span>
-              </div>
-
-              {/* QR Code */}
-              <div className="flex justify-center mb-3">
-                <div className="p-3 bg-white rounded-[8px]">
-                  <QRCodeSVG
-                    value={bytesToHex(resolvedMeta.spendingPubKey) + bytesToHex(resolvedMeta.viewingPubKey)}
-                    size={120}
-                    level="M"
-                  />
-                </div>
-              </div>
-
-              {/* Stealth Address */}
-              <div className="space-y-1">
-                <p className="text-caption text-gray text-center">Stealth Address (66 bytes)</p>
-                <code className="block text-[9px] font-mono text-privacy break-all bg-background/50 p-2 rounded text-center">
-                  {bytesToHex(resolvedMeta.spendingPubKey)}
-                  {bytesToHex(resolvedMeta.viewingPubKey)}
-                </code>
               </div>
             </div>
           )}
 
+          {/* ========== DEMO MODE: Stealth Deposit ========== */}
+          {demoMode && resolvedMeta && (
+            <>
+              {/* Amount Input */}
+              <div className="mb-4">
+                <label className="text-body2 text-gray-light pl-2 mb-2 block">Amount (satoshis)</label>
+                <input
+                  type="number"
+                  value={demoAmount}
+                  onChange={(e) => setDemoAmount(e.target.value)}
+                  placeholder="10000"
+                  className={cn(
+                    "w-full p-3 bg-muted border border-gray/15 rounded-[12px]",
+                    "text-body2 font-mono text-foreground placeholder:text-gray",
+                    "outline-none focus:border-warning/40 transition-colors"
+                  )}
+                />
+                <p className="text-caption text-gray mt-1 pl-2">
+                  {demoAmount ? `${(parseInt(demoAmount) / 100_000_000).toFixed(8)} BTC` : ""}
+                </p>
+              </div>
+
+              {/* Demo Submit Button */}
+              <button
+                onClick={submitDemoDeposit}
+                disabled={demoSubmitting}
+                className={cn(
+                  "w-full py-3 rounded-[12px] font-medium transition-colors flex items-center justify-center gap-2 mb-4",
+                  "bg-warning hover:bg-warning/90 text-background",
+                  "disabled:bg-gray/20 disabled:text-gray disabled:cursor-not-allowed"
+                )}
+              >
+                {demoSubmitting ? (
+                  <>
+                    <Loader2 className="w-4 h-4 animate-spin" />
+                    Publishing via relayer...
+                  </>
+                ) : (
+                  <>
+                    <Zap className="w-4 h-4" />
+                    Add Mock Stealth Deposit
+                  </>
+                )}
+              </button>
+
+              {/* Demo Result */}
+              {demoResult && (
+                <div className="p-4 bg-success/10 border border-success/30 rounded-[12px] mb-4">
+                  <div className="flex items-center gap-2 text-success mb-2">
+                    <CheckCircle2 className="w-5 h-5" />
+                    <span className="text-body2-semibold">Mock Stealth Deposit Published!</span>
+                  </div>
+
+                  {demoResult.ephemeralPubKey && (
+                    <div className="mb-3">
+                      <p className="text-caption text-gray mb-1">Ephemeral Public Key:</p>
+                      <code className="block text-[10px] font-mono text-sol bg-muted p-2 rounded-[8px] break-all">
+                        {demoResult.ephemeralPubKey}
+                      </code>
+                    </div>
+                  )}
+
+                  <a
+                    href={`https://solscan.io/tx/${demoResult.signature}?cluster=devnet`}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="flex items-center gap-2 text-caption text-sol hover:text-sol-light transition-colors"
+                  >
+                    View transaction
+                    <ExternalLink className="w-3.5 h-3.5" />
+                  </a>
+                </div>
+              )}
+
+              {/* Info about stealth deposit */}
+              <div className="p-3 bg-sol/10 border border-sol/20 rounded-[12px] mb-4">
+                <div className="flex items-start gap-2">
+                  <Info className="w-4 h-4 text-sol shrink-0 mt-0.5" />
+                  <p className="text-caption text-gray">
+                    The recipient can scan for this deposit using their stealth keys. Only they can see and claim it.
+                  </p>
+                </div>
+              </div>
+
+              {/* Reset button */}
+              {demoResult && (
+                <button onClick={resetFlow} className="btn-secondary w-full">
+                  <RefreshCw className="w-4 h-4" />
+                  Start New Deposit
+                </button>
+              )}
+            </>
+          )}
+
+          {/* ========== NORMAL MODE: Generate Stealth Deposit ========== */}
           {/* Generate Stealth Deposit Button - amount is determined by actual BTC sent */}
-          {resolvedMeta && !stealthDeposit && (
+          {!demoMode && resolvedMeta && !stealthDeposit && (
             <button
               onClick={generateStealthDeposit}
               disabled={loading}
@@ -593,8 +817,8 @@ export function DepositFlow() {
             </button>
           )}
 
-          {/* Stealth Deposit Result */}
-          {stealthDeposit && (
+          {/* Stealth Deposit Result (Normal Mode) */}
+          {!demoMode && stealthDeposit && (
             <>
               {/* Deposit Address */}
               <div className="gradient-bg-bitcoin p-4 rounded-[12px] mb-4">
@@ -713,21 +937,23 @@ export function DepositFlow() {
 
             const isActive = item.step === currentStep;
             const isCompleted = item.step < currentStep;
+            const isFirst = index === 0;
+            const isLast = index === 3;
 
             return (
               <div key={item.step} className="flex flex-col items-center flex-1">
                 <div className="flex items-center w-full">
-                  {index > 0 && (
-                    <div
-                      className={cn(
-                        "flex-1 h-0.5 transition-colors",
-                        isCompleted || isActive ? "bg-privacy" : "bg-gray/30"
-                      )}
-                    />
-                  )}
+                  {/* Line before circle (or invisible spacer for first item) */}
                   <div
                     className={cn(
-                      "w-6 h-6 rounded-full flex items-center justify-center text-caption font-medium transition-colors",
+                      "flex-1 h-0.5 transition-colors",
+                      isFirst ? "bg-transparent" :
+                      isCompleted || isActive ? "bg-privacy" : "bg-gray/30"
+                    )}
+                  />
+                  <div
+                    className={cn(
+                      "w-6 h-6 rounded-full flex items-center justify-center text-caption font-medium transition-colors shrink-0",
                       isCompleted ? "bg-privacy text-background" :
                       isActive ? "bg-privacy/20 text-privacy border-2 border-privacy" :
                       "bg-gray/20 text-gray border border-gray/30"
@@ -739,14 +965,14 @@ export function DepositFlow() {
                       item.step
                     )}
                   </div>
-                  {index < 3 && (
-                    <div
-                      className={cn(
-                        "flex-1 h-0.5 transition-colors",
-                        isCompleted ? "bg-privacy" : "bg-gray/30"
-                      )}
-                    />
-                  )}
+                  {/* Line after circle (or invisible spacer for last item) */}
+                  <div
+                    className={cn(
+                      "flex-1 h-0.5 transition-colors",
+                      isLast ? "bg-transparent" :
+                      isCompleted ? "bg-privacy" : "bg-gray/30"
+                    )}
+                  />
                 </div>
                 <span
                   className={cn(
@@ -822,7 +1048,7 @@ export function DepositFlow() {
       </div>
 
       {/* Loading state */}
-      {loading && (
+      {loading && !demoMode && (
         <LoadingState message="Generating deposit address..." className="py-4" />
       )}
 
@@ -831,8 +1057,100 @@ export function DepositFlow() {
         <InlineError error={error} className="mb-4" />
       )}
 
-      {/* Deposit Data Section - shown when depositData exists */}
-      {depositData && (
+      {/* ========== DEMO MODE: Note Deposit ========== */}
+      {demoMode && isSecretValid && (
+        <>
+          {/* Fixed Amount Display (demo note always uses 10000 sats) */}
+          <div className="mb-4">
+            <label className="text-body2 text-gray-light pl-2 mb-2 block">Amount (satoshis)</label>
+            <div
+              className={cn(
+                "w-full p-3 bg-muted/50 border border-gray/15 rounded-[12px]",
+                "text-body2 font-mono text-gray-light",
+                "flex items-center justify-between"
+              )}
+            >
+              <span>10000</span>
+              <span className="text-caption text-gray">(fixed for demo)</span>
+            </div>
+            <p className="text-caption text-gray mt-1 pl-2">
+              0.00010000 BTC
+            </p>
+          </div>
+
+          {/* Demo Submit Button */}
+          <button
+            onClick={submitDemoDeposit}
+            disabled={demoSubmitting || secretNote.length < 8}
+            className={cn(
+              "w-full py-3 rounded-[12px] font-medium transition-colors flex items-center justify-center gap-2",
+              "bg-warning hover:bg-warning/90 text-background",
+              "disabled:bg-gray/20 disabled:text-gray disabled:cursor-not-allowed"
+            )}
+          >
+            {demoSubmitting ? (
+              <>
+                <Loader2 className="w-4 h-4 animate-spin" />
+                Publishing via relayer...
+              </>
+            ) : (
+              <>
+                <Zap className="w-4 h-4" />
+                Add Mock Deposit
+              </>
+            )}
+          </button>
+
+          {/* Demo Result */}
+          {demoResult && (
+            <div className="mt-4 p-4 bg-success/10 border border-success/30 rounded-[12px]">
+              <div className="flex items-center gap-2 text-success mb-2">
+                <CheckCircle2 className="w-5 h-5" />
+                <span className="text-body2-semibold">Mock Deposit Published!</span>
+              </div>
+
+              {demoResult.secret && (
+                <div className="mb-3">
+                  <p className="text-caption text-gray mb-1">Secret (use to claim):</p>
+                  <div className="flex items-center gap-2">
+                    <code className="flex-1 text-caption font-mono text-privacy bg-muted p-2 rounded-[8px] truncate">
+                      {demoResult.secret}
+                    </code>
+                    <button
+                      onClick={() => { navigator.clipboard.writeText(demoResult.secret!); notifyCopied("Secret"); }}
+                      className="p-2 bg-muted hover:bg-gray/20 rounded-[8px] transition-colors"
+                    >
+                      <Copy className="w-4 h-4 text-gray" />
+                    </button>
+                  </div>
+                </div>
+              )}
+
+              <a
+                href={`https://solscan.io/tx/${demoResult.signature}?cluster=devnet`}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="flex items-center gap-2 text-caption text-sol hover:text-sol-light transition-colors"
+              >
+                View transaction
+                <ExternalLink className="w-3.5 h-3.5" />
+              </a>
+            </div>
+          )}
+
+          {/* Reset button */}
+          {demoResult && (
+            <button onClick={resetFlow} className="btn-secondary w-full mt-3">
+              <RefreshCw className="w-4 h-4" />
+              Start New Deposit
+            </button>
+          )}
+        </>
+      )}
+
+      {/* ========== NORMAL MODE: BTC Deposit ========== */}
+      {/* Deposit Data Section - shown when depositData exists and NOT in demo mode */}
+      {!demoMode && depositData && (
         <>
           {/* Deposit Address */}
           <div className="gradient-bg-bitcoin p-4 rounded-[12px] mb-4">

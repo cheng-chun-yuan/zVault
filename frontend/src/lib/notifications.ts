@@ -112,3 +112,13 @@ export function notifyCopied(label: string) {
     duration: 2000,
   });
 }
+
+/**
+ * Show a generic success notification
+ */
+export function notifySuccess(message: string) {
+  toast.success("Success", {
+    description: message,
+    duration: 5000,
+  });
+}
