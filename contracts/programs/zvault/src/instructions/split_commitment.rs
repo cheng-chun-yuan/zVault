@@ -189,10 +189,9 @@ pub fn process_split_commitment(
             return Err(ZVaultError::TreeFull.into());
         }
 
-        // Note: In production, compute new Merkle root properly
-        tree.update_root(ix_data.output_commitment_1);
-        let next = tree.next_index();
-        tree.set_next_index(next + 2);
+        // Insert both output commitments using Poseidon2 hashing
+        tree.insert_leaf(&ix_data.output_commitment_1)?;
+        tree.insert_leaf(&ix_data.output_commitment_2)?;
     }
 
     // Update pool statistics

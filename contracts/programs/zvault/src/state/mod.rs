@@ -14,25 +14,27 @@
 //! | `StealthAnnouncement` | Stealth address announcement (dual-key ECDH) |
 
 // Core state
-pub mod pool;
+pub mod block_header;
+pub mod btc_light_client;
 pub mod commitment_tree;
 pub mod deposit;
-pub mod nullifier;
-pub mod redemption;
-pub mod btc_light_client;
-pub mod block_header;
-pub mod stealth_announcement;
 pub mod name_registry;
+pub mod nullifier;
+pub mod pool;
+pub mod redemption;
+pub mod stealth_announcement;
+pub mod vk_registry;
 pub mod yield_pool;
 
 // Re-exports
-pub use pool::*;
+pub use block_header::*;
+pub use btc_light_client::*;
 pub use commitment_tree::*;
 pub use deposit::*;
-pub use nullifier::*;
-pub use redemption::*;
-pub use btc_light_client::*;
-pub use block_header::*;
-pub use stealth_announcement::*;
 pub use name_registry::*;
+pub use nullifier::*;
+pub use pool::*;
+pub use redemption::*;
+pub use stealth_announcement::*;
+pub use vk_registry::*;
 pub use yield_pool::*;

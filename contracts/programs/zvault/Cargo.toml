@@ -25,6 +25,7 @@ pinocchio-token = "0.4"
 pinocchio-system = "0.3"
 pinocchio-associated-token-account = "0.3"
 solana-bn254 = "~2.1"
+solana-poseidon = "~2.1"
 thiserror = "2.0"
 num-derive = "0.4"
 

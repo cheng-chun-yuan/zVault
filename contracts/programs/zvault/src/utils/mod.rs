@@ -3,14 +3,16 @@
 //! Security-critical utilities for the zVault Pinocchio program.
 //! All validation functions MUST be called before deserializing account data.
 
+pub mod bitcoin;
+pub mod chadbuffer;
+pub mod crypto;
 pub mod groth16;
 pub mod token;
 pub mod validation;
-pub mod bitcoin;
-pub mod chadbuffer;
 
+pub use bitcoin::*;
+pub use chadbuffer::*;
+pub use crypto::*;
 pub use groth16::*;
 pub use token::*;
 pub use validation::*;
-pub use bitcoin::*;
-pub use chadbuffer::*;

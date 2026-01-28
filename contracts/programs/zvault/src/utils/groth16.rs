@@ -425,24 +425,64 @@ pub fn verify_pool_compound_proof(
     verify_groth16_proof(vk, proof, &public_inputs)
 }
 
-/// Get placeholder verification key
+/// Load verification key from on-chain VK registry account
+///
+/// This is the PRODUCTION method for loading verification keys.
+/// VK accounts must be deployed during trusted setup and contain
+/// the actual Groth16 verification keys for each circuit.
+///
+/// # Arguments
+/// * `vk_account` - The VK registry account for the specific circuit
+/// * `program_id` - The program ID (for ownership verification)
+///
+/// # Returns
+/// The verification key loaded from on-chain storage
+pub fn load_verification_key_from_account(
+    vk_account: &pinocchio::account_info::AccountInfo,
+    program_id: &pinocchio::pubkey::Pubkey,
+) -> Result<VerificationKey, pinocchio::program_error::ProgramError> {
+    use crate::state::vk_registry::{VkRegistry, VK_REGISTRY_DISCRIMINATOR};
+
+    // Verify account owner
+    if vk_account.owner() != program_id {
+        return Err(pinocchio::program_error::ProgramError::InvalidAccountOwner);
+    }
+
+    let data = vk_account.try_borrow_data()?;
+
+    // Verify discriminator
+    if data.is_empty() || data[0] != VK_REGISTRY_DISCRIMINATOR {
+        return Err(pinocchio::program_error::ProgramError::InvalidAccountData);
+    }
+
+    let registry = VkRegistry::from_bytes(&data)?;
+
+    Ok(VerificationKey {
+        alpha: registry.alpha,
+        beta: registry.beta,
+        gamma: registry.gamma,
+        delta: registry.delta,
+        ic_length: registry.ic_length,
+        ic: registry.ic,
+    })
+}
+
+/// Get placeholder verification key (DEVNET/TESTING ONLY)
 ///
 /// # SECURITY WARNING
-/// This function returns an invalid verification key that will FAIL verification.
-/// In production, verification keys MUST be loaded from on-chain accounts that
-/// contain real Groth16 verification keys generated during trusted setup.
+/// This function returns a placeholder VK that will FAIL all proof verifications.
+/// This is BY DESIGN to prevent accidental use in production.
 ///
-/// # TODO for Production
-/// Replace all usages of this function with proper VK loading from on-chain accounts:
-/// 1. Deploy VK accounts during setup
-/// 2. Load VK data in each instruction that needs verification
-/// 3. Remove this placeholder function
+/// # Production Deployment
+/// For mainnet, you MUST:
+/// 1. Deploy VK registry accounts with real verification keys
+/// 2. Use `load_verification_key_from_account()` instead
+/// 3. Compile WITHOUT the `devnet` feature flag
 ///
-/// Current usage is a development shortcut that MUST be replaced before mainnet.
+/// The `devnet` feature must be enabled to use this function.
+#[cfg(feature = "devnet")]
 pub fn get_test_verification_key(num_public_inputs: usize) -> VerificationKey {
-    // Log warning in development builds
-    #[cfg(feature = "devnet")]
-    pinocchio::msg!("WARNING: Using placeholder VK - proofs will fail in production!");
+    pinocchio::msg!("WARNING: Using placeholder VK - proofs will NOT validate!");
 
     // Returns a zero-initialized VK that will fail all verifications
     // This ensures no proofs can be validated without proper VK setup
@@ -450,6 +490,19 @@ pub fn get_test_verification_key(num_public_inputs: usize) -> VerificationKey {
         ic_length: (num_public_inputs + 1) as u8,
         ..Default::default()
     }
+}
+
+/// Fallback for non-devnet builds - always fails
+///
+/// This ensures that production builds cannot accidentally use test VKs.
+/// If you see a compilation error here, you need to either:
+/// 1. Use `load_verification_key_from_account()` with real VKs
+/// 2. Enable the `devnet` feature for testing (NOT for mainnet)
+#[cfg(not(feature = "devnet"))]
+pub fn get_test_verification_key(_num_public_inputs: usize) -> VerificationKey {
+    // In production builds, return a VK that will definitely fail
+    // but still compiles (for gradual migration)
+    VerificationKey::default()
 }
 
 #[cfg(test)]
