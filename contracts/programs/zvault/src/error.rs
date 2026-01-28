@@ -99,6 +99,37 @@ pub enum ZVaultError {
 
     #[error("Insufficient funds in shielded pool")]
     InsufficientFunds = 6030,
+
+    // Yield pool errors (6040-6059)
+    #[error("Yield pool is paused")]
+    YieldPoolPaused = 6040,
+
+    #[error("Invalid pool ID")]
+    InvalidPoolId = 6041,
+
+    #[error("Pool position not found")]
+    PositionNotFound = 6042,
+
+    #[error("Invalid yield rate")]
+    InvalidYieldRate = 6043,
+
+    #[error("Invalid epoch duration")]
+    InvalidEpochDuration = 6044,
+
+    #[error("Insufficient yield reserve")]
+    InsufficientYieldReserve = 6045,
+
+    #[error("Pool nullifier already used")]
+    PoolNullifierAlreadyUsed = 6046,
+
+    #[error("Invalid pool merkle root")]
+    InvalidPoolRoot = 6047,
+
+    #[error("Pool commitment tree is full")]
+    PoolTreeFull = 6048,
+
+    #[error("Invalid pool position commitment")]
+    InvalidPositionCommitment = 6049,
 }
 
 impl From<ZVaultError> for ProgramError {

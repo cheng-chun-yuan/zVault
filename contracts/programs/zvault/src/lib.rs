@@ -69,6 +69,15 @@ pub mod instruction {
 
     // Backend-managed stealth deposit v2 (authority only)
     pub const VERIFY_STEALTH_DEPOSIT_V2: u8 = 23;
+
+    // Yield pool operations (zkEarn)
+    pub const CREATE_YIELD_POOL: u8 = 30;
+    pub const DEPOSIT_TO_POOL: u8 = 31;
+    pub const WITHDRAW_FROM_POOL: u8 = 32;
+    pub const CLAIM_POOL_YIELD: u8 = 33;
+    pub const COMPOUND_YIELD: u8 = 34;
+    pub const UPDATE_YIELD_RATE: u8 = 35;
+    pub const HARVEST_YIELD: u8 = 36;
 }
 
 entrypoint!(process_instruction);
@@ -129,6 +138,28 @@ pub fn process_instruction(
         // Backend-managed stealth deposit v2
         instruction::VERIFY_STEALTH_DEPOSIT_V2 => {
             instructions::process_verify_stealth_deposit_v2(program_id, accounts, data)
+        }
+        // Yield pool operations
+        instruction::CREATE_YIELD_POOL => {
+            instructions::process_create_yield_pool(program_id, accounts, data)
+        }
+        instruction::DEPOSIT_TO_POOL => {
+            instructions::process_deposit_to_pool(program_id, accounts, data)
+        }
+        instruction::WITHDRAW_FROM_POOL => {
+            instructions::process_withdraw_from_pool(program_id, accounts, data)
+        }
+        instruction::CLAIM_POOL_YIELD => {
+            instructions::process_claim_pool_yield(program_id, accounts, data)
+        }
+        instruction::COMPOUND_YIELD => {
+            instructions::process_compound_yield(program_id, accounts, data)
+        }
+        instruction::UPDATE_YIELD_RATE => {
+            instructions::process_update_yield_rate(program_id, accounts, data)
+        }
+        instruction::HARVEST_YIELD => {
+            instructions::process_harvest_yield(program_id, accounts, data)
         }
         _ => Err(ProgramError::InvalidInstructionData),
     }
@@ -206,6 +237,14 @@ mod tests {
             instruction::ADD_DEMO_NOTE,
             instruction::ADD_DEMO_STEALTH,
             instruction::VERIFY_STEALTH_DEPOSIT_V2,
+            // Yield pool operations
+            instruction::CREATE_YIELD_POOL,
+            instruction::DEPOSIT_TO_POOL,
+            instruction::WITHDRAW_FROM_POOL,
+            instruction::CLAIM_POOL_YIELD,
+            instruction::COMPOUND_YIELD,
+            instruction::UPDATE_YIELD_RATE,
+            instruction::HARVEST_YIELD,
         ];
 
         for (i, &d1) in discriminators.iter().enumerate() {

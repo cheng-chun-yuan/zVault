@@ -23,6 +23,7 @@ pub mod btc_light_client;
 pub mod block_header;
 pub mod stealth_announcement;
 pub mod name_registry;
+pub mod yield_pool;
 
 // Re-exports
 pub use pool::*;
@@ -34,3 +35,4 @@ pub use btc_light_client::*;
 pub use block_header::*;
 pub use stealth_announcement::*;
 pub use name_registry::*;
+pub use yield_pool::*;

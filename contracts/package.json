@@ -20,11 +20,18 @@
     "@noble/hashes": "^2.0.1",
     "@solana/spl-token": "^0.4.14",
     "@solana/web3.js": "^1.98.4",
-    "@zvault/sdk": "file:../sdk"
+    "@zvault/sdk": "file:../sdk",
+    "chai": "^6.2.2",
+    "circomlibjs": "^0.1.7",
+    "snarkjs": "^0.7.6"
   },
   "devDependencies": {
+    "@types/chai": "^5.2.3",
+    "@types/mocha": "^10.0.10",
     "@types/node": "^22.0.0",
+    "mocha": "^11.7.5",
     "react": "^19.0.0",
+    "ts-mocha": "^11.1.0",
     "typescript": "^5.0.0"
   }
 }
