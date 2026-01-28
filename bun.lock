@@ -57,7 +57,7 @@
     },
     "sdk": {
       "name": "@zvault/sdk",
-      "version": "1.0.3",
+      "version": "1.1.0",
       "dependencies": {
         "@aztec/bb.js": "3.0.0-nightly.20251104",
         "@noble/curves": "^1.8.2",
