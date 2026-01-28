@@ -130,6 +130,19 @@ pub enum ZVaultError {
 
     #[error("Invalid pool position commitment")]
     InvalidPositionCommitment = 6049,
+
+    // Security validation errors (6060-6069)
+    #[error("Account is not writable")]
+    AccountNotWritable = 6060,
+
+    #[error("Invalid token mint")]
+    InvalidMint = 6061,
+
+    #[error("Demo mode disabled on mainnet")]
+    DemoDisabledOnMainnet = 6062,
+
+    #[error("Account not rent exempt")]
+    NotRentExempt = 6063,
 }
 
 impl From<ZVaultError> for ProgramError {

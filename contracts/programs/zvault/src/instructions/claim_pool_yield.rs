@@ -14,7 +14,7 @@ use crate::state::{
     CommitmentTree, PoolCommitmentTree, PoolNullifierRecord, PoolOperationType, YieldPool,
     POOL_NULLIFIER_RECORD_DISCRIMINATOR,
 };
-use crate::utils::{get_test_verification_key, verify_pool_claim_yield_proof, Groth16Proof, validate_program_owner};
+use crate::utils::{get_test_verification_key, verify_pool_claim_yield_proof, Groth16Proof, validate_program_owner, validate_account_writable};
 
 /// Claim pool yield instruction data
 pub struct ClaimPoolYieldData {
@@ -128,6 +128,12 @@ pub fn process_claim_pool_yield(
     validate_program_owner(accounts.yield_pool, program_id)?;
     validate_program_owner(accounts.pool_commitment_tree, program_id)?;
     validate_program_owner(accounts.main_commitment_tree, program_id)?;
+
+    // SECURITY: Validate writable accounts
+    validate_account_writable(accounts.yield_pool)?;
+    validate_account_writable(accounts.pool_commitment_tree)?;
+    validate_account_writable(accounts.main_commitment_tree)?;
+    validate_account_writable(accounts.pool_nullifier_record)?;
 
     // Load yield pool and get current state
     let pool_id: [u8; 8];

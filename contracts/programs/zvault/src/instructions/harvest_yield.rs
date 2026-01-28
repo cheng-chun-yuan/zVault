@@ -10,7 +10,7 @@ use pinocchio::{
 
 use crate::error::ZVaultError;
 use crate::state::YieldPool;
-use crate::utils::validate_program_owner;
+use crate::utils::{validate_program_owner, validate_account_writable};
 
 /// Harvest yield instruction data
 pub struct HarvestYieldData {
@@ -76,6 +76,9 @@ pub fn process_harvest_yield(
 
     // SECURITY: Validate account owner
     validate_program_owner(accounts.yield_pool, program_id)?;
+
+    // SECURITY: Validate writable accounts
+    validate_account_writable(accounts.yield_pool)?;
 
     // Validate harvested amount > 0
     if ix_data.harvested_amount == 0 {

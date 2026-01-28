@@ -22,7 +22,7 @@ use crate::state::{
     RedemptionRequest, RedemptionStatus, NULLIFIER_RECORD_DISCRIMINATOR,
     REDEMPTION_REQUEST_DISCRIMINATOR,
 };
-use crate::utils::{validate_program_owner, validate_token_2022_owner, validate_token_program_key};
+use crate::utils::{validate_program_owner, validate_token_2022_owner, validate_token_program_key, validate_account_writable};
 
 /// Request redemption instruction data (with ZK proof)
 ///
@@ -164,6 +164,13 @@ pub fn process_request_redemption(
     validate_token_2022_owner(accounts.pool_vault)?;
     validate_token_program_key(accounts.token_program)?;
 
+    // SECURITY: Validate writable accounts
+    validate_account_writable(accounts.pool_state)?;
+    validate_account_writable(accounts.nullifier_record)?;
+    validate_account_writable(accounts.redemption_request)?;
+    validate_account_writable(accounts.zbtc_mint)?;
+    validate_account_writable(accounts.pool_vault)?;
+
     // Load and validate pool state
     let (pool_bump, min_deposit, pending_redemptions, total_shielded) = {
         let pool_data = accounts.pool_state.try_borrow_data()?;
@@ -197,11 +204,9 @@ pub fn process_request_redemption(
         return Err(ZVaultError::InvalidBtcAddress.into());
     }
 
-    // Check if demo mode (VK hash is all zeros)
-    let is_demo_mode = ix_data.vk_hash == [0u8; 32];
-
-    // Verify root is valid in commitment tree (skip in demo mode)
-    if !is_demo_mode {
+    // SECURITY: Always verify root is valid in commitment tree
+    // Demo mode bypass removed for mainnet security
+    {
         let tree_data = accounts.commitment_tree.try_borrow_data()?;
         let tree = CommitmentTree::from_bytes(&tree_data)?;
 

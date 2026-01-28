@@ -16,7 +16,7 @@ use crate::state::{
 };
 use crate::utils::{
     get_test_verification_key, verify_split_proof, Groth16Proof,
-    validate_program_owner,
+    validate_program_owner, validate_account_writable,
 };
 
 /// Split commitment instruction data
@@ -109,6 +109,11 @@ pub fn process_split_commitment(
     validate_program_owner(accounts.pool_state, program_id)?;
     validate_program_owner(accounts.commitment_tree, program_id)?;
     // Note: nullifier_record may not exist yet (will be created), skip owner check
+
+    // SECURITY: Validate writable accounts
+    validate_account_writable(accounts.pool_state)?;
+    validate_account_writable(accounts.commitment_tree)?;
+    validate_account_writable(accounts.nullifier_record)?;
 
     // Load and validate pool state
     {

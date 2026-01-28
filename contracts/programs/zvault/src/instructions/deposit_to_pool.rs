@@ -14,7 +14,7 @@ use crate::state::{
     CommitmentTree, NullifierOperationType, NullifierRecord, PoolCommitmentTree,
     PoolNullifierRecord, PoolOperationType, YieldPool, NULLIFIER_RECORD_DISCRIMINATOR,
 };
-use crate::utils::{get_test_verification_key, verify_pool_deposit_proof, Groth16Proof, validate_program_owner};
+use crate::utils::{get_test_verification_key, verify_pool_deposit_proof, Groth16Proof, validate_program_owner, validate_account_writable};
 
 /// Deposit to pool instruction data
 pub struct DepositToPoolData {
@@ -115,6 +115,11 @@ pub fn process_deposit_to_pool(
     validate_program_owner(accounts.yield_pool, program_id)?;
     validate_program_owner(accounts.pool_commitment_tree, program_id)?;
     validate_program_owner(accounts.main_commitment_tree, program_id)?;
+
+    // SECURITY: Validate writable accounts
+    validate_account_writable(accounts.yield_pool)?;
+    validate_account_writable(accounts.pool_commitment_tree)?;
+    validate_account_writable(accounts.input_nullifier_record)?;
 
     // Validate principal > 0
     if ix_data.principal == 0 {

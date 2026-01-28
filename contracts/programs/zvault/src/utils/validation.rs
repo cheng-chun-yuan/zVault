@@ -83,6 +83,50 @@ pub fn validate_program_owners(
     Ok(())
 }
 
+/// Validate that an account is writable
+///
+/// # Security
+/// This MUST be called before any `try_borrow_mut_data()` operation.
+/// Without this check, silent state corruption can occur if a read-only
+/// account is passed where a writable one is expected.
+#[inline(always)]
+pub fn validate_account_writable(account: &AccountInfo) -> Result<(), ProgramError> {
+    if !account.is_writable() {
+        return Err(ZVaultError::AccountNotWritable.into());
+    }
+    Ok(())
+}
+
+/// Validate that a token account belongs to the expected mint
+///
+/// # Security
+/// This prevents token account spoofing attacks where an attacker
+/// passes a token account for a different mint.
+///
+/// # Token Account Layout (Token-2022)
+/// - Bytes 0-32: mint pubkey
+/// - Bytes 32-64: owner pubkey
+/// - Bytes 64-72: amount (u64)
+#[inline(always)]
+pub fn validate_token_mint(
+    token_account: &AccountInfo,
+    expected_mint: &Pubkey,
+) -> Result<(), ProgramError> {
+    let data = token_account.try_borrow_data()?;
+    if data.len() < 32 {
+        return Err(ZVaultError::InvalidAccountData.into());
+    }
+
+    let mint_bytes: [u8; 32] = data[0..32]
+        .try_into()
+        .map_err(|_| ZVaultError::InvalidAccountData)?;
+
+    if &mint_bytes != expected_mint.as_ref() {
+        return Err(ZVaultError::InvalidMint.into());
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     // Tests would go here with mock AccountInfo
