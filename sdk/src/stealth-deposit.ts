@@ -83,9 +83,7 @@ export const STEALTH_OP_RETURN_SIZE = 32;
 export const VERIFY_STEALTH_DEPOSIT_DISCRIMINATOR = 20;
 
 // Program IDs (Solana Devnet)
-const ZVAULT_PROGRAM_ID: Address = address(
-  "5S5ynMni8Pgd6tKkpYaXiPJiEXgw927s7T2txDtDivRK"
-);
+import { ZVAULT_PROGRAM_ID } from "./pda";
 const SYSTEM_PROGRAM_ID: Address = address(
   "11111111111111111111111111111111"
 );

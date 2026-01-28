@@ -16,6 +16,7 @@
  */
 
 import { sha256 } from "@noble/hashes/sha2.js";
+import { ZVAULT_PROGRAM_ID as PROGRAM_ID_ADDRESS } from "./pda";
 
 // ========== Constants ==========
 
@@ -34,8 +35,8 @@ export const NAME_REGISTRY_DISCRIMINATOR = 0x09;
 /** Account size in bytes */
 export const NAME_REGISTRY_SIZE = 180;
 
-/** Default program ID (devnet) */
-export const ZVAULT_PROGRAM_ID = "5S5ynMni8Pgd6tKkpYaXiPJiEXgw927s7T2txDtDivRK";
+/** Default program ID (devnet) - re-exported from pda.ts as string */
+export const ZVAULT_PROGRAM_ID = PROGRAM_ID_ADDRESS as string;
 
 // ========== Types ==========
 

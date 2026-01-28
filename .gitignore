@@ -28,3 +28,5 @@ sdk/dist/
 # Subdirectories have their own .gitignore files
 # See backend/.gitignore, contracts/.gitignore, and frontend/.gitignore
 test-ledger/
+.vercel
+.env*.local

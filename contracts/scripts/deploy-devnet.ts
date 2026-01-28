@@ -395,8 +395,8 @@ async function initializeZVault(
     };
   }
 
-  // Create zkBTC Token-2022 mint
-  log("Creating zkBTC Token-2022 mint...");
+  // Create zBTC Token-2022 mint
+  log("Creating zBTC Token-2022 mint...");
   const zkbtcMint = await createMint(
     connection,
     authority,
@@ -407,7 +407,7 @@ async function initializeZVault(
     undefined,
     TOKEN_2022_PROGRAM_ID
   );
-  log(`zkBTC Mint: ${zkbtcMint.toBase58()}`);
+  log(`zBTC Mint: ${zkbtcMint.toBase58()}`);
 
   // Create pool vault (ATA for pool PDA)
   log("Creating pool vault...");

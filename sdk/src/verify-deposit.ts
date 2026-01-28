@@ -19,11 +19,7 @@ import {
   type SolanaRpcSubscriptionsApi,
 } from "@solana/kit";
 import { prepareVerifyDeposit, bytesToHex } from "./chadbuffer";
-
-// Program ID (Solana Devnet)
-const ZVAULT_PROGRAM_ID: Address = address(
-  "5S5ynMni8Pgd6tKkpYaXiPJiEXgw927s7T2txDtDivRK"
-);
+import { ZVAULT_PROGRAM_ID } from "./pda";
 
 /**
  * Derive PDA addresses (async v2 pattern)

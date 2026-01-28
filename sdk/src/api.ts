@@ -177,10 +177,8 @@ export interface ApiClientConfig {
 // Constants
 // ============================================================================
 
-/** Default program ID (Solana Devnet) */
-export const DEFAULT_PROGRAM_ID: Address = address(
-  "5S5ynMni8Pgd6tKkpYaXiPJiEXgw927s7T2txDtDivRK"
-);
+/** Default program ID (Solana Devnet) - imported from pda.ts */
+export { ZVAULT_PROGRAM_ID as DEFAULT_PROGRAM_ID } from "./pda";
 
 /** Instruction discriminators */
 const INSTRUCTION = {
