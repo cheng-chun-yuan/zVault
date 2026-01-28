@@ -43,7 +43,7 @@
  * - Single ephemeral key per deposit (standard EIP-5564/Umbra pattern)
  */
 
-import { sha256 } from "@noble/hashes/sha256";
+import { sha256 } from "@noble/hashes/sha2.js";
 import {
   scalarFromBytes,
   pointMul,

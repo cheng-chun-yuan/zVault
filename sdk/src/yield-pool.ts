@@ -14,7 +14,7 @@
  * 3. Claim/Withdraw: Spending key derives stealthPriv for ZK proof
  */
 
-import { sha256 } from "@noble/hashes/sha256";
+import { sha256 } from "@noble/hashes/sha2.js";
 import { bigintToBytes, bytesToBigint } from "./crypto";
 import { poseidon2Hash } from "./poseidon2";
 import {

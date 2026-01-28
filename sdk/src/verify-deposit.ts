@@ -2,64 +2,81 @@
  * Verify Deposit Client
  *
  * Helper to call verify_deposit instruction with ChadBuffer data
- * Uses native Solana web3.js (no Anchor - using Pinocchio contracts)
+ * Uses @solana/kit (v2) - no Anchor, using Pinocchio contracts
  */
 
 import {
-  Connection,
-  Keypair,
-  PublicKey,
-} from "@solana/web3.js";
+  address,
+  getProgramDerivedAddress,
+  createSolanaRpc,
+  createSolanaRpcSubscriptions,
+  generateKeyPairSigner,
+  type Address,
+  type Rpc,
+  type RpcSubscriptions,
+  type KeyPairSigner,
+  type SolanaRpcApi,
+  type SolanaRpcSubscriptionsApi,
+} from "@solana/kit";
 import { prepareVerifyDeposit, bytesToHex } from "./chadbuffer";
 
 // Program ID (Solana Devnet)
-const ZVAULT_PROGRAM_ID = new PublicKey(
+const ZVAULT_PROGRAM_ID: Address = address(
   "5S5ynMni8Pgd6tKkpYaXiPJiEXgw927s7T2txDtDivRK"
 );
 
 /**
- * Derive PDA addresses
+ * Derive PDA addresses (async v2 pattern)
  */
-export function derivePoolStatePDA(programId: PublicKey): [PublicKey, number] {
-  return PublicKey.findProgramAddressSync([Buffer.from("pool")], programId);
+export async function derivePoolStatePDA(programId: Address): Promise<[Address, number]> {
+  const result = await getProgramDerivedAddress({
+    seeds: [new TextEncoder().encode("pool")],
+    programAddress: programId,
+  });
+  return [result[0], result[1]];
 }
 
-export function deriveLightClientPDA(programId: PublicKey): [PublicKey, number] {
-  return PublicKey.findProgramAddressSync(
-    [Buffer.from("btc_light_client")],
-    programId
-  );
+export async function deriveLightClientPDA(programId: Address): Promise<[Address, number]> {
+  const result = await getProgramDerivedAddress({
+    seeds: [new TextEncoder().encode("btc_light_client")],
+    programAddress: programId,
+  });
+  return [result[0], result[1]];
 }
 
-export function deriveBlockHeaderPDA(
-  programId: PublicKey,
+export async function deriveBlockHeaderPDA(
+  programId: Address,
   blockHeight: number
-): [PublicKey, number] {
-  const heightBuffer = Buffer.alloc(8);
-  heightBuffer.writeBigUInt64LE(BigInt(blockHeight));
-  return PublicKey.findProgramAddressSync(
-    [Buffer.from("block_header"), heightBuffer],
-    programId
-  );
+): Promise<[Address, number]> {
+  const heightBuffer = new Uint8Array(8);
+  const view = new DataView(heightBuffer.buffer);
+  view.setBigUint64(0, BigInt(blockHeight), true); // little-endian
+  const result = await getProgramDerivedAddress({
+    seeds: [new TextEncoder().encode("block_header"), heightBuffer],
+    programAddress: programId,
+  });
+  return [result[0], result[1]];
 }
 
-export function deriveCommitmentTreePDA(
-  programId: PublicKey
-): [PublicKey, number] {
-  return PublicKey.findProgramAddressSync(
-    [Buffer.from("commitment_tree")],
-    programId
-  );
+export async function deriveCommitmentTreePDA(
+  programId: Address
+): Promise<[Address, number]> {
+  const result = await getProgramDerivedAddress({
+    seeds: [new TextEncoder().encode("commitment_tree")],
+    programAddress: programId,
+  });
+  return [result[0], result[1]];
 }
 
-export function deriveDepositRecordPDA(
-  programId: PublicKey,
+export async function deriveDepositRecordPDA(
+  programId: Address,
   txid: Uint8Array
-): [PublicKey, number] {
-  return PublicKey.findProgramAddressSync(
-    [Buffer.from("deposit"), txid],
-    programId
-  );
+): Promise<[Address, number]> {
+  const result = await getProgramDerivedAddress({
+    seeds: [new TextEncoder().encode("deposit"), txid],
+    programAddress: programId,
+  });
+  return [result[0], result[1]];
 }
 
 /**
@@ -98,45 +115,54 @@ export function buildMerkleProof(
  * 1. Fetch raw tx and merkle proof from Esplora
  * 2. Upload raw tx to ChadBuffer
  * 3. Call verify_deposit instruction
+ *
+ * @param rpc - Solana RPC client from @solana/kit
+ * @param rpcSubscriptions - Solana RPC subscriptions client from @solana/kit
+ * @param payer - KeyPairSigner from @solana/kit
+ * @param txid - Bitcoin transaction ID
+ * @param expectedValue - Expected value in satoshis
+ * @param network - Bitcoin network ("mainnet" | "testnet")
+ * @param programId - zVault program ID
  */
 export async function verifyDeposit(
-  connection: Connection,
-  payer: Keypair,
+  rpc: Rpc<SolanaRpcApi>,
+  rpcSubscriptions: RpcSubscriptions<SolanaRpcSubscriptionsApi>,
+  payer: KeyPairSigner,
   txid: string,
   expectedValue: number,
   network: "mainnet" | "testnet" = "testnet",
-  programId: PublicKey = ZVAULT_PROGRAM_ID
-): Promise<string> {
+  programId: Address = ZVAULT_PROGRAM_ID
+): Promise<Address> {
   console.log("=== Verify Deposit ===");
   console.log(`Txid: ${txid}`);
   console.log(`Expected value: ${expectedValue} sats`);
 
   // Step 1 & 2: Fetch tx, upload to buffer
   const {
-    bufferPubkey,
+    bufferAddress,
     transactionSize,
     merkleProof,
     blockHeight,
     txIndex,
     txidBytes,
-  } = await prepareVerifyDeposit(connection, payer, txid, network);
+  } = await prepareVerifyDeposit(rpc, rpcSubscriptions, payer, txid, network);
 
-  console.log(`Buffer: ${bufferPubkey.toBase58()}`);
+  console.log(`Buffer: ${bufferAddress}`);
   console.log(`Block height: ${blockHeight}`);
 
-  // Step 3: Derive PDAs
-  const [poolState] = derivePoolStatePDA(programId);
-  const [lightClient] = deriveLightClientPDA(programId);
-  const [blockHeader] = deriveBlockHeaderPDA(programId, blockHeight);
-  const [commitmentTree] = deriveCommitmentTreePDA(programId);
-  const [depositRecord] = deriveDepositRecordPDA(programId, txidBytes);
+  // Step 3: Derive PDAs (now async)
+  const [poolState] = await derivePoolStatePDA(programId);
+  const [lightClient] = await deriveLightClientPDA(programId);
+  const [blockHeader] = await deriveBlockHeaderPDA(programId, blockHeight);
+  const [commitmentTree] = await deriveCommitmentTreePDA(programId);
+  const [depositRecord] = await deriveDepositRecordPDA(programId, txidBytes);
 
   console.log("PDAs derived:");
-  console.log(`  Pool: ${poolState.toBase58()}`);
-  console.log(`  Light Client: ${lightClient.toBase58()}`);
-  console.log(`  Block Header: ${blockHeader.toBase58()}`);
-  console.log(`  Commitment Tree: ${commitmentTree.toBase58()}`);
-  console.log(`  Deposit Record: ${depositRecord.toBase58()}`);
+  console.log(`  Pool: ${poolState}`);
+  console.log(`  Light Client: ${lightClient}`);
+  console.log(`  Block Header: ${blockHeader}`);
+  console.log(`  Commitment Tree: ${commitmentTree}`);
+  console.log(`  Deposit Record: ${depositRecord}`);
 
   // Build merkle proof
   const merkleProofData = buildMerkleProof(txidBytes, merkleProof, txIndex);
@@ -156,23 +182,27 @@ export async function verifyDeposit(
 
   console.log("\n=== Ready to call verify_deposit ===");
 
-  return depositRecord.toBase58();
+  return depositRecord;
 }
 
 /**
  * Example usage
  */
 export async function exampleUsage() {
-  const connection = new Connection("https://api.devnet.solana.com");
-  const payer = Keypair.generate(); // Replace with actual keypair
+  // Create RPC client and subscriptions using @solana/kit
+  const rpc = createSolanaRpc("https://api.devnet.solana.com");
+  const rpcSubscriptions = createSolanaRpcSubscriptions("wss://api.devnet.solana.com");
+
+  // Generate a new keypair signer (replace with actual keypair in production)
+  const payer = await generateKeyPairSigner();
 
   // Example Bitcoin txid (replace with actual)
-  const txid =
-    "abc123..."; // 64 char hex
+  const txid = "abc123..."; // 64 char hex
 
   try {
     const depositRecordPDA = await verifyDeposit(
-      connection,
+      rpc,
+      rpcSubscriptions,
       payer,
       txid,
       100000, // 0.001 BTC in sats

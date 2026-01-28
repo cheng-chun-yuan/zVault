@@ -20,15 +20,25 @@
  */
 
 import {
-  Connection,
-  Keypair,
-  PublicKey,
-  SystemProgram,
-  Transaction,
-  TransactionInstruction,
-  sendAndConfirmTransaction,
-} from "@solana/web3.js";
-import { sha256 } from "@noble/hashes/sha256";
+  address,
+  createTransactionMessage,
+  setTransactionMessageFeePayer,
+  setTransactionMessageLifetimeUsingBlockhash,
+  appendTransactionMessageInstruction,
+  pipe,
+  signTransactionMessageWithSigners,
+  getSignatureFromTransaction,
+  getProgramDerivedAddress,
+  sendAndConfirmTransactionFactory,
+  AccountRole,
+  type Address,
+  type Rpc,
+  type RpcSubscriptions,
+  type KeyPairSigner,
+  type SolanaRpcApi,
+  type SolanaRpcSubscriptionsApi,
+} from "@solana/kit";
+import { sha256 } from "@noble/hashes/sha2.js";
 
 import { bytesToBigint, bigintToBytes, BN254_FIELD_PRIME } from "./crypto";
 import {
@@ -72,9 +82,12 @@ export const STEALTH_OP_RETURN_SIZE = 32;
 /** Instruction discriminator for verify_stealth_deposit */
 export const VERIFY_STEALTH_DEPOSIT_DISCRIMINATOR = 20;
 
-// Program ID (Solana Devnet)
-const ZVAULT_PROGRAM_ID = new PublicKey(
+// Program IDs (Solana Devnet)
+const ZVAULT_PROGRAM_ID: Address = address(
   "5S5ynMni8Pgd6tKkpYaXiPJiEXgw927s7T2txDtDivRK"
+);
+const SYSTEM_PROGRAM_ID: Address = address(
+  "11111111111111111111111111111111"
 );
 
 /** Domain separator for stealth key derivation */
@@ -256,14 +269,19 @@ export function parseStealthOpReturn(
  *
  * Uses ephemeral Grumpkin public key (33 bytes) as seed.
  */
-export function deriveStealthAnnouncementPDA(
-  programId: PublicKey,
+export async function deriveStealthAnnouncementPDA(
+  programId: Address,
   ephemeralPub: Uint8Array
-): [PublicKey, number] {
-  return PublicKey.findProgramAddressSync(
-    [Buffer.from("stealth"), ephemeralPub],
-    programId
-  );
+): Promise<[Address, number]> {
+  const seeds = [
+    new TextEncoder().encode("stealth"),
+    ephemeralPub,
+  ];
+  const [pda, bump] = await getProgramDerivedAddress({
+    seeds,
+    programAddress: programId,
+  });
+  return [pda, bump];
 }
 
 /**
@@ -279,8 +297,9 @@ export function deriveStealthAnnouncementPDA(
  * only contains the commitment. The ephemeral key is stored in the
  * StealthAnnouncement for recipient scanning.
  *
- * @param connection - Solana connection
- * @param payer - Transaction fee payer
+ * @param rpc - Solana RPC client
+ * @param rpcSubscriptions - Solana RPC subscriptions client
+ * @param payer - Transaction fee payer (KeyPairSigner)
  * @param btcTxid - Bitcoin transaction ID (hex string)
  * @param expectedValue - Expected deposit value in satoshis
  * @param ephemeralPub - Grumpkin ephemeral public key (33 bytes)
@@ -289,13 +308,14 @@ export function deriveStealthAnnouncementPDA(
  * @returns Transaction signature
  */
 export async function verifyStealthDeposit(
-  connection: Connection,
-  payer: Keypair,
+  rpc: Rpc<SolanaRpcApi>,
+  rpcSubscriptions: RpcSubscriptions<SolanaRpcSubscriptionsApi>,
+  payer: KeyPairSigner,
   btcTxid: string,
   expectedValue: bigint,
   ephemeralPub: Uint8Array,
   network: "mainnet" | "testnet" = "testnet",
-  programId: PublicKey = ZVAULT_PROGRAM_ID
+  programId: Address = ZVAULT_PROGRAM_ID
 ): Promise<string> {
   console.log("=== Verify Stealth Deposit ===");
   console.log(`Txid: ${btcTxid}`);
@@ -308,13 +328,13 @@ export async function verifyStealthDeposit(
 
   // Step 1: Fetch tx and merkle proof, upload to buffer
   const {
-    bufferPubkey,
+    bufferAddress,
     transactionSize,
     merkleProof,
     blockHeight,
     txIndex,
     txidBytes,
-  } = await prepareVerifyDeposit(connection, payer, btcTxid, network);
+  } = await prepareVerifyDeposit(rpc, rpcSubscriptions, payer, btcTxid, network);
 
   // Step 2: Verify the OP_RETURN contains valid commitment
   const rawTx = await fetchRawTransaction(btcTxid, network);
@@ -324,23 +344,23 @@ export async function verifyStealthDeposit(
   }
 
   // Step 3: Derive PDAs
-  const [poolState] = derivePoolStatePDA(programId);
-  const [lightClient] = deriveLightClientPDA(programId);
-  const [blockHeader] = deriveBlockHeaderPDA(programId, blockHeight);
-  const [commitmentTree] = deriveCommitmentTreePDA(programId);
-  const [depositRecord] = deriveDepositRecordPDA(programId, txidBytes);
-  const [stealthAnnouncement] = deriveStealthAnnouncementPDA(
+  const [poolState] = await derivePoolStatePDA(programId);
+  const [lightClient] = await deriveLightClientPDA(programId);
+  const [blockHeader] = await deriveBlockHeaderPDA(programId, blockHeight);
+  const [commitmentTree] = await deriveCommitmentTreePDA(programId);
+  const [depositRecord] = await deriveDepositRecordPDA(programId, txidBytes);
+  const [stealthAnnouncement] = await deriveStealthAnnouncementPDA(
     programId,
     ephemeralPub
   );
 
   console.log("PDAs derived:");
-  console.log(`  Pool: ${poolState.toBase58()}`);
-  console.log(`  Light Client: ${lightClient.toBase58()}`);
-  console.log(`  Block Header: ${blockHeader.toBase58()}`);
-  console.log(`  Commitment Tree: ${commitmentTree.toBase58()}`);
-  console.log(`  Deposit Record: ${depositRecord.toBase58()}`);
-  console.log(`  Stealth Announcement: ${stealthAnnouncement.toBase58()}`);
+  console.log(`  Pool: ${poolState}`);
+  console.log(`  Light Client: ${lightClient}`);
+  console.log(`  Block Header: ${blockHeader}`);
+  console.log(`  Commitment Tree: ${commitmentTree}`);
+  console.log(`  Deposit Record: ${depositRecord}`);
+  console.log(`  Stealth Announcement: ${stealthAnnouncement}`);
 
   // Build merkle proof data
   const merkleProofData = buildMerkleProof(txidBytes, merkleProof, txIndex);
@@ -355,27 +375,41 @@ export async function verifyStealthDeposit(
     ephemeralPub,
   });
 
-  // Create instruction
-  const instruction = new TransactionInstruction({
-    programId,
-    keys: [
-      { pubkey: poolState, isSigner: false, isWritable: true },
-      { pubkey: lightClient, isSigner: false, isWritable: false },
-      { pubkey: blockHeader, isSigner: false, isWritable: false },
-      { pubkey: commitmentTree, isSigner: false, isWritable: true },
-      { pubkey: depositRecord, isSigner: false, isWritable: true },
-      { pubkey: stealthAnnouncement, isSigner: false, isWritable: true },
-      { pubkey: bufferPubkey, isSigner: false, isWritable: false },
-      { pubkey: payer.publicKey, isSigner: true, isWritable: true },
-      { pubkey: SystemProgram.programId, isSigner: false, isWritable: false },
+  // Create instruction using v2 format
+  const instruction = {
+    programAddress: programId,
+    accounts: [
+      { address: poolState, role: AccountRole.WRITABLE },
+      { address: lightClient, role: AccountRole.READONLY },
+      { address: blockHeader, role: AccountRole.READONLY },
+      { address: commitmentTree, role: AccountRole.WRITABLE },
+      { address: depositRecord, role: AccountRole.WRITABLE },
+      { address: stealthAnnouncement, role: AccountRole.WRITABLE },
+      { address: bufferAddress, role: AccountRole.READONLY },
+      { address: payer.address, role: AccountRole.WRITABLE_SIGNER },
+      { address: SYSTEM_PROGRAM_ID, role: AccountRole.READONLY },
     ],
-    data: Buffer.from(instructionData),
-  });
+    data: new Uint8Array(instructionData),
+  };
 
-  // Send transaction
-  const tx = new Transaction().add(instruction);
-  const signature = await sendAndConfirmTransaction(connection, tx, [payer]);
+  // Get blockhash
+  const { value: latestBlockhash } = await rpc.getLatestBlockhash().send();
 
+  // Build transaction message
+  const txMessage = pipe(
+    createTransactionMessage({ version: 0 }),
+    (msg) => setTransactionMessageFeePayer(payer.address, msg),
+    (msg) => setTransactionMessageLifetimeUsingBlockhash(latestBlockhash, msg),
+    (msg) => appendTransactionMessageInstruction(instruction, msg)
+  );
+
+  // Sign and send
+  const signedTx = await signTransactionMessageWithSigners(txMessage);
+  const sendAndConfirm = sendAndConfirmTransactionFactory({ rpc, rpcSubscriptions });
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  await sendAndConfirm(signedTx as any, { commitment: "confirmed" });
+
+  const signature = getSignatureFromTransaction(signedTx);
   console.log(`Transaction confirmed: ${signature}`);
   return signature;
 }

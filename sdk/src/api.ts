@@ -19,7 +19,27 @@
  * @module api
  */
 
-import { Connection, Keypair, PublicKey, Transaction, TransactionInstruction, SystemProgram } from "@solana/web3.js";
+import {
+  address,
+  getProgramDerivedAddress,
+  AccountRole,
+  pipe,
+  createTransactionMessage,
+  setTransactionMessageFeePayer,
+  setTransactionMessageLifetimeUsingBlockhash,
+  appendTransactionMessageInstruction,
+  compileTransaction,
+  getBase64EncodedWireTransaction,
+  type Address,
+  type Blockhash,
+} from "@solana/kit";
+
+/** Instruction type for v2 */
+interface Instruction {
+  programAddress: Address;
+  accounts: Array<{ address: Address; role: (typeof AccountRole)[keyof typeof AccountRole] }>;
+  data: Uint8Array;
+}
 import { generateNote, type Note, formatBtc } from "./note";
 import { deriveTaprootAddress } from "./taproot";
 import { createClaimLink, parseClaimLink } from "./claim-link";
@@ -37,6 +57,9 @@ import { createStealthMetaAddress, type StealthMetaAddress } from "./keys";
 import { createMerkleProof, type MerkleProof, TREE_DEPTH, ZERO_VALUE } from "./merkle";
 import { bigintToBytes } from "./crypto";
 import { prepareVerifyDeposit } from "./chadbuffer";
+
+/** System program address */
+const SYSTEM_PROGRAM_ADDRESS = address("11111111111111111111111111111111");
 
 // ============================================================================
 // Types
@@ -79,7 +102,7 @@ export interface ClaimResult {
   /** Amount claimed in satoshis */
   amount: bigint;
   /** Recipient address */
-  recipient: PublicKey;
+  recipient: Address;
 }
 
 /**
@@ -125,12 +148,29 @@ export interface StealthTransferResult {
 }
 
 /**
+ * Signer interface for v2 transactions
+ */
+export interface TransactionSigner {
+  address: Address;
+  signTransaction: <T extends { signatures: Record<string, Uint8Array> }>(transaction: T) => Promise<T>;
+}
+
+/**
+ * RPC interface for sending transactions
+ */
+export interface RpcClient {
+  getLatestBlockhash: () => Promise<{ blockhash: string; lastValidBlockHeight: bigint }>;
+  sendTransaction: (transaction: Uint8Array) => Promise<string>;
+  confirmTransaction: (signature: string) => Promise<void>;
+}
+
+/**
  * Client configuration
  */
 export interface ApiClientConfig {
-  connection: Connection;
-  programId: PublicKey;
-  payer?: Keypair;
+  rpc: RpcClient;
+  programId: Address;
+  payer?: TransactionSigner;
 }
 
 // ============================================================================
@@ -138,7 +178,7 @@ export interface ApiClientConfig {
 // ============================================================================
 
 /** Default program ID (Solana Devnet) */
-export const DEFAULT_PROGRAM_ID = new PublicKey(
+export const DEFAULT_PROGRAM_ID: Address = address(
   "5S5ynMni8Pgd6tKkpYaXiPJiEXgw927s7T2txDtDivRK"
 );
 
@@ -156,32 +196,82 @@ const INSTRUCTION = {
 // PDA Derivation Helpers
 // ============================================================================
 
-function derivePoolStatePDA(programId: PublicKey): [PublicKey, number] {
-  return PublicKey.findProgramAddressSync([Buffer.from("pool_state")], programId);
+async function derivePoolStatePDA(programId: Address): Promise<[Address, number]> {
+  const result = await getProgramDerivedAddress({
+    programAddress: programId,
+    seeds: [new TextEncoder().encode("pool_state")],
+  });
+  return [result[0], result[1]];
 }
 
-function deriveCommitmentTreePDA(programId: PublicKey): [PublicKey, number] {
-  return PublicKey.findProgramAddressSync([Buffer.from("commitment_tree")], programId);
+async function deriveCommitmentTreePDA(programId: Address): Promise<[Address, number]> {
+  const result = await getProgramDerivedAddress({
+    programAddress: programId,
+    seeds: [new TextEncoder().encode("commitment_tree")],
+  });
+  return [result[0], result[1]];
 }
 
-function deriveNullifierRecordPDA(
-  programId: PublicKey,
+// ============================================================================
+// Transaction Helper
+// ============================================================================
+
+/**
+ * Send an instruction and confirm (v2 pattern)
+ */
+async function sendInstruction(
+  config: ApiClientConfig,
+  instruction: Instruction
+): Promise<string> {
+  if (!config.payer) {
+    throw new Error("Payer required");
+  }
+
+  const blockhash = await config.rpc.getLatestBlockhash();
+
+  // Build transaction message
+  const message = pipe(
+    createTransactionMessage({ version: 0 }),
+    (msg) => setTransactionMessageFeePayer(config.payer!.address, msg),
+    (msg) => setTransactionMessageLifetimeUsingBlockhash(
+      { blockhash: blockhash.blockhash as Blockhash, lastValidBlockHeight: blockhash.lastValidBlockHeight },
+      msg
+    ),
+    (msg) => appendTransactionMessageInstruction(instruction as any, msg)
+  );
+
+  // Compile and sign
+  const compiledTx = compileTransaction(message);
+  const signedTx = await config.payer.signTransaction(compiledTx as any);
+
+  // Send
+  const txBytes = getBase64EncodedWireTransaction(signedTx as any);
+  const signature = await config.rpc.sendTransaction(new TextEncoder().encode(txBytes));
+  await config.rpc.confirmTransaction(signature);
+
+  return signature;
+}
+
+async function deriveNullifierRecordPDA(
+  programId: Address,
   nullifierHash: Uint8Array
-): [PublicKey, number] {
-  return PublicKey.findProgramAddressSync(
-    [Buffer.from("nullifier"), nullifierHash],
-    programId
-  );
+): Promise<[Address, number]> {
+  const result = await getProgramDerivedAddress({
+    programAddress: programId,
+    seeds: [new TextEncoder().encode("nullifier"), nullifierHash],
+  });
+  return [result[0], result[1]];
 }
 
-function deriveStealthAnnouncementPDA(
-  programId: PublicKey,
+async function deriveStealthAnnouncementPDA(
+  programId: Address,
   commitment: Uint8Array
-): [PublicKey, number] {
-  return PublicKey.findProgramAddressSync(
-    [Buffer.from("stealth"), commitment],
-    programId
-  );
+): Promise<[Address, number]> {
+  const result = await getProgramDerivedAddress({
+    programAddress: programId,
+    seeds: [new TextEncoder().encode("stealth"), commitment],
+  });
+  return [result[0], result[1]];
 }
 
 // ============================================================================
@@ -337,29 +427,29 @@ export async function withdraw(
   );
 
   // Derive PDAs
-  const [poolState] = derivePoolStatePDA(config.programId);
-  const [commitmentTree] = deriveCommitmentTreePDA(config.programId);
-  const [nullifierRecord] = deriveNullifierRecordPDA(
+  const [poolState] = await derivePoolStatePDA(config.programId);
+  const [commitmentTree] = await deriveCommitmentTreePDA(config.programId);
+  const [nullifierRecord] = await deriveNullifierRecordPDA(
     config.programId,
     note.nullifierHashBytes
   );
 
-  // Build transaction
-  const ix = new TransactionInstruction({
-    programId: config.programId,
-    keys: [
-      { pubkey: poolState, isSigner: false, isWritable: true },
-      { pubkey: commitmentTree, isSigner: false, isWritable: true },
-      { pubkey: nullifierRecord, isSigner: false, isWritable: true },
-      { pubkey: config.payer.publicKey, isSigner: true, isWritable: true },
-      { pubkey: SystemProgram.programId, isSigner: false, isWritable: false },
+  // Build instruction (v2 format)
+  const ix: Instruction = {
+    programAddress: config.programId,
+    accounts: [
+      { address: poolState, role: AccountRole.WRITABLE },
+      { address: commitmentTree, role: AccountRole.WRITABLE },
+      { address: nullifierRecord, role: AccountRole.WRITABLE },
+      { address: config.payer.address, role: AccountRole.WRITABLE_SIGNER },
+      { address: SYSTEM_PROGRAM_ADDRESS, role: AccountRole.READONLY },
     ],
-    data: Buffer.from(data),
-  });
+    data: new Uint8Array(data),
+  };
 
-  const tx = new Transaction().add(ix);
-  const signature = await config.connection.sendTransaction(tx, [config.payer]);
-  await config.connection.confirmTransaction(signature);
+  // Send transaction using the RPC client
+  const signature = await sendInstruction(config, ix);
+  await config.rpc.confirmTransaction(signature);
 
   return {
     signature,
@@ -431,34 +521,34 @@ export async function claimNote(
   const data = buildClaimData(proof, note.amount);
 
   // Derive PDAs
-  const [poolState] = derivePoolStatePDA(config.programId);
-  const [commitmentTree] = deriveCommitmentTreePDA(config.programId);
-  const [nullifierRecord] = deriveNullifierRecordPDA(
+  const [poolState] = await derivePoolStatePDA(config.programId);
+  const [commitmentTree] = await deriveCommitmentTreePDA(config.programId);
+  const [nullifierRecord] = await deriveNullifierRecordPDA(
     config.programId,
     note.nullifierHashBytes
   );
 
-  // Build transaction
-  const ix = new TransactionInstruction({
-    programId: config.programId,
-    keys: [
-      { pubkey: poolState, isSigner: false, isWritable: true },
-      { pubkey: commitmentTree, isSigner: false, isWritable: false },
-      { pubkey: nullifierRecord, isSigner: false, isWritable: true },
-      { pubkey: config.payer.publicKey, isSigner: true, isWritable: true },
-      { pubkey: SystemProgram.programId, isSigner: false, isWritable: false },
+  // Build instruction (v2 format)
+  const ix: Instruction = {
+    programAddress: config.programId,
+    accounts: [
+      { address: poolState, role: AccountRole.WRITABLE },
+      { address: commitmentTree, role: AccountRole.READONLY },
+      { address: nullifierRecord, role: AccountRole.WRITABLE },
+      { address: config.payer.address, role: AccountRole.WRITABLE_SIGNER },
+      { address: SYSTEM_PROGRAM_ADDRESS, role: AccountRole.READONLY },
     ],
-    data: Buffer.from(data),
-  });
+    data: new Uint8Array(data),
+  };
 
-  const tx = new Transaction().add(ix);
-  const signature = await config.connection.sendTransaction(tx, [config.payer]);
-  await config.connection.confirmTransaction(signature);
+  // Send transaction using the RPC client
+  const signature = await sendInstruction(config, ix);
+  await config.rpc.confirmTransaction(signature);
 
   return {
     signature,
     amount: note.amount,
-    recipient: config.payer.publicKey,
+    recipient: config.payer.address,
   };
 }
 
@@ -526,29 +616,27 @@ export async function splitNote(
   const data = buildSplitData(proof, output1.commitmentBytes, output2.commitmentBytes);
 
   // Derive PDAs
-  const [poolState] = derivePoolStatePDA(config.programId);
-  const [commitmentTree] = deriveCommitmentTreePDA(config.programId);
-  const [nullifierRecord] = deriveNullifierRecordPDA(
+  const [poolState] = await derivePoolStatePDA(config.programId);
+  const [commitmentTree] = await deriveCommitmentTreePDA(config.programId);
+  const [nullifierRecord] = await deriveNullifierRecordPDA(
     config.programId,
     inputNote.nullifierHashBytes
   );
 
-  // Build transaction
-  const ix = new TransactionInstruction({
-    programId: config.programId,
-    keys: [
-      { pubkey: poolState, isSigner: false, isWritable: true },
-      { pubkey: commitmentTree, isSigner: false, isWritable: true },
-      { pubkey: nullifierRecord, isSigner: false, isWritable: true },
-      { pubkey: config.payer.publicKey, isSigner: true, isWritable: true },
-      { pubkey: SystemProgram.programId, isSigner: false, isWritable: false },
+  // Build instruction (v2 format)
+  const ix: Instruction = {
+    programAddress: config.programId,
+    accounts: [
+      { address: poolState, role: AccountRole.WRITABLE },
+      { address: commitmentTree, role: AccountRole.WRITABLE },
+      { address: nullifierRecord, role: AccountRole.WRITABLE },
+      { address: config.payer.address, role: AccountRole.WRITABLE_SIGNER },
+      { address: SYSTEM_PROGRAM_ADDRESS, role: AccountRole.READONLY },
     ],
-    data: Buffer.from(data),
-  });
+    data: new Uint8Array(data),
+  };
 
-  const tx = new Transaction().add(ix);
-  const signature = await config.connection.sendTransaction(tx, [config.payer]);
-  await config.connection.confirmTransaction(signature);
+  const signature = await sendInstruction(config, ix);
 
   return {
     signature,
@@ -649,25 +737,23 @@ export async function sendStealth(
   data.set(stealthDeposit.commitment, offset);
 
   // Derive stealth announcement PDA
-  const [stealthAnnouncement] = deriveStealthAnnouncementPDA(
+  const [stealthAnnouncement] = await deriveStealthAnnouncementPDA(
     config.programId,
     stealthDeposit.ephemeralPub
   );
 
-  // Build transaction
-  const ix = new TransactionInstruction({
-    programId: config.programId,
-    keys: [
-      { pubkey: stealthAnnouncement, isSigner: false, isWritable: true },
-      { pubkey: config.payer.publicKey, isSigner: true, isWritable: true },
-      { pubkey: SystemProgram.programId, isSigner: false, isWritable: false },
+  // Build instruction (v2 format)
+  const ix: Instruction = {
+    programAddress: config.programId,
+    accounts: [
+      { address: stealthAnnouncement, role: AccountRole.WRITABLE },
+      { address: config.payer.address, role: AccountRole.WRITABLE_SIGNER },
+      { address: SYSTEM_PROGRAM_ADDRESS, role: AccountRole.READONLY },
     ],
-    data: Buffer.from(data),
-  });
+    data: new Uint8Array(data),
+  };
 
-  const tx = new Transaction().add(ix);
-  const signature = await config.connection.sendTransaction(tx, [config.payer]);
-  await config.connection.confirmTransaction(signature);
+  const signature = await sendInstruction(config, ix);
 
   return {
     signature,
@@ -747,34 +833,32 @@ export async function sendPrivate(
   );
 
   // Derive PDAs
-  const [poolState] = derivePoolStatePDA(config.programId);
-  const [commitmentTree] = deriveCommitmentTreePDA(config.programId);
-  const [nullifierRecord] = deriveNullifierRecordPDA(
+  const [poolState] = await derivePoolStatePDA(config.programId);
+  const [commitmentTree] = await deriveCommitmentTreePDA(config.programId);
+  const [nullifierRecord] = await deriveNullifierRecordPDA(
     config.programId,
     inputNote.nullifierHashBytes
   );
-  const [stealthAnnouncement] = deriveStealthAnnouncementPDA(
+  const [stealthAnnouncement] = await deriveStealthAnnouncementPDA(
     config.programId,
     stealthDeposit.ephemeralPub
   );
 
-  // Build transaction
-  const ix = new TransactionInstruction({
-    programId: config.programId,
-    keys: [
-      { pubkey: poolState, isSigner: false, isWritable: true },
-      { pubkey: commitmentTree, isSigner: false, isWritable: true },
-      { pubkey: nullifierRecord, isSigner: false, isWritable: true },
-      { pubkey: stealthAnnouncement, isSigner: false, isWritable: true },
-      { pubkey: config.payer.publicKey, isSigner: true, isWritable: true },
-      { pubkey: SystemProgram.programId, isSigner: false, isWritable: false },
+  // Build instruction (v2 format)
+  const ix: Instruction = {
+    programAddress: config.programId,
+    accounts: [
+      { address: poolState, role: AccountRole.WRITABLE },
+      { address: commitmentTree, role: AccountRole.WRITABLE },
+      { address: nullifierRecord, role: AccountRole.WRITABLE },
+      { address: stealthAnnouncement, role: AccountRole.WRITABLE },
+      { address: config.payer.address, role: AccountRole.WRITABLE_SIGNER },
+      { address: SYSTEM_PROGRAM_ADDRESS, role: AccountRole.READONLY },
     ],
-    data: Buffer.from(data),
-  });
+    data: new Uint8Array(data),
+  };
 
-  const tx = new Transaction().add(ix);
-  const signature = await config.connection.sendTransaction(tx, [config.payer]);
-  await config.connection.confirmTransaction(signature);
+  const signature = await sendInstruction(config, ix);
 
   return {
     signature,

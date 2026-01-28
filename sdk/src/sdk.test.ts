@@ -11,7 +11,7 @@
  */
 
 import { expect, test, describe } from "bun:test";
-import { Connection, Keypair, PublicKey, SystemProgram } from "@solana/web3.js";
+import { address, createSolanaRpc, getProgramDerivedAddress, type Address } from "@solana/kit";
 
 // Core SDK imports
 import { deposit, claimNote, splitNote, sendStealth, sendPrivate, createClaimLinkFromNote } from "./api";
@@ -252,14 +252,14 @@ describe("NAME REGISTRY", () => {
     expect(data[1]).toBe(4);  // name length
   });
 
-  test("PDA derivation works", () => {
+  test("PDA derivation works", async () => {
     const nameHash = hashName("alice");
-    const [pda, bump] = PublicKey.findProgramAddressSync(
-      [Buffer.from(NAME_REGISTRY_SEED), Buffer.from(nameHash)],
-      new PublicKey(ZVAULT_PROGRAM_ID)
-    );
+    const [pda, bump] = await getProgramDerivedAddress({
+      seeds: [new TextEncoder().encode(NAME_REGISTRY_SEED), nameHash],
+      programAddress: address(ZVAULT_PROGRAM_ID),
+    });
 
-    expect(pda).toBeInstanceOf(PublicKey);
+    expect(typeof pda).toBe("string");
     expect(bump).toBeGreaterThanOrEqual(0);
   });
 });
@@ -295,12 +295,14 @@ describe("CRYPTOGRAPHY", () => {
 
 describe("ZVaultClient", () => {
   test("createClient() returns valid client", () => {
-    const client = createClient(new Connection("https://api.devnet.solana.com"));
+    const rpc = createSolanaRpc("https://api.devnet.solana.com");
+    const client = createClient(rpc);
     expect(client).toBeInstanceOf(ZVaultClient);
   });
 
   test("client has all methods", () => {
-    const client = createClient(new Connection("https://api.devnet.solana.com"));
+    const rpc = createSolanaRpc("https://api.devnet.solana.com");
+    const client = createClient(rpc);
 
     // Deposit
     expect(typeof client.deposit).toBe("function");
@@ -317,7 +319,8 @@ describe("ZVaultClient", () => {
   });
 
   test("client.deposit() works", async () => {
-    const client = createClient(new Connection("https://api.devnet.solana.com"));
+    const rpc = createSolanaRpc("https://api.devnet.solana.com");
+    const client = createClient(rpc);
     const result = await client.deposit(100_000n, "testnet");
 
     expect(result.note.amount).toBe(100_000n);

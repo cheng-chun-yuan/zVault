@@ -259,7 +259,7 @@ export function parseNameRegistry(
 export async function lookupZkeyName(
   connection: {
     getAccountInfo: (
-      pubkey: { toBytes(): Uint8Array }
+      pubkey: import("@solana/kit").Address
     ) => Promise<{ data: Uint8Array } | null>;
   },
   name: string,
@@ -276,12 +276,15 @@ export async function lookupZkeyName(
 
     // Caller must provide a way to derive PDA and fetch account
     // This is a platform-agnostic interface
-    const { PublicKey } = await import("@solana/web3.js");
+    const { address, getProgramDerivedAddress } = await import("@solana/kit");
 
-    const [pda] = PublicKey.findProgramAddressSync(
-      [Buffer.from(NAME_REGISTRY_SEED), Buffer.from(nameHash)],
-      new PublicKey(programId)
-    );
+    const [pda] = await getProgramDerivedAddress({
+      seeds: [
+        new TextEncoder().encode(NAME_REGISTRY_SEED),
+        nameHash,
+      ],
+      programAddress: address(programId),
+    });
 
     const accountInfo = await connection.getAccountInfo(pda);
     if (!accountInfo) {

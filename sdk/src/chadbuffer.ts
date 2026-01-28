@@ -10,19 +10,43 @@
  */
 
 import {
-  Connection,
-  Keypair,
-  PublicKey,
-  SystemProgram,
-  Transaction,
-  TransactionInstruction,
-  sendAndConfirmTransaction,
-} from "@solana/web3.js";
+  address,
+  getProgramDerivedAddress,
+  generateKeyPairSigner,
+  createKeyPairSignerFromBytes,
+  pipe,
+  createTransactionMessage,
+  setTransactionMessageFeePayer,
+  setTransactionMessageLifetimeUsingBlockhash,
+  appendTransactionMessageInstruction,
+  appendTransactionMessageInstructions,
+  signTransactionMessageWithSigners,
+  getSignatureFromTransaction,
+  sendAndConfirmTransactionFactory,
+  AccountRole,
+  type Address,
+  type KeyPairSigner,
+  type Rpc,
+  type RpcSubscriptions,
+  type SolanaRpcApi,
+  type SolanaRpcSubscriptionsApi,
+} from "@solana/kit";
+import { getCreateAccountInstruction } from "@solana-program/system";
+
+/** Instruction type for v2 */
+interface Instruction {
+  programAddress: Address;
+  accounts: Array<{ address: Address; role: (typeof AccountRole)[keyof typeof AccountRole] }>;
+  data: Uint8Array;
+}
 
 // ChadBuffer Program ID
-export const CHADBUFFER_PROGRAM_ID = new PublicKey(
+export const CHADBUFFER_PROGRAM_ID: Address = address(
   "CHADqH6wybhBMB9RR2xQVu2XRjuLcNvffTjwvv3ygMyn"
 );
+
+// System Program ID
+const SYSTEM_PROGRAM_ID: Address = address("11111111111111111111111111111111");
 
 // Buffer authority size (32 bytes)
 const AUTHORITY_SIZE = 32;
@@ -59,123 +83,211 @@ function createInstructionData(
 /**
  * Upload raw Bitcoin transaction to ChadBuffer
  *
- * @param connection - Solana connection
- * @param payer - Transaction fee payer
+ * @param rpc - Solana RPC client
+ * @param rpcSubscriptions - Solana RPC subscriptions client
+ * @param payer - Transaction fee payer (KeyPairSigner)
  * @param rawTx - Raw Bitcoin transaction bytes
- * @param seed - Optional seed for buffer PDA derivation
- * @returns Buffer public key
+ * @param seed - Optional seed for buffer keypair derivation
+ * @returns Buffer address
  */
 export async function uploadTransactionToBuffer(
-  connection: Connection,
-  payer: Keypair,
+  rpc: Rpc<SolanaRpcApi>,
+  rpcSubscriptions: RpcSubscriptions<SolanaRpcSubscriptionsApi>,
+  payer: KeyPairSigner,
   rawTx: Uint8Array,
   seed?: Uint8Array
-): Promise<PublicKey> {
+): Promise<Address> {
   // Generate buffer keypair or derive from seed
   const bufferKeypair = seed
-    ? Keypair.fromSeed(seed.slice(0, 32))
-    : Keypair.generate();
+    ? await createKeyPairSignerFromBytes(seed.slice(0, 64).length === 64 ? seed.slice(0, 64) : padTo64Bytes(seed.slice(0, 32)))
+    : await generateKeyPairSigner();
 
   // Calculate required space: authority (32) + data
   const space = AUTHORITY_SIZE + rawTx.length;
 
-  // Get rent exemption
-  const rentExemption = await connection.getMinimumBalanceForRentExemption(
-    space
-  );
+  // Get rent exemption using v2 RPC
+  const rentExemption = await rpc.getMinimumBalanceForRentExemption(BigInt(space)).send();
 
   // Split data into chunks
   const chunks = splitIntoChunks(rawTx, MAX_CHUNK_SIZE);
 
   // Create buffer account with first chunk
-  const createIx = new TransactionInstruction({
-    programId: CHADBUFFER_PROGRAM_ID,
-    keys: [
-      { pubkey: payer.publicKey, isSigner: true, isWritable: true },
-      { pubkey: bufferKeypair.publicKey, isSigner: true, isWritable: true },
-      { pubkey: SystemProgram.programId, isSigner: false, isWritable: false },
+  const createIx: Instruction = {
+    programAddress: CHADBUFFER_PROGRAM_ID,
+    accounts: [
+      { address: payer.address, role: AccountRole.WRITABLE_SIGNER },
+      { address: bufferKeypair.address, role: AccountRole.WRITABLE_SIGNER },
+      { address: SYSTEM_PROGRAM_ID, role: AccountRole.READONLY },
     ],
     data: createInstructionData(ChadBufferInstruction.Create, chunks[0]),
-  });
+  };
 
-  // Create account instruction
-  const createAccountIx = SystemProgram.createAccount({
-    fromPubkey: payer.publicKey,
-    newAccountPubkey: bufferKeypair.publicKey,
+  // Create account instruction using @solana-program/system
+  const createAccountIx = getCreateAccountInstruction({
+    payer,
+    newAccount: bufferKeypair,
     lamports: rentExemption,
-    space,
-    programId: CHADBUFFER_PROGRAM_ID,
+    space: BigInt(space),
+    programAddress: CHADBUFFER_PROGRAM_ID,
   });
 
-  // Send create transaction
-  const createTx = new Transaction().add(createAccountIx, createIx);
-  await sendAndConfirmTransaction(connection, createTx, [payer, bufferKeypair]);
+  // Get blockhash for transaction
+  const { value: latestBlockhash } = await rpc.getLatestBlockhash().send();
+
+  // Build and send create transaction
+  const createTxMessage = pipe(
+    createTransactionMessage({ version: 0 }),
+    (msg) => setTransactionMessageFeePayer(payer.address, msg),
+    (msg) => setTransactionMessageLifetimeUsingBlockhash(latestBlockhash, msg),
+    (msg) => appendTransactionMessageInstructions([createAccountIx, createIx], msg)
+  );
+
+  // Sign with signers using the message-based API
+  const signedCreateTx = await signTransactionMessageWithSigners(createTxMessage);
+
+  // Send and confirm using factory
+  const sendAndConfirm = sendAndConfirmTransactionFactory({ rpc, rpcSubscriptions });
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  await sendAndConfirm(signedCreateTx as any, { commitment: "confirmed" });
 
   // Write remaining chunks
   for (let i = 1; i < chunks.length; i++) {
-    const writeIx = new TransactionInstruction({
-      programId: CHADBUFFER_PROGRAM_ID,
-      keys: [
-        { pubkey: payer.publicKey, isSigner: true, isWritable: true },
-        { pubkey: bufferKeypair.publicKey, isSigner: false, isWritable: true },
+    const writeIx: Instruction = {
+      programAddress: CHADBUFFER_PROGRAM_ID,
+      accounts: [
+        { address: payer.address, role: AccountRole.WRITABLE_SIGNER },
+        { address: bufferKeypair.address, role: AccountRole.WRITABLE },
       ],
       data: createInstructionData(ChadBufferInstruction.Write, chunks[i]),
-    });
+    };
 
-    const writeTx = new Transaction().add(writeIx);
-    await sendAndConfirmTransaction(connection, writeTx, [payer]);
+    // Get fresh blockhash for each write
+    const { value: writeBlockhash } = await rpc.getLatestBlockhash().send();
+
+    const writeTxMessage = pipe(
+      createTransactionMessage({ version: 0 }),
+      (msg) => setTransactionMessageFeePayer(payer.address, msg),
+      (msg) => setTransactionMessageLifetimeUsingBlockhash(writeBlockhash, msg),
+      (msg) => appendTransactionMessageInstruction(writeIx, msg)
+    );
+
+    const signedWriteTx = await signTransactionMessageWithSigners(writeTxMessage);
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    await sendAndConfirm(signedWriteTx as any, { commitment: "confirmed" });
   }
 
-  console.log(`Buffer created: ${bufferKeypair.publicKey.toBase58()}`);
+  console.log(`Buffer created: ${bufferKeypair.address}`);
   console.log(`Transaction size: ${rawTx.length} bytes`);
   console.log(`Chunks uploaded: ${chunks.length}`);
 
-  return bufferKeypair.publicKey;
+  return bufferKeypair.address;
+}
+
+/**
+ * Helper to pad a 32-byte seed to 64 bytes for createKeyPairSignerFromBytes
+ */
+function padTo64Bytes(seed32: Uint8Array): Uint8Array {
+  const padded = new Uint8Array(64);
+  padded.set(seed32, 0);
+  return padded;
 }
 
 /**
  * Close buffer and reclaim rent
  */
 export async function closeBuffer(
-  connection: Connection,
-  payer: Keypair,
-  bufferPubkey: PublicKey,
-  recipient?: PublicKey
+  rpc: Rpc<SolanaRpcApi>,
+  rpcSubscriptions: RpcSubscriptions<SolanaRpcSubscriptionsApi>,
+  payer: KeyPairSigner,
+  bufferAddress: Address,
+  recipient?: Address
 ): Promise<string> {
-  const closeIx = new TransactionInstruction({
-    programId: CHADBUFFER_PROGRAM_ID,
-    keys: [
-      { pubkey: payer.publicKey, isSigner: true, isWritable: true },
-      { pubkey: bufferPubkey, isSigner: false, isWritable: true },
+  const closeIx: Instruction = {
+    programAddress: CHADBUFFER_PROGRAM_ID,
+    accounts: [
+      { address: payer.address, role: AccountRole.WRITABLE_SIGNER },
+      { address: bufferAddress, role: AccountRole.WRITABLE },
       {
-        pubkey: recipient || payer.publicKey,
-        isSigner: false,
-        isWritable: true,
+        address: recipient ?? payer.address,
+        role: AccountRole.WRITABLE,
       },
     ],
     data: createInstructionData(ChadBufferInstruction.Close),
-  });
+  };
 
-  const tx = new Transaction().add(closeIx);
-  return sendAndConfirmTransaction(connection, tx, [payer]);
+  // Get blockhash
+  const { value: latestBlockhash } = await rpc.getLatestBlockhash().send();
+
+  // Build transaction message
+  const txMessage = pipe(
+    createTransactionMessage({ version: 0 }),
+    (msg) => setTransactionMessageFeePayer(payer.address, msg),
+    (msg) => setTransactionMessageLifetimeUsingBlockhash(latestBlockhash, msg),
+    (msg) => appendTransactionMessageInstruction(closeIx, msg)
+  );
+
+  const signedTx = await signTransactionMessageWithSigners(txMessage);
+
+  // Send and confirm
+  const sendAndConfirm = sendAndConfirmTransactionFactory({ rpc, rpcSubscriptions });
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  await sendAndConfirm(signedTx as any, { commitment: "confirmed" });
+
+  // Return the signature as string
+  return getSignatureFromTransaction(signedTx);
 }
 
 /**
  * Read buffer data
  */
 export async function readBufferData(
-  connection: Connection,
-  bufferPubkey: PublicKey
-): Promise<{ authority: PublicKey; data: Uint8Array }> {
-  const accountInfo = await connection.getAccountInfo(bufferPubkey);
-  if (!accountInfo) {
+  rpc: Rpc<SolanaRpcApi>,
+  bufferAddress: Address
+): Promise<{ authority: Address; data: Uint8Array }> {
+  const accountInfo = await rpc.getAccountInfo(bufferAddress, { encoding: "base64" }).send();
+  if (!accountInfo.value) {
     throw new Error("Buffer account not found");
   }
 
-  const authority = new PublicKey(accountInfo.data.slice(0, AUTHORITY_SIZE));
-  const data = accountInfo.data.slice(AUTHORITY_SIZE);
+  // Decode base64 data
+  const rawData = Buffer.from(accountInfo.value.data[0], "base64");
+  const authorityBytes = rawData.slice(0, AUTHORITY_SIZE);
+  const data = new Uint8Array(rawData.slice(AUTHORITY_SIZE));
+
+  // Convert authority bytes to Address
+  const authority = address(bs58Encode(authorityBytes));
 
   return { authority, data };
+}
+
+/**
+ * Simple base58 encoding for addresses
+ */
+function bs58Encode(bytes: Uint8Array | Buffer): string {
+  const ALPHABET = "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz";
+  const byteArray = bytes instanceof Buffer ? new Uint8Array(bytes) : bytes;
+
+  let num = BigInt(0);
+  for (let i = 0; i < byteArray.length; i++) {
+    num = num * BigInt(256) + BigInt(byteArray[i]);
+  }
+
+  let result = "";
+  while (num > BigInt(0)) {
+    result = ALPHABET[Number(num % BigInt(58))] + result;
+    num = num / BigInt(58);
+  }
+
+  // Add leading zeros
+  for (let i = 0; i < byteArray.length; i++) {
+    if (byteArray[i] === 0) {
+      result = "1" + result;
+    } else {
+      break;
+    }
+  }
+
+  return result || "1";
 }
 
 /**
@@ -276,12 +388,13 @@ export function bytesToHex(bytes: Uint8Array): string {
  * Complete flow: Fetch tx, upload to buffer, return verification data
  */
 export async function prepareVerifyDeposit(
-  connection: Connection,
-  payer: Keypair,
+  rpc: Rpc<SolanaRpcApi>,
+  rpcSubscriptions: RpcSubscriptions<SolanaRpcSubscriptionsApi>,
+  payer: KeyPairSigner,
   txid: string,
   network: "mainnet" | "testnet" = "testnet"
 ): Promise<{
-  bufferPubkey: PublicKey;
+  bufferAddress: Address;
   transactionSize: number;
   merkleProof: Uint8Array[];
   blockHeight: number;
@@ -305,8 +418,9 @@ export async function prepareVerifyDeposit(
 
   // Upload to ChadBuffer
   console.log("Uploading to ChadBuffer...");
-  const bufferPubkey = await uploadTransactionToBuffer(
-    connection,
+  const bufferAddress = await uploadTransactionToBuffer(
+    rpc,
+    rpcSubscriptions,
     payer,
     rawTx
   );
@@ -316,7 +430,7 @@ export async function prepareVerifyDeposit(
   txidBytes.reverse();
 
   return {
-    bufferPubkey,
+    bufferAddress,
     transactionSize: rawTx.length,
     merkleProof,
     blockHeight,

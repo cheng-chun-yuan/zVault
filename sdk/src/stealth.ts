@@ -45,7 +45,7 @@ export const STEALTH_ANNOUNCEMENT_DISCRIMINATOR = 0x08;
 
 // ========== Imports ==========
 
-import { sha256 } from "@noble/hashes/sha256";
+import { sha256 } from "@noble/hashes/sha2.js";
 import { bigintToBytes, bytesToBigint, BN254_FIELD_PRIME } from "./crypto";
 import {
   generateKeyPair as generateGrumpkinKeyPair,
@@ -511,14 +511,16 @@ export function announcementToScanFormat(
 
 // ========== Connection Adapter for .zkey Name Lookup ==========
 
+import type { Address } from "@solana/kit";
+
 /**
  * Minimal connection adapter for name registry lookups
  *
- * Works with both @solana/web3.js Connection and custom implementations
+ * Works with @solana/kit RPC clients and custom implementations
  */
 export interface ConnectionAdapter {
   getAccountInfo: (
-    pubkey: { toBytes(): Uint8Array }
+    pubkey: Address
   ) => Promise<{ data: Uint8Array } | null>;
 }
 

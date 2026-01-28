@@ -12,7 +12,7 @@
  * @see https://hackmd.io/@aztec-network/grumpkin
  */
 
-import { sha256 } from "@noble/hashes/sha256";
+import { sha256 } from "@noble/hashes/sha2.js";
 
 // Grumpkin curve parameters
 // Base field is the BN254 scalar field

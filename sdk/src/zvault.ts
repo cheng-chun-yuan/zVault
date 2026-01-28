@@ -19,7 +19,12 @@
  * Note: This SDK uses Noir circuits with Poseidon2 hashing for ZK proofs.
  */
 
-import { Connection, Keypair, PublicKey } from "@solana/web3.js";
+import {
+  address,
+  type Address,
+  getProgramDerivedAddress,
+  getAddressEncoder,
+} from "@solana/kit";
 
 import {
   generateNote,
@@ -55,7 +60,7 @@ import {
 } from "./api";
 
 // Program ID (Solana Devnet)
-export const ZVAULT_PROGRAM_ID = new PublicKey(
+export const ZVAULT_PROGRAM_ID: Address = address(
   "5S5ynMni8Pgd6tKkpYaXiPJiEXgw927s7T2txDtDivRK"
 );
 
@@ -75,7 +80,7 @@ export interface DepositCredentials {
 export interface ClaimResult {
   signature: string;
   amount: bigint;
-  recipient: PublicKey;
+  recipient: Address;
 }
 
 /**
@@ -104,7 +109,7 @@ interface LocalMerkleState {
  *
  * ## Quick Start
  * ```typescript
- * const client = createClient(connection);
+ * const client = createClient(rpc);
  * client.setPayer(myKeypair);
  *
  * // 1. Generate deposit credentials
@@ -123,16 +128,16 @@ interface LocalMerkleState {
  * ```
  */
 export class ZVaultClient {
-  private connection: Connection;
-  private programId: PublicKey;
+  private rpc: ApiClientConfig["rpc"];
+  private programId: Address;
   private merkleState: LocalMerkleState;
-  private payer?: Keypair;
+  private payer?: ApiClientConfig["payer"];
 
   constructor(
-    connection: Connection,
-    programId: PublicKey = ZVAULT_PROGRAM_ID
+    rpc: ApiClientConfig["rpc"],
+    programId: Address = ZVAULT_PROGRAM_ID
   ) {
-    this.connection = connection;
+    this.rpc = rpc;
     this.programId = programId;
     this.merkleState = {
       leaves: [],
@@ -144,7 +149,7 @@ export class ZVaultClient {
   /**
    * Set the payer keypair for transactions
    */
-  setPayer(payer: Keypair): void {
+  setPayer(payer: ApiClientConfig["payer"]): void {
     this.payer = payer;
   }
 
@@ -153,7 +158,7 @@ export class ZVaultClient {
    */
   private getApiConfig(): ApiClientConfig {
     return {
-      connection: this.connection,
+      rpc: this.rpc,
       programId: this.programId,
       payer: this.payer,
     };
@@ -267,59 +272,70 @@ export class ZVaultClient {
   // PDA Derivation
   // ==========================================================================
 
-  derivePoolStatePDA(): [PublicKey, number] {
-    return PublicKey.findProgramAddressSync(
-      [Buffer.from("pool_state")],
-      this.programId
-    );
+  async derivePoolStatePDA(): Promise<[Address, number]> {
+    const encoder = getAddressEncoder();
+    const programIdBytes = encoder.encode(this.programId);
+    const result = await getProgramDerivedAddress({
+      seeds: [new TextEncoder().encode("pool_state")],
+      programAddress: this.programId,
+    });
+    return [result[0], result[1]];
   }
 
-  deriveLightClientPDA(): [PublicKey, number] {
-    return PublicKey.findProgramAddressSync(
-      [Buffer.from("btc_light_client")],
-      this.programId
-    );
+  async deriveLightClientPDA(): Promise<[Address, number]> {
+    const result = await getProgramDerivedAddress({
+      seeds: [new TextEncoder().encode("btc_light_client")],
+      programAddress: this.programId,
+    });
+    return [result[0], result[1]];
   }
 
-  deriveCommitmentTreePDA(): [PublicKey, number] {
-    return PublicKey.findProgramAddressSync(
-      [Buffer.from("commitment_tree")],
-      this.programId
-    );
+  async deriveCommitmentTreePDA(): Promise<[Address, number]> {
+    const result = await getProgramDerivedAddress({
+      seeds: [new TextEncoder().encode("commitment_tree")],
+      programAddress: this.programId,
+    });
+    return [result[0], result[1]];
   }
 
-  deriveBlockHeaderPDA(height: number): [PublicKey, number] {
-    const heightBuffer = Buffer.alloc(8);
-    heightBuffer.writeBigUInt64LE(BigInt(height));
-    return PublicKey.findProgramAddressSync(
-      [Buffer.from("block_header"), heightBuffer],
-      this.programId
-    );
+  async deriveBlockHeaderPDA(height: number): Promise<[Address, number]> {
+    const heightBuffer = new Uint8Array(8);
+    const view = new DataView(heightBuffer.buffer);
+    view.setBigUint64(0, BigInt(height), true);
+    const result = await getProgramDerivedAddress({
+      seeds: [new TextEncoder().encode("block_header"), heightBuffer],
+      programAddress: this.programId,
+    });
+    return [result[0], result[1]];
   }
 
-  deriveDepositRecordPDA(txid: Uint8Array): [PublicKey, number] {
-    return PublicKey.findProgramAddressSync(
-      [Buffer.from("deposit"), txid],
-      this.programId
-    );
+  async deriveDepositRecordPDA(txid: Uint8Array): Promise<[Address, number]> {
+    const result = await getProgramDerivedAddress({
+      seeds: [new TextEncoder().encode("deposit"), txid],
+      programAddress: this.programId,
+    });
+    return [result[0], result[1]];
   }
 
-  deriveNullifierRecordPDA(nullifierHash: Uint8Array): [PublicKey, number] {
-    return PublicKey.findProgramAddressSync(
-      [Buffer.from("nullifier"), nullifierHash],
-      this.programId
-    );
+  async deriveNullifierRecordPDA(nullifierHash: Uint8Array): Promise<[Address, number]> {
+    const result = await getProgramDerivedAddress({
+      seeds: [new TextEncoder().encode("nullifier"), nullifierHash],
+      programAddress: this.programId,
+    });
+    return [result[0], result[1]];
   }
 
-  deriveStealthAnnouncementPDA(commitment: bigint): [PublicKey, number] {
-    const commitmentBuffer = Buffer.from(
-      commitment.toString(16).padStart(64, "0"),
-      "hex"
-    );
-    return PublicKey.findProgramAddressSync(
-      [Buffer.from("stealth"), commitmentBuffer],
-      this.programId
-    );
+  async deriveStealthAnnouncementPDA(commitment: bigint): Promise<[Address, number]> {
+    const commitmentHex = commitment.toString(16).padStart(64, "0");
+    const commitmentBuffer = new Uint8Array(32);
+    for (let i = 0; i < 32; i++) {
+      commitmentBuffer[i] = parseInt(commitmentHex.slice(i * 2, i * 2 + 2), 16);
+    }
+    const result = await getProgramDerivedAddress({
+      seeds: [new TextEncoder().encode("stealth"), commitmentBuffer],
+      programAddress: this.programId,
+    });
+    return [result[0], result[1]];
   }
 
   // ==========================================================================
@@ -427,8 +443,8 @@ export class ZVaultClient {
 /**
  * Create a new ZVault client (Solana Devnet)
  */
-export function createClient(connection: Connection): ZVaultClient {
-  return new ZVaultClient(connection, ZVAULT_PROGRAM_ID);
+export function createClient(rpc: ApiClientConfig["rpc"]): ZVaultClient {
+  return new ZVaultClient(rpc, ZVAULT_PROGRAM_ID);
 }
 
 // Re-export types from api.ts

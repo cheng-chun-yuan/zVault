@@ -6,7 +6,7 @@
  * via the Noir circuits themselves or via noir_js execution.
  */
 
-import { sha256 } from "@noble/hashes/sha256";
+import { sha256 } from "@noble/hashes/sha2.js";
 
 // BN254 field prime (used by Noir)
 export const BN254_FIELD_PRIME =
