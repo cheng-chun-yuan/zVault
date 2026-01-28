@@ -2,65 +2,13 @@
 
 import { useState, useEffect, useCallback } from "react";
 import { Connection, PublicKey } from "@solana/web3.js";
-import { ZVAULT_PROGRAM_ID } from "@/lib/solana/instructions";
+import { getAssociatedTokenAddressSync } from "@solana/spl-token";
+import { ZVAULT_PROGRAM_ID, TOKEN_2022_PROGRAM_ID, derivezBTCMintPDA } from "@/lib/solana/instructions";
 
 export interface PoolStats {
   depositCount: number;
-  totalMinted: bigint;
-  totalBurned: bigint;
+  vaultBalance: bigint;
   pendingRedemptions: number;
-  totalShielded: bigint;
-}
-
-/**
- * Decode PoolState account data from on-chain
- * Layout (see contracts/programs/zvault/src/state/pool.rs):
- * - 0: discriminator (1 byte)
- * - 1: bump (1 byte)
- * - 2: flags (1 byte)
- * - 3: padding (1 byte)
- * - 4-35: authority (32 bytes)
- * - 36-67: zbtc_mint (32 bytes)
- * - 68-99: privacy_cash_pool (32 bytes)
- * - 100-131: pool_vault (32 bytes)
- * - 132-163: frost_vault (32 bytes)
- * - 164-171: deposit_count (u64 LE)
- * - 172-179: total_minted (u64 LE)
- * - 180-187: total_burned (u64 LE)
- * - 188-195: pending_redemptions (u64 LE)
- * - 196-203: direct_claims (u64 LE)
- * - 204-211: split_count (u64 LE)
- * - 212-219: last_update (u64 LE)
- * - 220-227: min_deposit (u64 LE)
- * - 228-235: max_deposit (u64 LE)
- * - 236-243: total_shielded (u64 LE)
- */
-function decodePoolState(data: Uint8Array): PoolStats | null {
-  if (data.length < 244) {
-    console.warn("Pool state data too short:", data.length);
-    return null;
-  }
-
-  // Check discriminator
-  if (data[0] !== 0x01) {
-    console.warn("Invalid pool state discriminator:", data[0]);
-    return null;
-  }
-
-  // Use DataView for cross-platform bigint reading
-  const view = new DataView(data.buffer, data.byteOffset, data.byteLength);
-
-  const readU64LE = (offset: number): bigint => {
-    return view.getBigUint64(offset, true); // true = little-endian
-  };
-
-  return {
-    depositCount: Number(readU64LE(164)),
-    totalMinted: readU64LE(172),
-    totalBurned: readU64LE(180),
-    pendingRedemptions: Number(readU64LE(188)),
-    totalShielded: readU64LE(236),
-  };
 }
 
 /**
@@ -70,6 +18,21 @@ function derivePoolStatePDA(programId: PublicKey = ZVAULT_PROGRAM_ID): [PublicKe
   return PublicKey.findProgramAddressSync(
     [Buffer.from("pool_state")],
     programId
+  );
+}
+
+/**
+ * Derive Pool Vault ATA (where zBTC is held)
+ */
+function derivePoolVaultATA(programId: PublicKey = ZVAULT_PROGRAM_ID): PublicKey {
+  const [poolState] = derivePoolStatePDA(programId);
+  const [zbtcMint] = derivezBTCMintPDA(programId);
+
+  return getAssociatedTokenAddressSync(
+    zbtcMint,
+    poolState,
+    true,
+    TOKEN_2022_PROGRAM_ID
   );
 }
 
@@ -86,27 +49,34 @@ export function usePoolStats() {
       const rpcUrl = process.env.NEXT_PUBLIC_SOLANA_RPC_URL || "https://api.devnet.solana.com";
       const connection = new Connection(rpcUrl, "confirmed");
 
+      let depositCount = 0;
+      let pendingRedemptions = 0;
+      let vaultBalance = 0n;
+
+      // Fetch pool state for counts
       const [poolStatePDA] = derivePoolStatePDA();
-      const accountInfo = await connection.getAccountInfo(poolStatePDA);
+      const poolInfo = await connection.getAccountInfo(poolStatePDA);
 
-      if (!accountInfo) {
-        // Pool not initialized yet - use zeros
-        setStats({
-          depositCount: 0,
-          totalMinted: 0n,
-          totalBurned: 0n,
-          pendingRedemptions: 0,
-          totalShielded: 0n,
-        });
-        return;
+      if (poolInfo && poolInfo.data.length >= 196 && poolInfo.data[0] === 0x01) {
+        const view = new DataView(poolInfo.data.buffer, poolInfo.data.byteOffset, poolInfo.data.byteLength);
+        depositCount = Number(view.getBigUint64(164, true));
+        pendingRedemptions = Number(view.getBigUint64(188, true));
       }
 
-      const decoded = decodePoolState(Buffer.from(accountInfo.data));
-      if (decoded) {
-        setStats(decoded);
-      } else {
-        setError("Failed to decode pool state");
+      // Fetch vault balance
+      try {
+        const poolVault = derivePoolVaultATA();
+        const vaultInfo = await connection.getAccountInfo(poolVault);
+
+        if (vaultInfo && vaultInfo.data.length >= 72) {
+          const view = new DataView(vaultInfo.data.buffer, vaultInfo.data.byteOffset, vaultInfo.data.byteLength);
+          vaultBalance = view.getBigUint64(64, true);
+        }
+      } catch {
+        // Vault may not exist yet
       }
+
+      setStats({ depositCount, vaultBalance, pendingRedemptions });
     } catch (err) {
       console.error("Error fetching pool stats:", err);
       setError(err instanceof Error ? err.message : "Failed to fetch stats");
@@ -117,7 +87,6 @@ export function usePoolStats() {
 
   useEffect(() => {
     fetchStats();
-    // Refresh every 30 seconds
     const interval = setInterval(fetchStats, 30000);
     return () => clearInterval(interval);
   }, [fetchStats]);

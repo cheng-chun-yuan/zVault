@@ -2,19 +2,19 @@
 
 import React, { useState, memo, useMemo } from "react";
 import * as Dialog from "@radix-ui/react-dialog";
-import { X, ArrowDownToLine, ArrowUpFromLine, Clock } from "lucide-react";
+import { X, ArrowDownToLine, Send, Clock } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { ErrorBoundary } from "@/components/error-boundary";
 import { DepositFlow } from "./deposit-flow";
-import { WithdrawFlow } from "./withdraw-flow";
+import { PayFlow } from "./pay-flow";
 import { BalanceView } from "./balance-view";
 
-type TabValue = "deposit" | "withdraw" | "activity";
+type TabValue = "deposit" | "pay" | "activity";
 
 // Tab configuration
 const TAB_CONFIG = [
   { title: "Deposit", value: "deposit" as TabValue, Icon: ArrowDownToLine },
-  { title: "Withdraw", value: "withdraw" as TabValue, Icon: ArrowUpFromLine },
+  { title: "Pay", value: "pay" as TabValue, Icon: Send },
   { title: "Activity", value: "activity" as TabValue, Icon: Clock },
 ];
 
@@ -71,7 +71,7 @@ function WidgetContent({ selectedTab, setSelectedTab }: {
   const content = useMemo(() => {
     switch (selectedTab) {
       case "deposit": return <DepositFlow />;
-      case "withdraw": return <WithdrawFlow />;
+      case "pay": return <PayFlow />;
       case "activity": return <BalanceView />;
     }
   }, [selectedTab]);

@@ -5,7 +5,6 @@ import Link from "next/link";
 import {
   ArrowLeft,
   ArrowDownToLine,
-  ArrowUpFromLine,
   Wallet,
   Shield,
   Key,
@@ -15,7 +14,6 @@ import {
   Tag,
   Loader2,
   TrendingUp,
-  Link2,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { FeatureCard, type FeatureCardColor } from "@/components/ui";
@@ -49,19 +47,11 @@ const features: FeatureConfig[] = [
     color: "btc",
   },
   {
-    icon: <Link2 className="w-full h-full" />,
-    title: "Claim",
-    description: "Claim with link",
-    subtext: "Redeem zkBTC",
-    href: "/claim",
-    color: "privacy",
-  },
-  {
     icon: <Send className="w-full h-full" />,
     title: "Pay",
-    description: "Private payment",
-    subtext: "Stealth or Link",
-    href: "/bridge/stealth-send",
+    description: "Send zkBTC",
+    subtext: "Public or Private",
+    href: "/bridge/pay",
     color: "privacy",
   },
   {
@@ -71,14 +61,6 @@ const features: FeatureConfig[] = [
     subtext: "Private APY",
     href: "/bridge/earn",
     color: "privacy",
-  },
-  {
-    icon: <ArrowUpFromLine className="w-full h-full" />,
-    title: "Withdraw",
-    description: "zkBTC → zBTC",
-    subtext: "Convert to public",
-    href: "/bridge/withdraw",
-    color: "btc",
   },
   {
     icon: <Wallet className="w-full h-full" />,
@@ -434,8 +416,8 @@ export default function BridgePage() {
           </div>
         )}
 
-        {/* Feature Cards Grid */}
-        <div className="grid grid-cols-2 sm:grid-cols-3 gap-4 mb-6">
+        {/* Feature Cards Grid - 2x2 */}
+        <div className="grid grid-cols-2 gap-4 mb-6">
           {features.map((feature) => (
             <FeatureCard
               key={feature.title}

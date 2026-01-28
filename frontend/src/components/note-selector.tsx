@@ -114,7 +114,7 @@ export function NoteSelector({
               {selectedNote ? (
                 <>
                   <p className="text-body2 text-foreground">
-                    {formatBtc(selectedNote.amountSats)} BTC
+                    {formatBtc(selectedNote.amountSats)}
                   </p>
                   <p className="text-caption text-gray">
                     {selectedNote.label || `Note #${selectedNote.leafIndex}`}
@@ -181,7 +181,7 @@ export function NoteSelector({
                 <div className="flex-1 min-w-0">
                   <div className="flex items-center justify-between">
                     <span className="text-body2 text-foreground">
-                      {formatBtc(note.amountSats)} BTC
+                      {formatBtc(note.amountSats)}
                     </span>
                     <span
                       className={cn(

@@ -348,7 +348,7 @@ export function StealthSendFlow() {
           <div className="flex items-center justify-between">
             <span className="text-caption text-gray">Sending</span>
             <span className="text-body2 text-privacy font-mono">
-              {formatBtc(selectedNote.amountSats)} BTC
+              {formatBtc(selectedNote.amountSats)}
             </span>
           </div>
         </div>

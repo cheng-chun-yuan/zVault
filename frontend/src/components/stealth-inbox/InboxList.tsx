@@ -31,7 +31,7 @@ export function InboxList({ notes, isLoading, onRefresh }: InboxListProps) {
       {/* List */}
       <div className="space-y-3">
         {notes.map((note) => (
-          <InboxItem key={note.id} note={note} />
+          <InboxItem key={note.id} note={note} onClaimed={onRefresh} />
         ))}
       </div>
     </div>

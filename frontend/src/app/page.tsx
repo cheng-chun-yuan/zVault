@@ -72,40 +72,25 @@ const StatsDisplay = memo(function StatsDisplay({
     );
   }
 
-  // Total Bridged = total minted on Solana (in BTC)
-  const totalBridgedBtc = (Number(stats?.totalMinted ?? 0n) / 100000000).toFixed(4);
-  // Vault Held = total minted - total burned (current circulating supply)
-  const vaultHeld = Number((stats?.totalMinted ?? 0n) - (stats?.totalBurned ?? 0n));
-  const vaultHeldBtc = (vaultHeld / 100000000).toFixed(4);
-  const totalDeposits = (stats?.depositCount ?? 0).toLocaleString();
-  const pendingCount = (stats?.pendingRedemptions ?? 0).toLocaleString();
+  const vaultBtc = (Number(stats?.vaultBalance ?? 0n) / 100_000_000).toFixed(4);
+  const deposits = (stats?.depositCount ?? 0).toLocaleString();
+  const pending = (stats?.pendingRedemptions ?? 0).toLocaleString();
 
   return (
-    <div className="grid grid-cols-2 md:grid-cols-4 gap-6">
-      <div className="space-y-2 text-center">
-        <div className="flex items-center justify-center gap-2">
-          <BitcoinIcon className="w-5 h-5 btc-glow" />
-          <span className="text-heading5 text-btc">{totalBridgedBtc}</span>
-        </div>
-        <div className="text-caption text-gray">Total Bridged (BTC)</div>
-      </div>
+    <div className="grid grid-cols-3 gap-6">
       <div className="space-y-2 text-center">
         <div className="flex items-center justify-center gap-2">
           <Shield className="w-5 h-5 text-privacy privacy-glow" />
-          <span className="text-heading5 text-privacy">{vaultHeldBtc}</span>
+          <span className="text-heading5 text-privacy">{vaultBtc}</span>
         </div>
-        <div className="text-caption text-gray">Vault Held (BTC)</div>
+        <div className="text-caption text-gray">Vault (BTC)</div>
       </div>
       <div className="space-y-2 text-center">
-        <div className="text-heading5 text-foreground">
-          {totalDeposits}
-        </div>
-        <div className="text-caption text-gray">Total Deposits</div>
+        <div className="text-heading5 text-foreground">{deposits}</div>
+        <div className="text-caption text-gray">Deposits</div>
       </div>
       <div className="space-y-2 text-center">
-        <div className="text-heading5 text-foreground">
-          {pendingCount}
-        </div>
+        <div className="text-heading5 text-foreground">{pending}</div>
         <div className="text-caption text-gray">Pending</div>
       </div>
     </div>

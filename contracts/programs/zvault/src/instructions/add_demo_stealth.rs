@@ -14,6 +14,11 @@
 //! 6. This instruction creates stealth announcement with ephemeral pubkey
 //! 7. User scans announcements with viewing key to detect deposits
 //! 8. User generates ZK proof with spending key to claim
+//!
+//! NOTE: The `amount` field is encrypted (XOR with shared secret) for privacy.
+//! The announcement stores the encrypted amount so only the recipient can
+//! decrypt it. For minting zBTC, we use a fixed demo amount since the
+//! encrypted value is not the real amount.
 
 use pinocchio::{
     account_info::AccountInfo,
@@ -27,18 +32,25 @@ use crate::error::ZVaultError;
 use crate::state::{CommitmentTree, PoolState, StealthAnnouncement, STEALTH_ANNOUNCEMENT_DISCRIMINATOR};
 use crate::utils::{mint_zbtc, validate_program_owner, validate_token_2022_owner, validate_token_program_key, create_pda_account};
 
+/// Fixed demo amount in satoshis for minting zBTC (0.0001 BTC = 10,000 sats)
+/// The encrypted_amount in the instruction is only used for the announcement,
+/// not for actual minting, since it's XOR-encrypted garbage.
+const DEMO_MINT_AMOUNT_SATS: u64 = 10_000;
+
 /// Add demo stealth instruction data (single ephemeral key)
 ///
 /// Layout:
 /// - ephemeral_pub: [u8; 33] (Grumpkin compressed)
 /// - commitment: [u8; 32] (pre-computed by SDK)
-/// - amount: u64 (8 bytes)
+/// - encrypted_amount: [u8; 8] (XOR encrypted, stored as-is for announcement)
 ///
 /// Total: 73 bytes (was 105 with dual keys)
 pub struct AddDemoStealthData {
     pub ephemeral_pub: [u8; 33],
     pub commitment: [u8; 32],
-    pub amount: u64,
+    /// Encrypted amount bytes - NOT decoded as u64 since it's XOR garbage
+    /// Stored on-chain for privacy; recipient decrypts with shared secret
+    pub encrypted_amount: [u8; 8],
 }
 
 impl AddDemoStealthData {
@@ -53,12 +65,14 @@ impl AddDemoStealthData {
         let mut commitment = [0u8; 32];
         commitment.copy_from_slice(&data[33..65]);
 
-        let amount = u64::from_le_bytes(data[65..73].try_into().unwrap());
+        // Keep encrypted amount as raw bytes (don't decode as u64)
+        let mut encrypted_amount = [0u8; 8];
+        encrypted_amount.copy_from_slice(&data[65..73]);
 
         Ok(Self {
             ephemeral_pub,
             commitment,
-            amount,
+            encrypted_amount,
         })
     }
 }
@@ -103,10 +117,8 @@ pub fn process_add_demo_stealth(
         return Err(ProgramError::MissingRequiredSignature);
     }
 
-    // Validate amount
-    if ix_data.amount == 0 {
-        return Err(ZVaultError::ZeroAmount.into());
-    }
+    // Note: We don't validate encrypted_amount since it's XOR garbage
+    // The actual mint amount is fixed at DEMO_MINT_AMOUNT_SATS
 
     // Validate account owners
     validate_program_owner(pool_state, program_id)?;
@@ -183,13 +195,15 @@ pub fn process_add_demo_stealth(
 
         announcement.bump = bump;
         announcement.ephemeral_pub = ix_data.ephemeral_pub;
-        announcement.set_amount_sats(ix_data.amount);
+        // Store encrypted amount bytes (only recipient can decrypt with shared secret)
+        announcement.set_encrypted_amount(ix_data.encrypted_amount);
         announcement.commitment = ix_data.commitment;
         announcement.set_leaf_index(leaf_index);
         announcement.set_created_at(clock.unix_timestamp);
     }
 
     // Mint zBTC to pool vault so users can claim
+    // NOTE: Use fixed demo amount, NOT encrypted_amount (which is XOR garbage)
     let bump_bytes = [pool_bump];
     let pool_signer_seeds: &[&[u8]] = &[PoolState::SEED, &bump_bytes];
 
@@ -198,18 +212,18 @@ pub fn process_add_demo_stealth(
         zbtc_mint,
         pool_vault,
         pool_state,
-        ix_data.amount,
+        DEMO_MINT_AMOUNT_SATS,
         pool_signer_seeds,
     )?;
 
-    // Update pool statistics
+    // Update pool statistics with fixed demo amount
     {
         let mut pool_data = pool_state.try_borrow_mut_data()?;
         let pool = PoolState::from_bytes_mut(&mut pool_data)?;
 
         pool.increment_deposit_count()?;
-        pool.add_minted(ix_data.amount)?;
-        pool.add_shielded(ix_data.amount)?;
+        pool.add_minted(DEMO_MINT_AMOUNT_SATS)?;
+        pool.add_shielded(DEMO_MINT_AMOUNT_SATS)?;
         pool.set_last_update(clock.unix_timestamp);
     }
 

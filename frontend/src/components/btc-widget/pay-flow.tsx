@@ -3,7 +3,7 @@
 import { useState, useEffect, useMemo, useCallback, useRef } from "react";
 import { useWallet } from "@solana/wallet-adapter-react";
 import { PublicKey } from "@solana/web3.js";
-import { CheckCircle2, ArrowUpFromLine, Wallet, Shield, Clock, AlertCircle, Key, Copy, Check, Pencil, X } from "lucide-react";
+import { CheckCircle2, Send, Wallet, Shield, Clock, AlertCircle, Key, Copy, Check, Pencil, X } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { zBTCApi } from "@/lib/api/client";
 import { parseSats, validateWithdrawalAmount } from "@/lib/utils/validation";
@@ -24,16 +24,16 @@ function isValidSolanaAddress(address: string): boolean {
 }
 
 // Constants
-const MIN_WITHDRAW_SATS = 1000;
+const MIN_PAY_SATS = 1000;
 
-type WithdrawStep = "connect" | "select_note" | "form" | "proving" | "success";
+type PayStep = "connect" | "select_note" | "form" | "proving" | "success";
 
-export function WithdrawFlow() {
+export function PayFlow() {
   const { publicKey, connected } = useWallet();
   const { hasKeys, deriveKeys, isLoading: keysLoading } = useZVaultKeys();
   const { notes: inboxNotes, isLoading: inboxLoading, refresh: refreshInbox } = useStealthInbox();
 
-  const [step, setStep] = useState<WithdrawStep>("connect");
+  const [step, setStep] = useState<PayStep>("connect");
   const [selectedNote, setSelectedNote] = useState<InboxNote | null>(null);
   const [amount, setAmount] = useState("");
   const [error, setError] = useState<string | null>(null);
@@ -118,12 +118,12 @@ export function WithdrawFlow() {
   const amountSats = useMemo(() => parseSats(amount), [amount]);
 
   // Max amount is the full note balance
-  const maxWithdrawSats = useMemo(() => {
+  const maxPaySats = useMemo(() => {
     if (!selectedNote) return 0;
     return Number(selectedNote.amount);
   }, [selectedNote]);
 
-  const isValidAmount = amountSats && amountSats >= MIN_WITHDRAW_SATS;
+  const isValidAmount = amountSats && amountSats >= MIN_PAY_SATS;
 
   // Handle note selection
   const handleSelectNote = useCallback((note: InboxNote) => {
@@ -131,7 +131,7 @@ export function WithdrawFlow() {
     setStep("form");
   }, []);
 
-  const handleWithdraw = async () => {
+  const handlePay = async () => {
     if (!publicKey || !selectedNote) return;
 
     const amountValidation = validateWithdrawalAmount(amountSats ?? 0);
@@ -159,18 +159,18 @@ export function WithdrawFlow() {
 
       // For stealth notes, we need to derive nullifier/secret from the stealth keys
       // This requires prepareClaimInputs from the SDK
-      // For now, simulate a successful withdrawal for demo purposes
-      console.log("[Withdraw] Stealth note withdrawal...");
-      console.log("[Withdraw] Amount:", noteAmountSats, "sats");
-      console.log("[Withdraw] Leaf index:", selectedNote.leafIndex);
-      console.log("[Withdraw] Commitment:", selectedNote.commitmentHex);
+      // For now, simulate a successful payment for demo purposes
+      console.log("[Pay] Processing payment...");
+      console.log("[Pay] Amount:", amountSats, "sats");
+      console.log("[Pay] Leaf index:", selectedNote.leafIndex);
+      console.log("[Pay] Commitment:", selectedNote.commitmentHex);
 
       // Validate recipient before submission
       if (!validateRecipient(recipientAddress)) {
         throw new Error("Invalid recipient address");
       }
 
-      // Submit to backend with proof (withdraw to zBTC on Solana)
+      // Submit to backend with proof
       const response = await zBTCApi.redeem(
         amountSats,
         recipientAddress, // zBTC recipient (custom or own wallet)
@@ -183,12 +183,12 @@ export function WithdrawFlow() {
         setChangeAmountSats(0);
         setStep("success");
       } else {
-        setError(response.message || "Withdrawal request failed");
+        setError(response.message || "Payment failed");
         setStep("form");
       }
     } catch (err) {
-      console.error("[Withdraw] Error:", err);
-      setError(err instanceof Error ? err.message : "Failed to submit withdrawal");
+      console.error("[Pay] Error:", err);
+      setError(err instanceof Error ? err.message : "Failed to process payment");
       setStep("form");
     } finally {
       setLoading(false);
@@ -288,7 +288,7 @@ export function WithdrawFlow() {
         </div>
         <p className="text-heading6 text-foreground mb-2">Connect Your Wallet</p>
         <p className="text-body2 text-gray text-center mb-6">
-          Connect your Solana wallet to withdraw to zBTC
+          Connect your Solana wallet to send payments
         </p>
         <WalletButton className="btn-primary w-full justify-center" />
       </div>
@@ -303,9 +303,9 @@ export function WithdrawFlow() {
         <div className="privacy-box mb-4">
           <Shield className="w-5 h-5 shrink-0" />
           <div className="flex flex-col">
-            <span className="text-body2-semibold">Zero-Knowledge Withdrawal</span>
+            <span className="text-body2-semibold">Zero-Knowledge Payment</span>
             <span className="text-caption opacity-80">
-              Your withdrawal proof hides the original deposit amount
+              Your payment proof hides the original deposit amount
             </span>
           </div>
         </div>
@@ -341,7 +341,7 @@ export function WithdrawFlow() {
         <div className="flex items-center gap-3 p-3 bg-muted border border-gray/15 rounded-[12px]">
           <AlertCircle className="w-5 h-5 text-gray shrink-0" />
           <p className="text-caption text-gray">
-            You can withdraw any amount up to the note balance.
+            You can send any amount up to the note balance.
           </p>
         </div>
       </div>
@@ -373,7 +373,7 @@ export function WithdrawFlow() {
               </button>
             </div>
             <span className="text-caption text-gray">
-              Max withdraw: {formatBtc(maxWithdrawSats)} zkBTC
+              Max: {formatBtc(maxPaySats)} zkBTC
             </span>
           </div>
         </div>
@@ -412,7 +412,7 @@ export function WithdrawFlow() {
                 }}
               />
               <div className="px-4 py-[6px] text-body2 text-gray">
-                sats to withdraw
+                sats to send
               </div>
             </div>
           </div>
@@ -423,13 +423,13 @@ export function WithdrawFlow() {
             !isValidAmount && "blur-[4px]"
           )}>
             <div className="flex justify-between text-white">
-              <span>You Will Receive</span>
+              <span>Recipient Gets</span>
               <span className="flex items-center gap-2 text-privacy">
                 {formatBtc(amountSats ?? 0)} zBTC
               </span>
             </div>
             <div className="flex justify-between text-gray">
-              <span>Change (kept private)</span>
+              <span>Your Change (kept private)</span>
               <span>{formatBtc(changeAmount)} zkBTC</span>
             </div>
           </div>
@@ -576,9 +576,9 @@ export function WithdrawFlow() {
         <div className="success-box mb-4">
           <Shield className="w-5 h-5 shrink-0" />
           <div className="flex flex-col">
-            <span className="text-body2-semibold">Zero-Knowledge Withdrawal</span>
+            <span className="text-body2-semibold">Zero-Knowledge Payment</span>
             <span className="text-caption text-success/80">
-              Your withdrawal amount and original deposit are hidden on-chain
+              Payment amount and original deposit are hidden on-chain
             </span>
           </div>
         </div>
@@ -601,12 +601,12 @@ export function WithdrawFlow() {
 
         {/* Submit button */}
         <button
-          onClick={handleWithdraw}
+          onClick={handlePay}
           disabled={loading || !isValidAmount || (amountSats ?? 0) > noteAmountSats}
           className="btn-primary w-full"
         >
-          <Shield className="w-5 h-5" />
-          Generate Proof & Withdraw
+          <Send className="w-5 h-5" />
+          Generate Proof & Pay
         </button>
       </div>
     );
@@ -630,7 +630,7 @@ export function WithdrawFlow() {
 
         <p className="text-heading6 text-foreground mb-2">Generating ZK Proof</p>
         <p className="text-body2 text-gray text-center mb-4">
-          Creating your zero-knowledge withdrawal proof...
+          Creating your zero-knowledge payment proof...
         </p>
 
         {/* Privacy info */}
@@ -639,7 +639,7 @@ export function WithdrawFlow() {
           <div className="flex flex-col">
             <span className="text-body2-semibold">Privacy Protected</span>
             <span className="text-caption opacity-80">
-              This proof hides the link between your deposit and withdrawal
+              This proof hides the link between your deposit and payment
             </span>
           </div>
         </div>
@@ -656,9 +656,9 @@ export function WithdrawFlow() {
           <CheckCircle2 className="h-12 w-12 text-success" />
         </div>
 
-        <p className="text-heading6 text-foreground mb-2">Withdrawal Complete!</p>
+        <p className="text-heading6 text-foreground mb-2">Payment Complete!</p>
         <p className="text-body2 text-gray text-center mb-6">
-          Your zBTC has been sent to your wallet
+          Your zBTC has been sent successfully
         </p>
 
         {/* Details card */}
@@ -721,14 +721,16 @@ export function WithdrawFlow() {
         <div className="w-full flex items-center gap-3 p-3 bg-privacy/10 border border-privacy/20 rounded-[12px] mb-6">
           <CheckCircle2 className="w-5 h-5 text-privacy shrink-0" />
           <p className="text-caption text-gray-light">
-            Your zBTC is now a public SPL token in your wallet.
+            {recipientMode === "stealth"
+              ? "Recipient can scan and claim using their stealth keys"
+              : "zBTC has been sent to the recipient's wallet"}
           </p>
         </div>
 
         {/* Reset button */}
         <button onClick={resetFlow} className="btn-tertiary w-full">
-          <ArrowUpFromLine className="w-5 h-5" />
-          Make Another Withdrawal
+          <Send className="w-5 h-5" />
+          Make Another Payment
         </button>
       </div>
     );

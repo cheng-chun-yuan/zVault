@@ -1,13 +1,14 @@
 "use client";
 
 import { useRouter } from "next/navigation";
-import { ArrowRight, Clock, Shield, Send } from "lucide-react";
+import { ArrowRight, Clock, Shield, Send, Coins } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { formatBtc } from "@/lib/utils/formatting";
 import type { InboxNote } from "@/hooks/use-zvault";
 
 interface InboxItemProps {
   note: InboxNote;
+  onClaimed?: () => void;
 }
 
 function formatRelativeTime(timestamp: number): string {
@@ -29,6 +30,7 @@ function formatRelativeTime(timestamp: number): string {
 export function InboxItem({ note }: InboxItemProps) {
   const router = useRouter();
 
+  // Navigate to claim page with stealth note data
   const handleClaim = () => {
     const params = new URLSearchParams({
       stealth: "true",
@@ -39,6 +41,7 @@ export function InboxItem({ note }: InboxItemProps) {
     router.push(`/claim?${params.toString()}`);
   };
 
+  // Navigate to pay page with note pre-selected
   const handleSendPrivate = () => {
     const params = new URLSearchParams({
       noteId: note.commitmentHex,
@@ -46,7 +49,7 @@ export function InboxItem({ note }: InboxItemProps) {
       leafIndex: note.leafIndex.toString(),
       amount: note.amount.toString(),
     });
-    router.push(`/bridge/stealth-send?${params.toString()}`);
+    router.push(`/bridge/pay?${params.toString()}`);
   };
 
   return (
@@ -101,6 +104,7 @@ export function InboxItem({ note }: InboxItemProps) {
           onClick={handleClaim}
           className="flex-1 flex items-center justify-center gap-2 px-4 py-3 rounded-[10px] bg-privacy/10 hover:bg-privacy/20 text-privacy transition-colors"
         >
+          <Coins className="w-4 h-4" />
           Claim zBTC
           <ArrowRight className="w-4 h-4" />
         </button>

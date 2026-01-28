@@ -10,6 +10,7 @@ import {
   Shield,
   Inbox,
   CheckCircle2,
+  Link2,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { ErrorBoundary } from "@/components/error-boundary";
@@ -83,6 +84,15 @@ function ClaimableTab() {
 
   return (
     <div className="space-y-4">
+      {/* Claim with Link button */}
+      <Link
+        href="/claim"
+        className="w-full flex items-center justify-center gap-2 px-4 py-3 rounded-[12px] bg-sol/10 border border-sol/20 text-sol hover:bg-sol/20 transition-colors"
+      >
+        <Link2 className="w-4 h-4" />
+        Claim with Link
+      </Link>
+
       {/* Error state */}
       {error && (
         <div className="p-3 bg-red-500/10 border border-red-500/30 rounded-lg text-red-400 text-sm">

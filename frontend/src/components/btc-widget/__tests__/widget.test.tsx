@@ -18,8 +18,8 @@ vi.mock("../deposit-flow", () => ({
   DepositFlow: () => <div data-testid="deposit-flow">Deposit Flow</div>,
 }));
 
-vi.mock("../withdraw-flow", () => ({
-  WithdrawFlow: () => <div data-testid="withdraw-flow">Withdraw Flow</div>,
+vi.mock("../pay-flow", () => ({
+  PayFlow: () => <div data-testid="pay-flow">Pay Flow</div>,
 }));
 
 vi.mock("../balance-view", () => ({
@@ -61,10 +61,10 @@ describe("SbBTCWidget (Dialog)", () => {
   });
 
   it("respects defaultTab prop", async () => {
-    render(<SbBTCWidget defaultTab="withdraw" />);
+    render(<SbBTCWidget defaultTab="pay" />);
     fireEvent.click(screen.getByRole("button", { name: /open zvault/i }));
 
-    expect(screen.getByTestId("withdraw-flow")).toBeDefined();
+    expect(screen.getByTestId("pay-flow")).toBeDefined();
   });
 
   it("switches tabs when clicked", async () => {
@@ -74,10 +74,10 @@ describe("SbBTCWidget (Dialog)", () => {
     // Initially on deposit
     expect(screen.getByTestId("deposit-flow")).toBeDefined();
 
-    // Click withdraw tab
-    const withdrawTab = screen.getByRole("button", { name: /withdraw/i });
-    fireEvent.click(withdrawTab);
-    expect(screen.getByTestId("withdraw-flow")).toBeDefined();
+    // Click pay tab
+    const payTab = screen.getByRole("button", { name: /pay/i });
+    fireEvent.click(payTab);
+    expect(screen.getByTestId("pay-flow")).toBeDefined();
 
     // Click activity tab
     const activityTab = screen.getByRole("button", { name: /activity/i });
@@ -101,7 +101,7 @@ describe("SbBTCWidget (Dialog)", () => {
     fireEvent.click(screen.getByRole("button", { name: /open zvault/i }));
 
     expect(screen.getByRole("button", { name: /deposit/i })).toBeDefined();
-    expect(screen.getByRole("button", { name: /withdraw/i })).toBeDefined();
+    expect(screen.getByRole("button", { name: /pay/i })).toBeDefined();
     expect(screen.getByRole("button", { name: /activity/i })).toBeDefined();
   });
 
@@ -135,9 +135,9 @@ describe("IntegratedWidget", () => {
   it("allows tab switching", () => {
     render(<IntegratedWidget />);
 
-    // Switch to withdraw
-    fireEvent.click(screen.getByRole("button", { name: /withdraw/i }));
-    expect(screen.getByTestId("withdraw-flow")).toBeDefined();
+    // Switch to pay
+    fireEvent.click(screen.getByRole("button", { name: /pay/i }));
+    expect(screen.getByTestId("pay-flow")).toBeDefined();
   });
 
   it("accepts custom className", () => {

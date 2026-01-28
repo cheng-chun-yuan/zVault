@@ -37,7 +37,7 @@ function getRelayerKeypair(): Keypair | null {
 
 // zVault Program ID (Devnet)
 const PROGRAM_ID = new PublicKey(
-  process.env.NEXT_PUBLIC_PROGRAM_ID || "5S5ynMni8Pgd6tKkpYaXiPJiEXgw927s7T2txDtDivRK"
+  process.env.NEXT_PUBLIC_PROGRAM_ID || "DjnryiDxMsUY8pzYCgynVUGDgv45J9b3XbSDnp4qDYrq"
 );
 
 // Derive light client PDA (v2 for correct byte order)

@@ -104,6 +104,12 @@ impl StealthAnnouncement {
         self.encrypted_amount_bytes = value;
     }
 
+    /// Set amount as u64 (converts to le_bytes)
+    /// Note: For privacy, prefer set_encrypted_amount with pre-encrypted bytes
+    pub fn set_amount_sats(&mut self, value: u64) {
+        self.encrypted_amount_bytes = value.to_le_bytes();
+    }
+
     /// Get leaf_index as u64
     pub fn leaf_index(&self) -> u64 {
         u64::from_le_bytes(self.leaf_index_bytes)
