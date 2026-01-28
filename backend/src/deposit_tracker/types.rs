@@ -39,17 +39,38 @@ impl Default for DepositStatus {
 
 impl std::fmt::Display for DepositStatus {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::Pending => write!(f, "pending"),
-            Self::Detected => write!(f, "detected"),
-            Self::Confirming => write!(f, "confirming"),
-            Self::Confirmed => write!(f, "confirmed"),
-            Self::Sweeping => write!(f, "sweeping"),
-            Self::SweepConfirming => write!(f, "sweep_confirming"),
-            Self::Verifying => write!(f, "verifying"),
-            Self::Ready => write!(f, "ready"),
-            Self::Claimed => write!(f, "claimed"),
-            Self::Failed => write!(f, "failed"),
+        let s = match self {
+            Self::Pending => "pending",
+            Self::Detected => "detected",
+            Self::Confirming => "confirming",
+            Self::Confirmed => "confirmed",
+            Self::Sweeping => "sweeping",
+            Self::SweepConfirming => "sweep_confirming",
+            Self::Verifying => "verifying",
+            Self::Ready => "ready",
+            Self::Claimed => "claimed",
+            Self::Failed => "failed",
+        };
+        write!(f, "{}", s)
+    }
+}
+
+impl std::str::FromStr for DepositStatus {
+    type Err = String;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s {
+            "pending" => Ok(Self::Pending),
+            "detected" => Ok(Self::Detected),
+            "confirming" => Ok(Self::Confirming),
+            "confirmed" => Ok(Self::Confirmed),
+            "sweeping" => Ok(Self::Sweeping),
+            "sweep_confirming" => Ok(Self::SweepConfirming),
+            "verifying" => Ok(Self::Verifying),
+            "ready" => Ok(Self::Ready),
+            "claimed" => Ok(Self::Claimed),
+            "failed" => Ok(Self::Failed),
+            _ => Err(format!("unknown status: {}", s)),
         }
     }
 }
@@ -100,6 +121,10 @@ pub struct DepositRecord {
     pub updated_at: u64,
     /// Error message if failed
     pub error: Option<String>,
+    /// Number of retry attempts for failed operations
+    pub retry_count: u32,
+    /// Timestamp of last retry attempt
+    pub last_retry_at: Option<u64>,
 }
 
 impl DepositRecord {
@@ -131,6 +156,8 @@ impl DepositRecord {
             created_at: now,
             updated_at: now,
             error: None,
+            retry_count: 0,
+            last_retry_at: None,
         }
     }
 
@@ -155,14 +182,11 @@ impl DepositRecord {
             self.deposit_block_height = Some(height);
         }
 
-        // Update status based on confirmations
-        if confirmations == 0 {
-            self.status = DepositStatus::Detected;
-        } else if confirmations < 1 {
-            self.status = DepositStatus::Confirming;
+        self.status = if confirmations == 0 {
+            DepositStatus::Detected
         } else {
-            self.status = DepositStatus::Confirmed;
-        }
+            DepositStatus::Confirmed
+        };
         self.touch();
     }
 
@@ -214,6 +238,30 @@ impl DepositRecord {
         self.error = Some(error);
         self.status = DepositStatus::Failed;
         self.touch();
+    }
+
+    /// Increment retry count and update last retry timestamp
+    pub fn increment_retry(&mut self) {
+        self.retry_count += 1;
+        self.last_retry_at = Some(
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_secs(),
+        );
+    }
+
+    /// Reset for retry - clear error and set status to resume from
+    pub fn reset_for_retry(&mut self, resume_status: DepositStatus) {
+        self.error = None;
+        self.status = resume_status;
+        self.increment_retry();
+        self.touch();
+    }
+
+    /// Check if eligible for retry based on max retries
+    pub fn can_retry(&self, max_retries: u32) -> bool {
+        self.status == DepositStatus::Failed && self.retry_count < max_retries
     }
 
     /// Update timestamp
@@ -340,17 +388,26 @@ pub struct TrackerConfig {
     pub solana_rpc: String,
     /// Pool receive address for swept funds
     pub pool_receive_address: String,
+    /// Path to SQLite database file
+    pub db_path: String,
+    /// Maximum retry attempts for failed operations
+    pub max_retries: u32,
+    /// Delay between retry attempts in seconds
+    pub retry_delay_secs: u64,
 }
 
 impl Default for TrackerConfig {
     fn default() -> Self {
         Self {
-            poll_interval_secs: 10,
-            required_confirmations: 1, // Reduced to 1 for demo/testing
+            poll_interval_secs: 30,
+            required_confirmations: 3, // Production-safe default
             required_sweep_confirmations: 2,
             esplora_url: "https://blockstream.info/testnet/api".to_string(),
             solana_rpc: "https://api.devnet.solana.com".to_string(),
             pool_receive_address: String::new(), // Must be set via env
+            db_path: "data/deposits.db".to_string(),
+            max_retries: 5,
+            retry_delay_secs: 60,
         }
     }
 }
@@ -403,17 +460,18 @@ impl Default for StealthDepositStatus {
 
 impl std::fmt::Display for StealthDepositStatus {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::Pending => write!(f, "pending"),
-            Self::Detected => write!(f, "detected"),
-            Self::Confirming => write!(f, "confirming"),
-            Self::Confirmed => write!(f, "confirmed"),
-            Self::Sweeping => write!(f, "sweeping"),
-            Self::SweepConfirming => write!(f, "sweep_confirming"),
-            Self::Verifying => write!(f, "verifying"),
-            Self::Ready => write!(f, "ready"),
-            Self::Failed => write!(f, "failed"),
-        }
+        let s = match self {
+            Self::Pending => "pending",
+            Self::Detected => "detected",
+            Self::Confirming => "confirming",
+            Self::Confirmed => "confirmed",
+            Self::Sweeping => "sweeping",
+            Self::SweepConfirming => "sweep_confirming",
+            Self::Verifying => "verifying",
+            Self::Ready => "ready",
+            Self::Failed => "failed",
+        };
+        write!(f, "{}", s)
     }
 }
 
@@ -552,14 +610,11 @@ impl StealthDepositRecord {
             self.deposit_block_height = Some(height);
         }
 
-        // Update status based on confirmations
-        if confirmations == 0 {
-            self.status = StealthDepositStatus::Detected;
-        } else if confirmations < 1 {
-            self.status = StealthDepositStatus::Confirming;
+        self.status = if confirmations == 0 {
+            StealthDepositStatus::Detected
         } else {
-            self.status = StealthDepositStatus::Confirmed;
-        }
+            StealthDepositStatus::Confirmed
+        };
         self.touch();
     }
 
@@ -751,6 +806,8 @@ mod tests {
 
         assert_eq!(record.status, DepositStatus::Pending);
         assert!(!record.can_claim());
+        assert_eq!(record.retry_count, 0);
+        assert!(record.last_retry_at.is_none());
 
         // Detect
         record.mark_detected("txid123".to_string(), 0);
@@ -775,6 +832,33 @@ mod tests {
         record.mark_ready("sol_tx".to_string(), 42);
         assert_eq!(record.status, DepositStatus::Ready);
         assert!(record.can_claim());
+    }
+
+    #[test]
+    fn test_retry_logic() {
+        let mut record = DepositRecord::new(
+            "tb1p123...".to_string(),
+            "abcd".repeat(16),
+            100_000,
+        );
+
+        // Mark as failed
+        record.mark_failed("test error".to_string());
+        assert_eq!(record.status, DepositStatus::Failed);
+        assert!(record.can_retry(5));
+        assert!(!record.can_retry(0));
+
+        // Reset for retry
+        record.reset_for_retry(DepositStatus::Confirmed);
+        assert_eq!(record.status, DepositStatus::Confirmed);
+        assert_eq!(record.retry_count, 1);
+        assert!(record.last_retry_at.is_some());
+        assert!(record.error.is_none());
+
+        // After max retries
+        record.retry_count = 5;
+        record.mark_failed("another error".to_string());
+        assert!(!record.can_retry(5));
     }
 
     #[test]

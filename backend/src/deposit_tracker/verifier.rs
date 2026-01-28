@@ -210,6 +210,28 @@ impl SpvVerifier {
         })
     }
 
+    /// Check if block header is available in the BTC light client
+    ///
+    /// This verifies that the header-relayer has synced the required block
+    /// before attempting SPV verification.
+    pub async fn block_header_available(&self, height: u64) -> Result<bool, VerifierError> {
+        // Derive the block header PDA
+        let (block_header_pda, _) = Pubkey::find_program_address(
+            &[b"block_header", &height.to_le_bytes()],
+            &self.light_client_program_id,
+        );
+
+        // Check if the account exists and has data
+        match self.rpc.get_account(&block_header_pda) {
+            Ok(account) => {
+                // Account exists - check if it has sufficient data for a block header
+                // Block header account should have at least 80 bytes for the raw header
+                Ok(account.data.len() >= 80)
+            }
+            Err(_) => Ok(false),
+        }
+    }
+
     /// Check if a deposit has already been verified
     pub async fn is_already_verified(&self, sweep_txid: &str) -> Result<bool, VerifierError> {
         // Convert txid to internal byte order

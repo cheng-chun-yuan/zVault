@@ -25,6 +25,10 @@ test-ledger/
 # Logs
 *.log
 
+# SQLite database
+data/
+*.db
+
 # OS
 .DS_Store
 Thumbs.db

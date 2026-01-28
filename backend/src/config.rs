@@ -277,14 +277,12 @@ impl ZVaultConfig {
         println!("Solana RPC: {}", self.solana_rpc);
         println!("Bitcoin API: {}", self.bitcoin_api);
         println!("Program ID: {}", self.program_id);
-        println!(
-            "Signing Mode: {}",
-            match &self.signing {
-                SigningMode::Single { .. } => "Single Key (POC)",
-                SigningMode::Frost { threshold, participants, .. } =>
-                    &format!("FROST {}-of-{}", threshold, participants),
-            }
-        );
+        let signing_mode = match &self.signing {
+            SigningMode::Single { .. } => "Single Key (POC)".to_string(),
+            SigningMode::Frost { threshold, participants, .. } =>
+                format!("FROST {}-of-{}", threshold, participants),
+        };
+        println!("Signing Mode: {}", signing_mode);
         println!("Deposit Limit: {} sats", self.deposit_limit_sats);
         println!("Demo Mode: {}", self.demo_mode);
         println!("Log Level: {}", self.log_level);

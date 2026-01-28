@@ -46,15 +46,25 @@ fn print_usage() {
     println!("Usage:");
     println!("  zbtc-api api [--port <port>]               Start REST API server (default: 3001)");
     println!("  zbtc-api redemption [--interval <secs>]    Start redemption processor");
-    println!("  zbtc-api tracker [--interval <secs>]       Start deposit tracker");
+    println!("  zbtc-api tracker [options]                 Start deposit tracker");
     println!("  zbtc-api demo                              Run interactive demo");
     println!();
+    println!("Tracker Options:");
+    println!("  --interval <secs>       Poll interval (default: 30)");
+    println!("  --confirmations <n>     Required BTC confirmations (default: 3)");
+    println!("  --db-path <path>        SQLite database path (default: data/deposits.db)");
+    println!("  --max-retries <n>       Max retry attempts for failed operations (default: 5)");
+    println!();
     println!("Environment Variables:");
-    println!("  POOL_SIGNING_KEY      Hex-encoded private key for BTC signing");
-    println!("  POOL_RECEIVE_ADDRESS  Pool wallet address for swept funds");
-    println!("  API_PORT              REST API port (default: 3001)");
-    println!("  SOLANA_RPC_URL        Solana RPC endpoint");
-    println!("  VERIFIER_KEYPAIR      Path to Solana keypair for verification");
+    println!("  POOL_SIGNING_KEY              Hex-encoded private key for BTC signing");
+    println!("  POOL_RECEIVE_ADDRESS          Pool wallet address for swept funds");
+    println!("  API_PORT                      REST API port (default: 3001)");
+    println!("  SOLANA_RPC_URL                Solana RPC endpoint");
+    println!("  VERIFIER_KEYPAIR              Path to Solana keypair for verification");
+    println!("  DEPOSIT_DB_PATH               SQLite database path");
+    println!("  DEPOSIT_POLL_INTERVAL_SECS    Poll interval in seconds");
+    println!("  DEPOSIT_REQUIRED_CONFIRMATIONS Required BTC confirmations");
+    println!("  DEPOSIT_MAX_RETRIES           Max retry attempts");
     println!();
     println!("Note: Most functionality is handled by the SDK on the client side.");
     println!();
@@ -150,25 +160,50 @@ async fn run_tracker_service(args: &[String]) {
     while i < args.len() {
         match args[i].as_str() {
             "--interval" if i + 1 < args.len() => {
-                config.poll_interval_secs = args[i + 1].parse().unwrap_or(10);
+                config.poll_interval_secs = args[i + 1].parse().unwrap_or(30);
                 i += 2;
             }
             "--confirmations" if i + 1 < args.len() => {
-                config.required_confirmations = args[i + 1].parse().unwrap_or(6);
+                config.required_confirmations = args[i + 1].parse().unwrap_or(3);
+                i += 2;
+            }
+            "--db-path" if i + 1 < args.len() => {
+                config.db_path = args[i + 1].clone();
+                i += 2;
+            }
+            "--max-retries" if i + 1 < args.len() => {
+                config.max_retries = args[i + 1].parse().unwrap_or(5);
                 i += 2;
             }
             _ => i += 1,
         }
     }
 
-    // Load pool address from env
+    // Load config from environment
     if let Ok(addr) = env::var("POOL_RECEIVE_ADDRESS") {
         config.pool_receive_address = addr;
     }
-
-    // Load Solana RPC from env
     if let Ok(rpc) = env::var("SOLANA_RPC_URL") {
         config.solana_rpc = rpc;
+    }
+    if let Ok(db_path) = env::var("DEPOSIT_DB_PATH") {
+        config.db_path = db_path;
+    }
+    if let Ok(interval) = env::var("DEPOSIT_POLL_INTERVAL_SECS") {
+        config.poll_interval_secs = interval.parse().unwrap_or(30);
+    }
+    if let Ok(confirmations) = env::var("DEPOSIT_REQUIRED_CONFIRMATIONS") {
+        config.required_confirmations = confirmations.parse().unwrap_or(3);
+    }
+    if let Ok(max_retries) = env::var("DEPOSIT_MAX_RETRIES") {
+        config.max_retries = max_retries.parse().unwrap_or(5);
+    }
+
+    // Create data directory if using default path
+    if config.db_path.starts_with("data/") {
+        if let Err(e) = std::fs::create_dir_all("data") {
+            eprintln!("Warning: Failed to create data directory: {}", e);
+        }
     }
 
     // Create service with optional sweeper
@@ -192,7 +227,7 @@ async fn run_tracker_service(args: &[String]) {
     };
 
     // Configure verifier if keypair available
-    let mut service = if let Ok(keypair_path) = env::var("VERIFIER_KEYPAIR") {
+    let service = if let Ok(keypair_path) = env::var("VERIFIER_KEYPAIR") {
         match zbtc::load_keypair_from_file(&keypair_path) {
             Ok(keypair) => {
                 println!("Verifier configured with Solana keypair");
@@ -217,6 +252,9 @@ async fn run_tracker_service(args: &[String]) {
         config.required_sweep_confirmations
     );
     println!("  Pool Address: {}", config.pool_receive_address);
+    println!("  Database: {}", config.db_path);
+    println!("  Max Retries: {}", config.max_retries);
+    println!("  Retry Delay: {} seconds", config.retry_delay_secs);
     println!();
     println!("Watching for Bitcoin deposits...");
     println!("Press Ctrl+C to stop");

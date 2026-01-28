@@ -6,16 +6,19 @@
 //! # Flow:
 //! 1. User registers deposit (taproot address + commitment)
 //! 2. Service polls Esplora for incoming transactions
-//! 3. Once confirmed (6 blocks), sweeps UTXO to pool wallet
+//! 3. Once confirmed (configurable blocks), sweeps UTXO to pool wallet
 //! 4. After sweep confirms (2 blocks), submits SPV proof to Solana
 //! 5. User can claim zBTC once status is "ready"
+//!
+//! # Persistence:
+//! Uses SQLite for durable storage. Service can restart and resume processing.
 
 use solana_sdk::signature::Keypair;
-use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::RwLock;
 use tokio::time::{interval, Duration};
 
+use super::sqlite_db::{SqliteDepositStore, SqliteError};
 use super::sweeper::{SweeperError, UtxoSweeper};
 use super::types::{DepositRecord, DepositStatus, TrackerConfig, TrackerStats};
 use super::verifier::{SpvVerifier, VerifierError};
@@ -45,16 +48,17 @@ pub enum TrackerError {
 
     #[error("Duplicate deposit: {0}")]
     Duplicate(String),
+
+    #[error("Database error: {0}")]
+    Database(#[from] SqliteError),
 }
 
 /// Main deposit tracker service
 pub struct DepositTrackerService {
     /// Configuration
     config: TrackerConfig,
-    /// In-memory deposit storage (address -> record)
-    deposits: HashMap<String, DepositRecord>,
-    /// Lookup by ID
-    deposits_by_id: HashMap<String, String>,
+    /// SQLite persistent storage
+    db: SqliteDepositStore,
     /// Address watcher
     watcher: AddressWatcher,
     /// UTXO sweeper
@@ -63,40 +67,38 @@ pub struct DepositTrackerService {
     verifier: Option<SpvVerifier>,
     /// WebSocket publisher
     publisher: Option<DepositUpdatePublisher>,
-    /// Statistics
-    stats: TrackerStats,
 }
 
 impl DepositTrackerService {
-    /// Create a new tracker service for testnet
+    /// Create a new tracker service for testnet with SQLite persistence
     pub fn new_testnet(config: TrackerConfig) -> Self {
+        let db = SqliteDepositStore::new(&config.db_path)
+            .expect("Failed to initialize SQLite database");
         let watcher = AddressWatcher::testnet();
 
         Self {
             config,
-            deposits: HashMap::new(),
-            deposits_by_id: HashMap::new(),
+            db,
             watcher,
             sweeper: None,
             verifier: None,
             publisher: None,
-            stats: TrackerStats::default(),
         }
     }
 
     /// Create with custom configuration
     pub fn new(config: TrackerConfig) -> Self {
+        let db = SqliteDepositStore::new(&config.db_path)
+            .expect("Failed to initialize SQLite database");
         let watcher = AddressWatcher::new(&config.esplora_url);
 
         Self {
             config,
-            deposits: HashMap::new(),
-            deposits_by_id: HashMap::new(),
+            db,
             watcher,
             sweeper: None,
             verifier: None,
             publisher: None,
-            stats: TrackerStats::default(),
         }
     }
 
@@ -129,7 +131,7 @@ impl DepositTrackerService {
 
     /// Register a new deposit to track
     pub fn register_deposit(
-        &mut self,
+        &self,
         taproot_address: String,
         commitment: String,
         amount_sats: u64,
@@ -143,55 +145,181 @@ impl DepositTrackerService {
         }
 
         // Check for duplicate
-        if self.deposits.contains_key(&taproot_address) {
+        if self.db.get_by_address(&taproot_address)?.is_some() {
             return Err(TrackerError::Duplicate(taproot_address));
         }
 
         // Create new record
-        let record = DepositRecord::new(taproot_address.clone(), commitment, amount_sats);
+        let record = DepositRecord::new(taproot_address, commitment, amount_sats);
         let id = record.id.clone();
 
-        // Store
-        self.deposits_by_id.insert(id.clone(), taproot_address.clone());
-        self.deposits.insert(taproot_address, record);
+        // Store in database
+        self.db.insert(&record)?;
 
-        // Update stats
-        self.stats.total_deposits += 1;
-        self.stats.pending += 1;
+        println!("[{}] Deposit registered, watching for BTC", id);
 
         Ok(id)
     }
 
     /// Get deposit by ID
-    pub fn get_deposit(&self, id: &str) -> Option<&DepositRecord> {
-        self.deposits_by_id
-            .get(id)
-            .and_then(|addr| self.deposits.get(addr))
-    }
-
-    /// Get deposit by ID (mutable)
-    fn get_deposit_mut(&mut self, id: &str) -> Option<&mut DepositRecord> {
-        let addr = self.deposits_by_id.get(id)?.clone();
-        self.deposits.get_mut(&addr)
+    pub fn get_deposit(&self, id: &str) -> Option<DepositRecord> {
+        self.db.get_by_id(id).ok().flatten()
     }
 
     /// Get deposit by address
-    pub fn get_deposit_by_address(&self, address: &str) -> Option<&DepositRecord> {
-        self.deposits.get(address)
+    pub fn get_deposit_by_address(&self, address: &str) -> Option<DepositRecord> {
+        self.db.get_by_address(address).ok().flatten()
     }
 
     /// Get all deposits
-    pub fn get_all_deposits(&self) -> Vec<&DepositRecord> {
-        self.deposits.values().collect()
+    pub fn get_all_deposits(&self) -> Vec<DepositRecord> {
+        self.db.get_all().unwrap_or_default()
     }
 
     /// Get statistics
-    pub fn stats(&self) -> &TrackerStats {
-        &self.stats
+    pub fn stats(&self) -> TrackerStats {
+        let counts = self.db.count_by_status().unwrap_or_default();
+        let total_sats = self.db.total_sats_received().unwrap_or(0);
+
+        TrackerStats {
+            total_deposits: counts.values().sum(),
+            pending: *counts.get("pending").unwrap_or(&0),
+            confirming: counts.get("confirming").unwrap_or(&0)
+                + counts.get("detected").unwrap_or(&0),
+            ready: *counts.get("ready").unwrap_or(&0),
+            claimed: *counts.get("claimed").unwrap_or(&0),
+            failed: *counts.get("failed").unwrap_or(&0),
+            total_sats_received: total_sats,
+        }
+    }
+
+    /// Recover in-progress deposits after service restart
+    ///
+    /// Finds deposits that were interrupted mid-processing and resets them
+    /// to an appropriate state to resume.
+    pub fn recover_in_progress_deposits(&self) -> Result<u32, TrackerError> {
+        let active = self.db.get_active()?;
+        let mut recovered = 0;
+
+        for mut record in active {
+            let should_reset = match record.status {
+                // These mid-operation states should be reset
+                DepositStatus::Sweeping => {
+                    // Was in the middle of sweeping - check if sweep actually happened
+                    if record.sweep_txid.is_none() {
+                        record.status = DepositStatus::Confirmed;
+                        true
+                    } else {
+                        record.status = DepositStatus::SweepConfirming;
+                        true
+                    }
+                }
+                DepositStatus::Verifying => {
+                    // Was verifying - reset to sweep confirming to re-verify
+                    record.status = DepositStatus::SweepConfirming;
+                    true
+                }
+                _ => false,
+            };
+
+            if should_reset {
+                record.error = None;
+                self.db.update(&record)?;
+                println!(
+                    "[{}] Recovered interrupted deposit, reset to {:?}",
+                    record.id, record.status
+                );
+                recovered += 1;
+            }
+        }
+
+        if recovered > 0 {
+            println!("Recovered {} interrupted deposits", recovered);
+        }
+
+        Ok(recovered)
+    }
+
+    /// Determine the appropriate status to resume from based on deposit progress
+    fn determine_resume_status(&self, record: &DepositRecord) -> DepositStatus {
+        if record.sweep_txid.is_some() {
+            DepositStatus::SweepConfirming
+        } else if record.deposit_txid.is_some() && record.confirmations >= self.config.required_confirmations {
+            DepositStatus::Confirmed
+        } else if record.deposit_txid.is_some() {
+            DepositStatus::Detected
+        } else {
+            DepositStatus::Pending
+        }
+    }
+
+    /// Retry failed operations that are eligible for retry
+    pub async fn retry_failed_operations(&self) -> Result<u32, TrackerError> {
+        let retryable = self.db.get_failed_for_retry(self.config.max_retries)?;
+        let mut retried = 0;
+
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_secs();
+
+        for mut record in retryable {
+            if let Some(last_retry) = record.last_retry_at {
+                if now - last_retry < self.config.retry_delay_secs {
+                    continue;
+                }
+            }
+
+            let resume_status = self.determine_resume_status(&record);
+            record.reset_for_retry(resume_status);
+            self.db.update(&record)?;
+
+            println!(
+                "[{}] Retrying (attempt {}/{}), resuming from {:?}",
+                record.id,
+                record.retry_count,
+                self.config.max_retries,
+                resume_status
+            );
+            retried += 1;
+        }
+
+        Ok(retried)
+    }
+
+    /// Get deposits eligible for retry
+    pub fn get_failed_deposits(&self) -> Vec<DepositRecord> {
+        self.db.get_by_status(DepositStatus::Failed).unwrap_or_default()
+    }
+
+    /// Get pending deposits
+    pub fn get_pending_deposits(&self) -> Vec<DepositRecord> {
+        self.db.get_by_status(DepositStatus::Pending).unwrap_or_default()
+    }
+
+    /// Manually retry a specific deposit
+    pub fn retry_deposit(&self, id: &str) -> Result<(), TrackerError> {
+        let mut record = self.db.get_by_id(id)?
+            .ok_or_else(|| TrackerError::NotFound(id.to_string()))?;
+
+        if record.status != DepositStatus::Failed {
+            return Err(TrackerError::InvalidCommitment(format!(
+                "cannot retry deposit in status {:?}",
+                record.status
+            )));
+        }
+
+        let resume_status = self.determine_resume_status(&record);
+        record.reset_for_retry(resume_status);
+        self.db.update(&record)?;
+
+        println!("[{}] Manual retry triggered, resuming from {:?}", id, resume_status);
+
+        Ok(())
     }
 
     /// Run the tracker service (blocking)
-    pub async fn run(&mut self) -> Result<(), TrackerError> {
+    pub async fn run(&self) -> Result<(), TrackerError> {
         println!("=== Deposit Tracker Service ===");
         println!("Poll interval: {} seconds", self.config.poll_interval_secs);
         println!("Required confirmations: {}", self.config.required_confirmations);
@@ -199,50 +327,55 @@ impl DepositTrackerService {
             "Required sweep confirmations: {}",
             self.config.required_sweep_confirmations
         );
+        println!("Database: {}", self.config.db_path);
+        println!("Max retries: {}", self.config.max_retries);
         println!();
 
+        // Recover any interrupted deposits
+        self.recover_in_progress_deposits()?;
+
         let mut poll_interval = interval(Duration::from_secs(self.config.poll_interval_secs));
+        let mut retry_interval = interval(Duration::from_secs(self.config.retry_delay_secs));
 
         loop {
-            poll_interval.tick().await;
-            if let Err(e) = self.process_cycle().await {
-                eprintln!("Process cycle error: {}", e);
+            tokio::select! {
+                _ = poll_interval.tick() => {
+                    if let Err(e) = self.process_cycle().await {
+                        eprintln!("Process cycle error: {}", e);
+                    }
+                }
+                _ = retry_interval.tick() => {
+                    if let Err(e) = self.retry_failed_operations().await {
+                        eprintln!("Retry cycle error: {}", e);
+                    }
+                }
             }
         }
     }
 
     /// Run a single processing cycle
-    pub async fn process_cycle(&mut self) -> Result<(), TrackerError> {
-        // Collect addresses to check (clone to avoid borrow issues)
-        let addresses: Vec<String> = self.deposits.keys().cloned().collect();
+    pub async fn process_cycle(&self) -> Result<(), TrackerError> {
+        // Get all active deposits from database
+        let deposits = self.db.get_active()?;
 
-        for address in addresses {
-            if let Err(e) = self.process_deposit(&address).await {
-                eprintln!("Error processing deposit {}: {}", address, e);
-                // Mark as failed if there's a serious error
-                let should_publish = if let Some(record) = self.deposits.get_mut(&address) {
+        for record in deposits {
+            if let Err(e) = self.process_deposit(&record.taproot_address).await {
+                eprintln!("Error processing deposit {}: {}", record.id, e);
+
+                // Mark as failed for certain errors
+                if let Some(mut record) = self.db.get_by_address(&record.taproot_address)? {
                     if !matches!(
                         record.status,
                         DepositStatus::Claimed | DepositStatus::Failed
                     ) {
-                        // Only mark failed for certain errors
                         match &e {
                             TrackerError::Sweeper(_) | TrackerError::Verifier(_) => {
                                 record.mark_failed(e.to_string());
-                                true
+                                self.db.update(&record)?;
+                                self.publish_update(&record).await;
                             }
-                            _ => false,
+                            _ => {}
                         }
-                    } else {
-                        false
-                    }
-                } else {
-                    false
-                };
-
-                if should_publish {
-                    if let Some(record) = self.deposits.get(&address) {
-                        self.publish_update(record).await;
                     }
                 }
             }
@@ -252,68 +385,52 @@ impl DepositTrackerService {
     }
 
     /// Process a single deposit
-    async fn process_deposit(&mut self, address: &str) -> Result<(), TrackerError> {
-        let record = self.deposits.get(address).ok_or_else(|| {
-            TrackerError::NotFound(address.to_string())
-        })?;
+    async fn process_deposit(&self, address: &str) -> Result<(), TrackerError> {
+        let record = self.db.get_by_address(address)?
+            .ok_or_else(|| TrackerError::NotFound(address.to_string()))?;
 
-        // Clone needed data to avoid borrow issues
-        let status = record.status;
-        let commitment = record.commitment.clone();
-
-        match status {
+        match record.status {
             DepositStatus::Pending | DepositStatus::Detected | DepositStatus::Confirming => {
-                // Check for deposits and update confirmations
                 self.check_and_update_confirmations(address).await?;
             }
             DepositStatus::Confirmed => {
-                // Ready to sweep
-                self.sweep_deposit(address, &commitment).await?;
+                self.sweep_deposit(address, &record.commitment).await?;
             }
             DepositStatus::Sweeping => {
                 // Waiting for sweep tx broadcast - handled in sweep_deposit
             }
             DepositStatus::SweepConfirming => {
-                // Check sweep confirmations
                 self.check_sweep_confirmations(address).await?;
             }
             DepositStatus::Verifying => {
-                // SPV verification in progress - check if done
                 self.check_verification_status(address).await?;
             }
-            DepositStatus::Ready => {
-                // Waiting for user to claim - nothing to do
-            }
-            DepositStatus::Claimed | DepositStatus::Failed => {
+            DepositStatus::Ready | DepositStatus::Claimed | DepositStatus::Failed => {
                 // Terminal states - nothing to do
             }
         }
 
         // Publish update after processing
-        if let Some(record) = self.deposits.get(address) {
-            self.publish_update(record).await;
+        if let Some(record) = self.db.get_by_address(address)? {
+            self.publish_update(&record).await;
         }
 
         Ok(())
     }
 
     /// Check address for deposits and update confirmation count
-    async fn check_and_update_confirmations(&mut self, address: &str) -> Result<(), TrackerError> {
+    async fn check_and_update_confirmations(&self, address: &str) -> Result<(), TrackerError> {
         let addr_status = self.watcher.check_address(address).await?;
 
         if addr_status.utxos.is_empty() {
-            // No deposit yet
             return Ok(());
         }
 
-        // Find the first UTXO (assuming single deposit per address)
         let utxo = addr_status.utxos[0].clone();
 
-        let record = self.deposits.get_mut(address).ok_or_else(|| {
-            TrackerError::NotFound(address.to_string())
-        })?;
+        let mut record = self.db.get_by_address(address)?
+            .ok_or_else(|| TrackerError::NotFound(address.to_string()))?;
 
-        // Update record if we found a deposit
         if record.deposit_txid.is_none() {
             record.mark_detected(utxo.txid.clone(), utxo.vout);
             println!(
@@ -321,34 +438,36 @@ impl DepositTrackerService {
                 record.id, utxo.txid, utxo.value
             );
 
-            // Update amount if different
             if record.amount_sats != utxo.value {
                 record.amount_sats = utxo.value;
             }
         }
 
-        // Update confirmations
         let old_status = record.status;
         record.update_confirmations(utxo.confirmations, utxo.block_height);
         let new_status = record.status;
-        let record_id = record.id.clone();
 
-        // Drop the mutable borrow before updating stats
-        if new_status != old_status {
+        // Check if enough confirmations
+        if utxo.confirmations >= self.config.required_confirmations
+            && record.status != DepositStatus::Confirmed
+        {
+            record.status = DepositStatus::Confirmed;
+        }
+
+        self.db.update(&record)?;
+
+        if new_status != old_status || record.status == DepositStatus::Confirmed {
             println!(
                 "[{}] Status: {:?} → {:?} ({} confirmations)",
-                record_id, old_status, new_status, utxo.confirmations
+                record.id, old_status, record.status, utxo.confirmations
             );
-
-            // Update stats
-            self.update_stats_for_status_change(old_status, new_status);
         }
 
         Ok(())
     }
 
     /// Sweep deposit UTXO to pool wallet
-    async fn sweep_deposit(&mut self, address: &str, commitment: &str) -> Result<(), TrackerError> {
+    async fn sweep_deposit(&self, address: &str, commitment: &str) -> Result<(), TrackerError> {
         let sweeper = match &self.sweeper {
             Some(s) => s,
             None => {
@@ -357,21 +476,20 @@ impl DepositTrackerService {
             }
         };
 
-        let record = self.deposits.get_mut(address).ok_or_else(|| {
-            TrackerError::NotFound(address.to_string())
-        })?;
+        let mut record = self.db.get_by_address(address)?
+            .ok_or_else(|| TrackerError::NotFound(address.to_string()))?;
 
-        // Mark as sweeping
         record.mark_sweeping();
+        self.db.update(&record)?;
         println!("[{}] Sweeping UTXO to pool wallet...", record.id);
 
-        // Attempt sweep
         let result = sweeper
             .sweep_utxo(address, commitment, self.config.required_confirmations)
             .await?;
 
-        // Update record with sweep tx
         record.mark_sweep_broadcast(result.txid.clone(), result.pool_address);
+        self.db.update(&record)?;
+
         println!(
             "[{}] Sweep broadcast: {} (fee: {} sats)",
             record.id, result.txid, result.fee_sats
@@ -381,10 +499,9 @@ impl DepositTrackerService {
     }
 
     /// Check sweep transaction confirmations
-    async fn check_sweep_confirmations(&mut self, address: &str) -> Result<(), TrackerError> {
-        let record = self.deposits.get(address).ok_or_else(|| {
-            TrackerError::NotFound(address.to_string())
-        })?;
+    async fn check_sweep_confirmations(&self, address: &str) -> Result<(), TrackerError> {
+        let record = self.db.get_by_address(address)?
+            .ok_or_else(|| TrackerError::NotFound(address.to_string()))?;
 
         let sweep_txid = match &record.sweep_txid {
             Some(txid) => txid.clone(),
@@ -394,21 +511,19 @@ impl DepositTrackerService {
         let record_id = record.id.clone();
         let commitment = record.commitment.clone();
 
-        // Get sweep tx confirmations
         let tx_status = self.watcher.get_tx_confirmations(&sweep_txid).await?;
 
-        let record = self.deposits.get_mut(address).ok_or_else(|| {
-            TrackerError::NotFound(address.to_string())
-        })?;
+        let mut record = self.db.get_by_address(address)?
+            .ok_or_else(|| TrackerError::NotFound(address.to_string()))?;
 
         record.update_sweep_confirmations(tx_status.confirmations, tx_status.block_height);
+        self.db.update(&record)?;
 
         println!(
             "[{}] Sweep confirmations: {}",
             record_id, tx_status.confirmations
         );
 
-        // If enough confirmations, proceed to verification
         if record.can_verify() {
             self.verify_deposit(address, &sweep_txid, &commitment).await?;
         }
@@ -418,7 +533,7 @@ impl DepositTrackerService {
 
     /// Submit deposit for SPV verification
     async fn verify_deposit(
-        &mut self,
+        &self,
         address: &str,
         sweep_txid: &str,
         commitment: &str,
@@ -431,51 +546,54 @@ impl DepositTrackerService {
             }
         };
 
-        let record = self.deposits.get_mut(address).ok_or_else(|| {
-            TrackerError::NotFound(address.to_string())
-        })?;
+        let mut record = self.db.get_by_address(address)?
+            .ok_or_else(|| TrackerError::NotFound(address.to_string()))?;
 
         let amount_sats = record.amount_sats;
         let record_id = record.id.clone();
 
-        // Check if already verified
+        // Check if block header is available
+        if let Some(block_height) = record.sweep_block_height {
+            if !verifier.block_header_available(block_height).await? {
+                println!(
+                    "[{}] Waiting for header-relayer to sync block {}",
+                    record_id, block_height
+                );
+                return Ok(());
+            }
+        }
+
         if verifier.is_already_verified(sweep_txid).await? {
             println!("[{}] Already verified on Solana", record_id);
             record.mark_ready("already_verified".to_string(), 0);
+            self.db.update(&record)?;
             return Ok(());
         }
 
-        // Mark as verifying
         record.mark_verifying();
+        self.db.update(&record)?;
         println!("[{}] Submitting SPV verification...", record_id);
 
-        // Submit verification
         let result = verifier
             .verify_deposit(sweep_txid, 0, commitment, amount_sats)
             .await?;
 
-        // Update record
-        let record = self.deposits.get_mut(address).ok_or_else(|| {
-            TrackerError::NotFound(address.to_string())
-        })?;
+        let mut record = self.db.get_by_address(address)?
+            .ok_or_else(|| TrackerError::NotFound(address.to_string()))?;
 
         record.mark_ready(result.solana_tx.clone(), result.leaf_index);
+        self.db.update(&record)?;
+
         println!(
             "[{}] Verified! Solana TX: {}, Leaf index: {}",
             record_id, result.solana_tx, result.leaf_index
         );
 
-        // Update stats
-        self.stats.ready += 1;
-        self.stats.total_sats_received += amount_sats;
-
         Ok(())
     }
 
     /// Check verification status (for deposits in Verifying state)
-    async fn check_verification_status(&mut self, _address: &str) -> Result<(), TrackerError> {
-        // Verification is synchronous in verify_deposit
-        // This is a placeholder for async verification flows
+    async fn check_verification_status(&self, _address: &str) -> Result<(), TrackerError> {
         Ok(())
     }
 
@@ -486,49 +604,20 @@ impl DepositTrackerService {
         }
     }
 
-    /// Update stats for status change
-    fn update_stats_for_status_change(&mut self, old: DepositStatus, new: DepositStatus) {
-        // Decrement old status
-        match old {
-            DepositStatus::Pending => self.stats.pending = self.stats.pending.saturating_sub(1),
-            DepositStatus::Confirming | DepositStatus::Detected => {
-                self.stats.confirming = self.stats.confirming.saturating_sub(1)
-            }
-            DepositStatus::Ready => self.stats.ready = self.stats.ready.saturating_sub(1),
-            _ => {}
-        }
-
-        // Increment new status
-        match new {
-            DepositStatus::Pending => self.stats.pending += 1,
-            DepositStatus::Confirming | DepositStatus::Detected => self.stats.confirming += 1,
-            DepositStatus::Ready => self.stats.ready += 1,
-            DepositStatus::Claimed => self.stats.claimed += 1,
-            DepositStatus::Failed => self.stats.failed += 1,
-            _ => {}
-        }
-    }
-
     /// Mark deposit as claimed (called by claim handler)
-    pub fn mark_claimed(&mut self, id: &str) -> Result<(), TrackerError> {
-        let (old_status, new_status) = {
-            let record = self.get_deposit_mut(id).ok_or_else(|| {
-                TrackerError::NotFound(id.to_string())
-            })?;
+    pub fn mark_claimed(&self, id: &str) -> Result<(), TrackerError> {
+        let mut record = self.db.get_by_id(id)?
+            .ok_or_else(|| TrackerError::NotFound(id.to_string()))?;
 
-            if record.status != DepositStatus::Ready {
-                return Err(TrackerError::InvalidCommitment(format!(
-                    "cannot claim deposit in status {:?}",
-                    record.status
-                )));
-            }
+        if record.status != DepositStatus::Ready {
+            return Err(TrackerError::InvalidCommitment(format!(
+                "cannot claim deposit in status {:?}",
+                record.status
+            )));
+        }
 
-            let old_status = record.status;
-            record.mark_claimed();
-            (old_status, record.status)
-        };
-
-        self.update_stats_for_status_change(old_status, new_status);
+        record.mark_claimed();
+        self.db.update(&record)?;
 
         Ok(())
     }
@@ -546,10 +635,17 @@ pub fn create_tracker_service(config: TrackerConfig) -> SharedTrackerService {
 mod tests {
     use super::*;
 
+    fn test_config() -> TrackerConfig {
+        TrackerConfig {
+            db_path: ":memory:".to_string(),
+            ..TrackerConfig::default()
+        }
+    }
+
     #[test]
     fn test_register_deposit() {
-        let config = TrackerConfig::default();
-        let mut service = DepositTrackerService::new_testnet(config);
+        let config = test_config();
+        let service = DepositTrackerService::new_testnet(config);
 
         let id = service
             .register_deposit(
@@ -568,25 +664,36 @@ mod tests {
 
     #[test]
     fn test_duplicate_registration() {
-        let config = TrackerConfig::default();
-        let mut service = DepositTrackerService::new_testnet(config);
+        let config = test_config();
+        let service = DepositTrackerService::new_testnet(config);
 
         service
             .register_deposit("tb1p123".to_string(), "b".repeat(64), 50_000)
             .unwrap();
 
-        // Duplicate should fail
         let result = service.register_deposit("tb1p123".to_string(), "c".repeat(64), 60_000);
         assert!(matches!(result, Err(TrackerError::Duplicate(_))));
     }
 
     #[test]
     fn test_invalid_commitment() {
-        let config = TrackerConfig::default();
-        let mut service = DepositTrackerService::new_testnet(config);
+        let config = test_config();
+        let service = DepositTrackerService::new_testnet(config);
 
-        // Too short
         let result = service.register_deposit("tb1p456".to_string(), "abc".to_string(), 10_000);
         assert!(matches!(result, Err(TrackerError::InvalidCommitment(_))));
+    }
+
+    #[test]
+    fn test_stats() {
+        let config = test_config();
+        let service = DepositTrackerService::new_testnet(config);
+
+        service.register_deposit("tb1p1".to_string(), "a".repeat(64), 100_000).unwrap();
+        service.register_deposit("tb1p2".to_string(), "b".repeat(64), 200_000).unwrap();
+
+        let stats = service.stats();
+        assert_eq!(stats.total_deposits, 2);
+        assert_eq!(stats.pending, 2);
     }
 }

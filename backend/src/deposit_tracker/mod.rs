@@ -34,6 +34,7 @@
 pub mod api;
 pub mod db;
 pub mod service;
+pub mod sqlite_db;
 pub mod sweeper;
 pub mod types;
 pub mod verifier;
@@ -61,3 +62,4 @@ pub use websocket::{
     SharedWebSocketState, WebSocketState,
 };
 pub use db::{DbError, StealthDepositStats, StealthDepositStore};
+pub use sqlite_db::{SqliteDepositStore, SqliteError};
