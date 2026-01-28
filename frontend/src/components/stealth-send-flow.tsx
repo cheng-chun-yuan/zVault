@@ -4,7 +4,7 @@ import { useState, useCallback, useEffect } from "react";
 import { useSearchParams } from "next/navigation";
 import { useWallet } from "@solana/wallet-adapter-react";
 import { useWalletModal } from "@solana/wallet-adapter-react-ui";
-import { Connection, PublicKey } from "@solana/web3.js";
+import { getConnectionAdapter } from "@/lib/adapters/connection-adapter";
 import {
   AlertCircle,
   Check,
@@ -134,19 +134,8 @@ export function StealthSendFlow() {
       } else {
         // Try as zkey name
         const name = input.replace(/\.zkey$/i, "");
-        const connection = new Connection(
-          process.env.NEXT_PUBLIC_SOLANA_RPC_URL || "https://api.devnet.solana.com"
-        );
-        // Wrap connection to match SDK expected type (v2 Address is a string)
-        const connectionAdapter = {
-          getAccountInfo: async (pubkey: string) => {
-            const pk = new PublicKey(pubkey);
-            const info = await connection.getAccountInfo(pk);
-            return info ? { data: new Uint8Array(info.data) } : null;
-          },
-        };
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        const result = await lookupZkeyName(connectionAdapter as any, name);
+        const connectionAdapter = getConnectionAdapter();
+        const result = await lookupZkeyName(connectionAdapter, name);
         if (result) {
           setResolvedMeta({
             spendingPubKey: result.spendingPubKey,

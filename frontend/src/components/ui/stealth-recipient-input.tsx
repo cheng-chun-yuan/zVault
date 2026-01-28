@@ -1,8 +1,8 @@
 "use client";
 
 import { useState, useCallback } from "react";
-import { Connection } from "@solana/web3.js";
 import { Tag, Key, Check, AlertCircle, Info, Loader2 } from "lucide-react";
+import { getConnectionAdapter } from "@/lib/adapters/connection-adapter";
 import { cn } from "@/lib/utils";
 import { Tooltip } from "@/components/ui/tooltip";
 import {
@@ -51,20 +51,8 @@ export function StealthRecipientInput({
       if (recipientType === "zkey" || (!isLikelyHex && recipientType === "address")) {
         // Lookup .zkey name on-chain
         const name = trimmed.replace(/\.zkey$/i, "");
-        const connection = new Connection(
-          process.env.NEXT_PUBLIC_SOLANA_RPC_URL || "https://api.devnet.solana.com"
-        );
-        // Wrap connection to match SDK expected type (v2 Address is a string)
-        const connectionAdapter = {
-          getAccountInfo: async (pubkey: string) => {
-            const { PublicKey } = await import("@solana/web3.js");
-            const pk = new PublicKey(pubkey);
-            const info = await connection.getAccountInfo(pk);
-            return info ? { data: new Uint8Array(info.data) } : null;
-          },
-        };
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        const result = await lookupZkeyName(connectionAdapter as any, name);
+        const connectionAdapter = getConnectionAdapter();
+        const result = await lookupZkeyName(connectionAdapter, name);
         if (!result) {
           // If in address mode, also try as hex
           if (recipientType === "address") {
