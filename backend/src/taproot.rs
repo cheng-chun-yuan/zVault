@@ -1,9 +1,10 @@
 //! Taproot Address Generation with Embedded Commitment
 //!
-//! # WARNING: POC ONLY - NOT FOR PRODUCTION
+//! # Security Notes
 //!
-//! This module uses a deterministic key derived from a hardcoded seed.
-//! In production, keys MUST be generated via FROST DKG (Distributed Key Generation).
+//! - For production (mainnet): Keys MUST be generated via FROST DKG
+//! - For testing (devnet/testnet): Environment-derived keys can be used
+//! - NEVER use hardcoded keys with real funds
 //!
 //! # How it works:
 //!
@@ -49,22 +50,50 @@ impl Default for PoolKeys {
 }
 
 impl PoolKeys {
-    /// Create pool keys (deterministic for POC)
+    /// Create pool keys from environment configuration
     ///
-    /// # WARNING: POC ONLY
+    /// # Security
     ///
-    /// This uses a hardcoded seed. Anyone reading this source code can derive
-    /// the private key and steal all funds. In production, use FROST DKG.
+    /// - Production: Loads key from ZVAULT_BTC_SIGNER_KEY environment variable
+    /// - Devnet: Falls back to derived key if env var not set (with warning)
+    ///
+    /// For mainnet, FROST DKG should be used instead of single-key signing.
     pub fn new() -> Self {
-        // Print warning at runtime
-        eprintln!("WARNING: Using hardcoded POC keys - DO NOT USE WITH REAL FUNDS!");
+        use std::env;
 
         let secp = Secp256k1::new();
 
-        // Deterministic seed for POC (in production: FROST DKG)
-        let seed = sha256(b"zkbtc_pool_internal_key_v1");
-        let secret_key = SecretKey::from_slice(&seed)
-            .expect("32 bytes, within curve order");
+        // Try to load from environment variable first
+        let secret_key = match env::var("ZVAULT_BTC_SIGNER_KEY") {
+            Ok(hex_key) if !hex_key.is_empty() => {
+                let bytes = hex::decode(&hex_key)
+                    .expect("ZVAULT_BTC_SIGNER_KEY must be valid hex");
+                SecretKey::from_slice(&bytes)
+                    .expect("ZVAULT_BTC_SIGNER_KEY must be a valid secp256k1 secret key")
+            }
+            _ => {
+                // Check if we're on devnet (allow fallback) or production (error)
+                let network = env::var("ZVAULT_NETWORK").unwrap_or_else(|_| "devnet".to_string());
+                if network == "mainnet" {
+                    panic!(
+                        "ZVAULT_BTC_SIGNER_KEY environment variable is required for mainnet. \
+                         For production, use FROST DKG instead of single-key signing."
+                    );
+                }
+
+                // Devnet/testnet fallback with warning
+                eprintln!("WARNING: Using derived key for {} - DO NOT USE WITH REAL FUNDS!", network);
+                eprintln!("Set ZVAULT_BTC_SIGNER_KEY environment variable for custom keys.");
+
+                // Use environment-specific seed (not fully deterministic)
+                let seed_input = format!(
+                    "zvault_devnet_key_{}",
+                    env::var("HOSTNAME").unwrap_or_else(|_| "local".to_string())
+                );
+                let seed = sha256(seed_input.as_bytes());
+                SecretKey::from_slice(&seed).expect("32 bytes, within curve order")
+            }
+        };
 
         let keypair = Keypair::from_secret_key(&secp, &secret_key);
         let (internal_key, _parity) = keypair.x_only_public_key();

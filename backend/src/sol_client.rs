@@ -21,7 +21,7 @@ use std::str::FromStr;
 // Constants
 // ============================================================================
 
-/// Solana devnet RPC endpoint
+/// Solana devnet RPC endpoint (default, override via ZVaultConfig)
 pub const DEVNET_RPC: &str = "https://api.devnet.solana.com";
 
 /// Token-2022 program ID
@@ -32,17 +32,28 @@ pub const TOKEN_2022_PROGRAM_ID: Pubkey =
 pub const ATA_PROGRAM_ID: Pubkey =
     solana_sdk::pubkey!("ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL");
 
-/// zVault program ID (devnet)
-pub const PROGRAM_ID: &str = "AtztELZfz3GHA8hFQCv7aT9Mt47Xhknv3ZCNb3fmXsgf";
+// ============================================================================
+// Devnet Defaults (used when ZVAULT_NETWORK=devnet and no env vars set)
+// For production, all addresses MUST come from environment variables.
+// ============================================================================
 
-/// Pool state PDA (devnet)
-pub const POOL_STATE: &str = "8bbcVecB619HHsHn2TQMraJ8R8WjQjApdZY7h9JCJW7b";
+/// zVault program ID (devnet default)
+pub const DEVNET_PROGRAM_ID: &str = "AtztELZfz3GHA8hFQCv7aT9Mt47Xhknv3ZCNb3fmXsgf";
 
-/// Commitment tree PDA (devnet)
-pub const COMMITMENT_TREE: &str = "HtfDXZ5mBQNBdZrDxJMbXCDkyUqFdTDj7zAqo3aqrqiA";
+/// Pool state PDA (devnet default)
+pub const DEVNET_POOL_STATE: &str = "8bbcVecB619HHsHn2TQMraJ8R8WjQjApdZY7h9JCJW7b";
 
-/// zBTC mint address (devnet)
-pub const ZBTC_MINT: &str = "HiDyAcEBTS7SRiLA49BZ5B6XMBAksgwLEAHpvteR8vbV";
+/// Commitment tree PDA (devnet default)
+pub const DEVNET_COMMITMENT_TREE: &str = "HtfDXZ5mBQNBdZrDxJMbXCDkyUqFdTDj7zAqo3aqrqiA";
+
+/// zBTC mint address (devnet default)
+pub const DEVNET_ZBTC_MINT: &str = "HiDyAcEBTS7SRiLA49BZ5B6XMBAksgwLEAHpvteR8vbV";
+
+// Legacy aliases for backward compatibility
+pub const PROGRAM_ID: &str = DEVNET_PROGRAM_ID;
+pub const POOL_STATE: &str = DEVNET_POOL_STATE;
+pub const COMMITMENT_TREE: &str = DEVNET_COMMITMENT_TREE;
+pub const ZBTC_MINT: &str = DEVNET_ZBTC_MINT;
 
 // ============================================================================
 // Helper Functions
@@ -129,11 +140,28 @@ impl SolClient {
         Self {
             rpc,
             payer: None,
-            program_id: parse_pubkey(PROGRAM_ID).unwrap(),
-            pool_state: parse_pubkey(POOL_STATE).unwrap(),
-            commitment_tree: parse_pubkey(COMMITMENT_TREE).unwrap(),
-            zbtc_mint: parse_pubkey(ZBTC_MINT).unwrap(),
+            program_id: parse_pubkey(DEVNET_PROGRAM_ID).unwrap(),
+            pool_state: parse_pubkey(DEVNET_POOL_STATE).unwrap(),
+            commitment_tree: parse_pubkey(DEVNET_COMMITMENT_TREE).unwrap(),
+            zbtc_mint: parse_pubkey(DEVNET_ZBTC_MINT).unwrap(),
         }
+    }
+
+    /// Create new client from ZVaultConfig (preferred for production)
+    pub fn from_config(config: &crate::config::ZVaultConfig) -> Result<Self, SolError> {
+        let rpc = RpcClient::new_with_commitment(
+            config.solana_rpc.clone(),
+            CommitmentConfig::confirmed(),
+        );
+
+        Ok(Self {
+            rpc,
+            payer: None,
+            program_id: parse_pubkey(&config.program_id)?,
+            pool_state: parse_pubkey(&config.pool_state)?,
+            commitment_tree: parse_pubkey(&config.commitment_tree)?,
+            zbtc_mint: parse_pubkey(&config.zbtc_mint)?,
+        })
     }
 
     /// Set relayer keypair

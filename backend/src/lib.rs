@@ -20,12 +20,31 @@
 pub mod api;
 pub mod btc_client;
 pub mod btc_spv;
+pub mod config;
 pub mod deposit_tracker;
 pub mod esplora;
+pub mod logging;
+pub mod middleware;
 pub mod redemption;
 pub mod sol_client;
 pub mod stealth;
 pub mod taproot;
+
+// Re-exports: Configuration
+pub use config::{ConfigError, Network, SigningMode, ZVaultConfig};
+
+// Re-exports: Middleware
+pub use middleware::{
+    create_rate_limiter, validate_btc_address, validate_solana_address, validate_amount_sats,
+    validate_hex, ApiError, RateLimitConfig, SharedRateLimiter, ValidationResult,
+};
+
+// Re-exports: Logging
+pub use logging::{
+    init_logging, init_from_config, log_api_request, log_api_response, log_deposit_event,
+    log_security_event, log_withdrawal_event, generate_correlation_id, EventCategory,
+    LogEvent, LogLevel, LoggingError,
+};
 
 // Re-exports: Bitcoin signer
 pub use btc_client::{FrostConfig, Signer, SignerError, SingleKeySigner};
