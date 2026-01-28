@@ -1,75 +1,181 @@
 /**
- * Wallet Home Screen
+ * Wallet Home Screen - Production Ready
  *
- * Shows balance, recent notes, and quick actions.
- * Clean and simple like a normal wallet.
+ * Simplified wallet interface with:
+ * - Clean balance display
+ * - Quick action buttons
+ * - Recent activity list
+ *
+ * Best Practices:
+ * - Memoized list items with primitive props
+ * - Minimum 44px touch targets
+ * - borderCurve: 'continuous' for iOS-native corners
+ * - Proper accessibility labels
  */
 
-import { useCallback, memo } from 'react';
-import { StyleSheet, View, Text, Pressable, RefreshControl } from 'react-native';
+import { useCallback, memo, useMemo } from 'react';
+import {
+  StyleSheet,
+  View,
+  Text,
+  Pressable,
+  RefreshControl,
+  SafeAreaView,
+} from 'react-native';
 import { FlashList, ListRenderItemInfo } from '@shopify/flash-list';
 import { useRouter } from 'expo-router';
 import { FontAwesome } from '@expo/vector-icons';
 import { useColorScheme } from '@/components/useColorScheme';
 import { useWallet, WalletNote } from '@/contexts/WalletContext';
 import { usePhantom } from '@phantom/react-native-wallet-sdk';
+import { formatBtc as sdkFormatBtc } from '@zvault/sdk';
+import { ListSeparator } from '@/components/ui';
+import {
+  colors,
+  getThemeColors,
+  spacing,
+  radius,
+  typography,
+  touch,
+} from '@/components/ui/theme';
 
-function formatBtc(sats: number): string {
-  return (sats / 100_000_000).toFixed(8);
-}
+// ============================================================================
+// Utilities
+// ============================================================================
 
-function formatShortBtc(sats: number): string {
-  const btc = sats / 100_000_000;
+/** Format satoshis to BTC display */
+function formatBalance(sats: bigint): string {
+  const btc = Number(sats) / 100_000_000;
+  if (btc === 0) return '0.00';
   if (btc >= 1) return btc.toFixed(4);
-  if (btc >= 0.01) return btc.toFixed(6);
+  if (btc >= 0.001) return btc.toFixed(6);
   return btc.toFixed(8);
 }
 
-// Memoized note item component for better FlashList performance
+/** Format USD value */
+function formatUsd(sats: bigint, btcPrice: number = 95000): string {
+  const btc = Number(sats) / 100_000_000;
+  return btc * btcPrice < 1
+    ? (btc * btcPrice).toFixed(2)
+    : (btc * btcPrice).toLocaleString(undefined, {
+        minimumFractionDigits: 2,
+        maximumFractionDigits: 2,
+      });
+}
+
+// ============================================================================
+// Memoized Components
+// ============================================================================
+
+interface ActionButtonProps {
+  icon: string;
+  label: string;
+  onPress: () => void;
+  primary?: boolean;
+}
+
+/** Quick action button (Receive/Send) */
+const ActionButton = memo(function ActionButton({
+  icon,
+  label,
+  onPress,
+  primary,
+}: ActionButtonProps) {
+  return (
+    <Pressable
+      style={({ pressed }) => [
+        styles.actionButton,
+        primary && styles.actionButtonPrimary,
+        pressed && styles.actionButtonPressed,
+      ]}
+      onPress={onPress}
+      accessibilityLabel={label}
+      accessibilityRole="button"
+    >
+      <FontAwesome
+        name={icon as any}
+        size={20}
+        color={primary ? '#fff' : colors.primary}
+      />
+      <Text
+        style={[styles.actionButtonText, primary && styles.actionButtonTextPrimary]}
+      >
+        {label}
+      </Text>
+    </Pressable>
+  );
+});
+
+interface NoteItemProps {
+  amount: bigint;
+  status: 'available' | 'pending' | 'spent';
+  createdAt: number;
+  textColor: string;
+  mutedColor: string;
+  cardBg: string;
+}
+
+/** Memoized note item for FlashList */
 const NoteItem = memo(function NoteItem({
-  id,
   amount,
   status,
   createdAt,
-  cardBg,
   textColor,
   mutedColor,
-}: {
-  id: string;
-  amount: number;
-  status: 'available' | 'pending' | 'spent';
-  createdAt: number;
-  cardBg: string;
-  textColor: string;
-  mutedColor: string;
-}) {
+  cardBg,
+}: NoteItemProps) {
   const isAvailable = status === 'available';
+  const isPending = status === 'pending';
 
   return (
     <View style={[styles.noteItem, { backgroundColor: cardBg }]}>
       <View style={styles.noteLeft}>
-        <View style={[styles.noteIcon, { backgroundColor: isAvailable ? '#14F19520' : '#FF990020' }]}>
+        <View
+          style={[
+            styles.noteIcon,
+            {
+              backgroundColor: isAvailable
+                ? colors.successLight
+                : isPending
+                ? colors.warningLight
+                : colors.dark.divider,
+            },
+          ]}
+        >
           <FontAwesome
-            name={isAvailable ? 'check' : 'clock-o'}
+            name={isAvailable ? 'check' : isPending ? 'clock-o' : 'times'}
             size={14}
-            color={isAvailable ? '#14F195' : '#FF9900'}
+            color={
+              isAvailable
+                ? colors.success
+                : isPending
+                ? colors.warning
+                : mutedColor
+            }
           />
         </View>
-        <View>
+        <View style={styles.noteInfo}>
           <Text style={[styles.noteAmount, { color: textColor }]}>
-            {formatShortBtc(amount)} BTC
+            {formatBalance(amount)} BTC
           </Text>
           <Text style={[styles.noteStatus, { color: mutedColor }]}>
-            {isAvailable ? 'Available' : 'Pending'}
+            {isAvailable ? 'Available' : isPending ? 'Confirming' : 'Spent'}
           </Text>
         </View>
       </View>
       <Text style={[styles.noteDate, { color: mutedColor }]}>
-        {new Date(createdAt).toLocaleDateString()}
+        {new Date(createdAt).toLocaleDateString(undefined, {
+          month: 'short',
+          day: 'numeric',
+        })}
       </Text>
     </View>
   );
 });
+
+// ============================================================================
+// Main Screen
+// ============================================================================
 
 export default function WalletScreen() {
   const { push } = useRouter();
@@ -89,322 +195,420 @@ export default function WalletScreen() {
     isLoading,
   } = useWallet();
 
-  const bgColor = isDark ? '#0a0a0a' : '#fff';
-  const cardBg = isDark ? '#151515' : '#f8f8f8';
-  const textColor = isDark ? '#fff' : '#000';
-  const mutedColor = isDark ? '#888' : '#666';
+  const theme = useMemo(() => getThemeColors(isDark), [isDark]);
 
-  // Callbacks destructured early for React Compiler
+  // Stable callbacks
   const handleReceive = useCallback(() => push('/receive'), [push]);
   const handleSend = useCallback(() => push('/send'), [push]);
-  const handleDemo = useCallback(() => addDemoNote(100000), [addDemoNote]);
 
-  // Render item for FlashList - pass primitives for memoization
+  // Render list item
   const renderItem = useCallback(
     ({ item }: ListRenderItemInfo<WalletNote>) => (
       <NoteItem
-        id={item.id}
         amount={item.amount}
         status={item.status}
         createdAt={item.createdAt}
-        cardBg={cardBg}
-        textColor={textColor}
-        mutedColor={mutedColor}
+        textColor={theme.text}
+        mutedColor={theme.textMuted}
+        cardBg={theme.card}
       />
     ),
-    [cardBg, textColor, mutedColor]
+    [theme]
   );
 
   const keyExtractor = useCallback((item: WalletNote) => item.id, []);
 
-  // Not connected - show connect button
+  // ========== NOT CONNECTED ==========
   if (!isConnected) {
     return (
-      <View style={[styles.container, { backgroundColor: bgColor }]}>
+      <SafeAreaView style={[styles.container, { backgroundColor: theme.background }]}>
         <View style={styles.centerContent}>
-          <FontAwesome name="lock" size={64} color="#9945FF" />
-          <Text style={[styles.title, { color: textColor }]}>zVault</Text>
-          <Text style={[styles.subtitle, { color: mutedColor }]}>
+          {/* Logo */}
+          <View style={styles.logoContainer}>
+            <FontAwesome name="shield" size={48} color={colors.primary} />
+          </View>
+
+          {/* Title */}
+          <Text style={[styles.heroTitle, { color: theme.text }]}>zVault</Text>
+          <Text style={[styles.heroSubtitle, { color: theme.textSecondary }]}>
             Private Bitcoin Wallet
           </Text>
+
+          {/* Connect Button */}
           <Pressable
-            style={styles.primaryButton}
+            style={({ pressed }) => [
+              styles.connectButton,
+              pressed && styles.buttonPressed,
+            ]}
             onPress={showLoginOptions}
+            accessibilityLabel="Connect Phantom Wallet"
+            accessibilityRole="button"
           >
             <FontAwesome name="bolt" size={18} color="#fff" />
-            <Text style={styles.buttonText}>Connect Wallet</Text>
+            <Text style={styles.connectButtonText}>Connect Wallet</Text>
           </Pressable>
+
+          {/* Security badge */}
+          <View style={styles.securityBadge}>
+            <FontAwesome name="lock" size={12} color={colors.success} />
+            <Text style={[styles.securityText, { color: theme.textMuted }]}>
+              Self-custodial & Private
+            </Text>
+          </View>
         </View>
-      </View>
+      </SafeAreaView>
     );
   }
 
-  // Connected but keys not derived
+  // ========== KEYS NOT DERIVED ==========
   if (!keysDerived) {
     return (
-      <View style={[styles.container, { backgroundColor: bgColor }]}>
+      <SafeAreaView style={[styles.container, { backgroundColor: theme.background }]}>
         <View style={styles.centerContent}>
-          <FontAwesome name="key" size={64} color="#9945FF" />
-          <Text style={[styles.title, { color: textColor }]}>Setup Keys</Text>
-          <Text style={[styles.subtitle, { color: mutedColor, textAlign: 'center', paddingHorizontal: 32 }]}>
+          <View style={[styles.logoContainer, { backgroundColor: colors.primaryLight }]}>
+            <FontAwesome name="key" size={32} color={colors.primary} />
+          </View>
+
+          <Text style={[styles.heroTitle, { color: theme.text }]}>Setup Keys</Text>
+          <Text
+            style={[
+              styles.heroSubtitle,
+              { color: theme.textSecondary, textAlign: 'center', paddingHorizontal: spacing['3xl'] },
+            ]}
+          >
             Sign a message to derive your private viewing and spending keys
           </Text>
+
           <Pressable
-            style={styles.primaryButton}
+            style={({ pressed }) => [
+              styles.connectButton,
+              pressed && styles.buttonPressed,
+              isDerivingKeys && styles.buttonDisabled,
+            ]}
             onPress={deriveKeys}
             disabled={isDerivingKeys}
+            accessibilityLabel="Derive Keys"
+            accessibilityRole="button"
           >
             {isDerivingKeys ? (
-              <Text style={styles.buttonText}>Signing...</Text>
+              <Text style={styles.connectButtonText}>Signing...</Text>
             ) : (
               <>
                 <FontAwesome name="pencil" size={18} color="#fff" />
-                <Text style={styles.buttonText}>Derive Keys</Text>
+                <Text style={styles.connectButtonText}>Derive Keys</Text>
               </>
             )}
           </Pressable>
         </View>
-      </View>
+      </SafeAreaView>
     );
   }
 
-  // Header component for FlashList
+  // ========== MAIN WALLET VIEW ==========
   const ListHeader = (
-    <>
+    <View style={styles.header}>
       {/* Balance Card */}
-      <View style={[styles.balanceCard, { backgroundColor: '#9945FF' }]}>
-        <Text style={styles.balanceLabel}>Total Balance</Text>
-        <Text style={styles.balanceAmount}>{formatBtc(totalBalance)} BTC</Text>
-        <Text style={styles.balanceUsd}>
-          ≈ ${((totalBalance / 100_000_000) * 95000).toLocaleString()} USD
+      <View style={[styles.balanceCard, { backgroundColor: theme.card }]}>
+        <Text style={[styles.balanceLabel, { color: theme.textMuted }]}>
+          Total Balance
+        </Text>
+        <Text style={[styles.balanceAmount, { color: theme.text }]}>
+          {formatBalance(totalBalance)}
+          <Text style={styles.balanceCurrency}> BTC</Text>
+        </Text>
+        <Text style={[styles.balanceUsd, { color: theme.textSecondary }]}>
+          ≈ ${formatUsd(totalBalance)} USD
         </Text>
 
-        {/* Quick Actions */}
-        <View style={styles.quickActions}>
-          <Pressable style={styles.quickAction} onPress={handleReceive}>
-            <View style={styles.quickActionIcon}>
-              <FontAwesome name="arrow-down" size={16} color="#9945FF" />
-            </View>
-            <Text style={styles.quickActionText}>Receive</Text>
-          </Pressable>
-
-          <Pressable style={styles.quickAction} onPress={handleSend}>
-            <View style={styles.quickActionIcon}>
-              <FontAwesome name="arrow-up" size={16} color="#9945FF" />
-            </View>
-            <Text style={styles.quickActionText}>Send</Text>
-          </Pressable>
-
-          <Pressable style={styles.quickAction} onPress={handleDemo}>
-            <View style={styles.quickActionIcon}>
-              <FontAwesome name="plus" size={16} color="#9945FF" />
-            </View>
-            <Text style={styles.quickActionText}>Demo</Text>
-          </Pressable>
+        {/* Action Buttons */}
+        <View style={styles.actionButtons}>
+          <ActionButton icon="arrow-down" label="Receive" onPress={handleReceive} />
+          <ActionButton icon="arrow-up" label="Send" onPress={handleSend} primary />
         </View>
       </View>
 
-      {/* Section Title */}
-      <Text style={[styles.sectionTitle, { color: textColor }]}>Your Notes</Text>
-    </>
-  );
-
-  // Footer component for FlashList
-  const ListFooter = (
-    <View style={[styles.privacyBadge, { backgroundColor: cardBg }]}>
-      <FontAwesome name="eye-slash" size={14} color="#14F195" />
-      <Text style={[styles.privacyText, { color: mutedColor }]}>
-        Your balance is private - only visible to you
-      </Text>
+      {/* Activity Header */}
+      {notes.length > 0 ? (
+        <View style={styles.sectionHeader}>
+          <Text style={[styles.sectionTitle, { color: theme.text }]}>Activity</Text>
+          <Pressable onPress={() => addDemoNote(100000)}>
+            <Text style={[styles.sectionAction, { color: colors.primary }]}>
+              + Demo
+            </Text>
+          </Pressable>
+        </View>
+      ) : null}
     </View>
   );
 
-  // Empty state component
   const ListEmpty = (
-    <View style={[styles.emptyState, { backgroundColor: cardBg }]}>
-      <FontAwesome name="inbox" size={32} color={mutedColor} />
-      <Text style={[styles.emptyText, { color: mutedColor }]}>
-        No zkBTC notes yet
+    <View style={[styles.emptyState, { backgroundColor: theme.card }]}>
+      <FontAwesome name="inbox" size={40} color={theme.textMuted} />
+      <Text style={[styles.emptyTitle, { color: theme.text }]}>No Activity Yet</Text>
+      <Text style={[styles.emptySubtitle, { color: theme.textMuted }]}>
+        Receive BTC to get started
       </Text>
-      <Text style={[styles.emptySubtext, { color: mutedColor }]}>
-        Tap "Demo" to add a test note
-      </Text>
+      <Pressable
+        style={({ pressed }) => [styles.emptyButton, pressed && styles.buttonPressed]}
+        onPress={handleReceive}
+      >
+        <Text style={styles.emptyButtonText}>Receive BTC</Text>
+      </Pressable>
     </View>
   );
 
-  // Full wallet view with FlashList
   return (
-    <View style={[styles.container, { backgroundColor: bgColor }]}>
+    <View style={[styles.container, { backgroundColor: theme.background }]}>
       <FlashList
         data={notes}
         renderItem={renderItem}
         keyExtractor={keyExtractor}
         contentContainerStyle={styles.listContent}
         ListHeaderComponent={ListHeader}
-        ListFooterComponent={ListFooter}
         ListEmptyComponent={ListEmpty}
-        ItemSeparatorComponent={() => <View style={styles.separator} />}
+        ItemSeparatorComponent={ListSeparator}
         refreshControl={
-          <RefreshControl refreshing={isLoading} onRefresh={refreshNotes} />
+          <RefreshControl
+            refreshing={isLoading}
+            onRefresh={refreshNotes}
+            tintColor={colors.primary}
+          />
         }
         contentInsetAdjustmentBehavior="automatic"
+        showsVerticalScrollIndicator={false}
       />
     </View>
   );
 }
+
+// ============================================================================
+// Styles
+// ============================================================================
 
 const styles = StyleSheet.create({
   container: {
     flex: 1,
   },
   listContent: {
-    padding: 16,
+    paddingHorizontal: spacing.lg,
+    paddingBottom: spacing['4xl'],
   },
+
+  // Center content (connect/setup screens)
   centerContent: {
     flex: 1,
     alignItems: 'center',
     justifyContent: 'center',
-    padding: 24,
-    gap: 16,
+    padding: spacing['2xl'],
+    gap: spacing.lg,
   },
-  title: {
-    fontSize: 28,
-    fontWeight: 'bold',
-    marginTop: 16,
+  logoContainer: {
+    width: 96,
+    height: 96,
+    borderRadius: radius['2xl'],
+    borderCurve: 'continuous',
+    backgroundColor: colors.primaryLight,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: spacing.sm,
   },
-  subtitle: {
-    fontSize: 16,
-    opacity: 0.7,
+  heroTitle: {
+    fontSize: typography['3xl'],
+    fontWeight: typography.bold,
+    letterSpacing: -0.5,
   },
-  primaryButton: {
+  heroSubtitle: {
+    fontSize: typography.lg,
+    lineHeight: typography.lg * typography.relaxed,
+  },
+  connectButton: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: '#9945FF',
-    paddingHorizontal: 32,
-    paddingVertical: 16,
-    borderRadius: 12,
+    backgroundColor: colors.primary,
+    paddingHorizontal: spacing['3xl'],
+    paddingVertical: spacing.lg,
+    borderRadius: radius.lg,
     borderCurve: 'continuous',
-    gap: 8,
-    marginTop: 24,
+    gap: spacing.sm,
+    marginTop: spacing.xl,
+    minWidth: 200,
+    minHeight: touch.buttonHeight,
   },
-  buttonText: {
+  connectButtonText: {
     color: '#fff',
-    fontSize: 16,
-    fontWeight: '600',
+    fontSize: typography.lg,
+    fontWeight: typography.semibold,
   },
+  buttonPressed: {
+    opacity: 0.85,
+    transform: [{ scale: 0.98 }],
+  },
+  buttonDisabled: {
+    opacity: 0.6,
+  },
+  securityBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.xs,
+    marginTop: spacing['2xl'],
+  },
+  securityText: {
+    fontSize: typography.sm,
+  },
+
+  // Header
+  header: {
+    paddingTop: spacing.lg,
+  },
+
+  // Balance Card
   balanceCard: {
-    padding: 24,
-    borderRadius: 20,
+    padding: spacing['2xl'],
+    borderRadius: radius.xl,
     borderCurve: 'continuous',
-    marginBottom: 24,
   },
   balanceLabel: {
-    color: 'rgba(255,255,255,0.7)',
-    fontSize: 14,
-    marginBottom: 4,
+    fontSize: typography.sm,
+    fontWeight: typography.medium,
+    textTransform: 'uppercase',
+    letterSpacing: 0.5,
   },
   balanceAmount: {
-    color: '#fff',
-    fontSize: 36,
-    fontWeight: 'bold',
-    fontFamily: 'SpaceMono',
+    fontSize: typography['5xl'],
+    fontWeight: typography.bold,
+    fontFamily: typography.mono,
+    marginTop: spacing.xs,
+    letterSpacing: -1,
+  },
+  balanceCurrency: {
+    fontSize: typography['2xl'],
+    fontWeight: typography.medium,
   },
   balanceUsd: {
-    color: 'rgba(255,255,255,0.7)',
-    fontSize: 14,
-    marginTop: 4,
+    fontSize: typography.md,
+    marginTop: spacing.xs,
   },
-  quickActions: {
+  actionButtons: {
     flexDirection: 'row',
-    justifyContent: 'space-around',
-    marginTop: 24,
-    paddingTop: 20,
-    borderTopWidth: 1,
-    borderTopColor: 'rgba(255,255,255,0.1)',
+    gap: spacing.md,
+    marginTop: spacing['2xl'],
   },
-  quickAction: {
-    alignItems: 'center',
-    gap: 8,
-  },
-  quickActionIcon: {
-    width: 48,
-    height: 48,
-    borderRadius: 24,
-    backgroundColor: '#fff',
+  actionButton: {
+    flex: 1,
+    flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
+    gap: spacing.sm,
+    paddingVertical: spacing.lg,
+    borderRadius: radius.lg,
+    borderCurve: 'continuous',
+    borderWidth: 1.5,
+    borderColor: colors.primary,
+    minHeight: touch.buttonHeight,
   },
-  quickActionText: {
+  actionButtonPrimary: {
+    backgroundColor: colors.primary,
+    borderColor: colors.primary,
+  },
+  actionButtonPressed: {
+    opacity: 0.85,
+    transform: [{ scale: 0.98 }],
+  },
+  actionButtonText: {
+    fontSize: typography.md,
+    fontWeight: typography.semibold,
+    color: colors.primary,
+  },
+  actionButtonTextPrimary: {
     color: '#fff',
-    fontSize: 12,
-    fontWeight: '500',
+  },
+
+  // Section Header
+  sectionHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginTop: spacing['2xl'],
+    marginBottom: spacing.md,
+    paddingHorizontal: spacing.xs,
   },
   sectionTitle: {
-    fontSize: 18,
-    fontWeight: '600',
-    marginBottom: 12,
+    fontSize: typography.lg,
+    fontWeight: typography.semibold,
   },
-  emptyState: {
-    padding: 32,
-    borderRadius: 16,
-    borderCurve: 'continuous',
-    alignItems: 'center',
-    gap: 8,
+  sectionAction: {
+    fontSize: typography.sm,
+    fontWeight: typography.medium,
   },
-  emptyText: {
-    fontSize: 16,
-    fontWeight: '500',
-  },
-  emptySubtext: {
-    fontSize: 14,
-  },
-  separator: {
-    height: 8,
-  },
+
+  // Note Item
   noteItem: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    padding: 16,
-    borderRadius: 12,
+    padding: spacing.lg,
+    borderRadius: radius.lg,
     borderCurve: 'continuous',
   },
   noteLeft: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 12,
+    gap: spacing.md,
   },
   noteIcon: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
+    width: 40,
+    height: 40,
+    borderRadius: radius.md,
+    borderCurve: 'continuous',
     alignItems: 'center',
     justifyContent: 'center',
+  },
+  noteInfo: {
+    gap: 2,
   },
   noteAmount: {
-    fontSize: 16,
-    fontWeight: '600',
-    fontFamily: 'SpaceMono',
+    fontSize: typography.md,
+    fontWeight: typography.semibold,
+    fontFamily: typography.mono,
   },
   noteStatus: {
-    fontSize: 12,
-    marginTop: 2,
+    fontSize: typography.xs,
   },
   noteDate: {
-    fontSize: 12,
+    fontSize: typography.xs,
   },
-  privacyBadge: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    padding: 12,
-    borderRadius: 8,
+
+  // Empty State
+  emptyState: {
+    padding: spacing['3xl'],
+    borderRadius: radius.xl,
     borderCurve: 'continuous',
-    gap: 8,
-    marginTop: 16,
+    alignItems: 'center',
+    gap: spacing.md,
+    marginTop: spacing.lg,
   },
-  privacyText: {
-    fontSize: 12,
+  emptyTitle: {
+    fontSize: typography.lg,
+    fontWeight: typography.semibold,
+    marginTop: spacing.sm,
+  },
+  emptySubtitle: {
+    fontSize: typography.base,
+    textAlign: 'center',
+  },
+  emptyButton: {
+    backgroundColor: colors.primary,
+    paddingHorizontal: spacing['2xl'],
+    paddingVertical: spacing.md,
+    borderRadius: radius.md,
+    borderCurve: 'continuous',
+    marginTop: spacing.md,
+    minHeight: touch.buttonHeightSm,
+  },
+  emptyButtonText: {
+    color: '#fff',
+    fontSize: typography.base,
+    fontWeight: typography.semibold,
   },
 });

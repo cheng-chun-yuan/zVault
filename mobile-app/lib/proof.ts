@@ -4,10 +4,23 @@
  * Uses mopro (NoirReactNative) for native Noir proof generation on mobile devices.
  * Achieves ~2-3 second proof times on modern iPhones.
  *
+ * SDK Integration:
+ * - Uses SDK for Merkle proof formatting
+ * - Uses SDK for nullifier hash computation
+ * - Native prover is still faster than WASM for mobile
+ *
  * @module lib/proof
  */
 
 import * as FileSystem from "expo-file-system/legacy";
+import {
+  proofToNoirFormat,
+  proofToOnChainFormat,
+  computeNullifier,
+  hashNullifier,
+  type MerkleProof as SDKMerkleProof,
+  type Note,
+} from '@zvault/sdk';
 
 // ============================================================================
 // Types
@@ -421,4 +434,69 @@ export function createEmptyMerkleProof(depth: number = 10): MerkleProof {
     pathElements: Array(depth).fill("0"),
     pathIndices: Array(depth).fill("0"),
   };
+}
+
+// ============================================================================
+// SDK Integration Helpers
+// ============================================================================
+
+/**
+ * Prepare claim inputs from an SDK Note and Merkle proof
+ *
+ * Uses SDK for nullifier computation, keeps native prover for actual proving.
+ */
+export function prepareClaimInputsFromNote(
+  note: Note,
+  merkleRoot: bigint,
+  merkleProof: SDKMerkleProof
+): ClaimProofInput {
+  // Use SDK to compute nullifier hash
+  const nullifierHash = hashNullifier(note.nullifier);
+
+  // Format merkle proof for Noir circuit
+  const noirProof = proofToNoirFormat(merkleProof);
+
+  return {
+    nullifier: note.nullifier.toString(),
+    secret: note.secret.toString(),
+    amount: note.amount.toString(),
+    merkleRoot: merkleRoot.toString(),
+    merkleProof: {
+      pathElements: noirProof.merkle_path,
+      pathIndices: noirProof.path_indices,
+    },
+  };
+}
+
+/**
+ * Format proof for on-chain verification
+ *
+ * Converts native proof output to format expected by Solana program.
+ */
+export function formatProofForOnChain(
+  proof: string,
+  publicInputs: string[]
+): { proof: Uint8Array; publicInputs: bigint[] } {
+  // Proof is hex-encoded, convert to bytes
+  const proofBytes = hexToBytes(proof);
+
+  // Public inputs are decimal strings, convert to bigint
+  const inputs = publicInputs.map((s) => BigInt(s));
+
+  return {
+    proof: proofBytes,
+    publicInputs: inputs,
+  };
+}
+
+/**
+ * Convert hex string to Uint8Array
+ */
+function hexToBytes(hex: string): Uint8Array {
+  const cleanHex = hex.startsWith('0x') ? hex.slice(2) : hex;
+  const bytes = new Uint8Array(cleanHex.length / 2);
+  for (let i = 0; i < cleanHex.length; i += 2) {
+    bytes[i / 2] = parseInt(cleanHex.substr(i, 2), 16);
+  }
+  return bytes;
 }
