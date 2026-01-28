@@ -3,13 +3,18 @@
  *
  * Provides high-level APIs for the complete zVault flow:
  *
- * ## 6 Main Functions
- * 1. deposit() - Generate deposit credentials (taproot address + claim link)
- * 2. withdraw() - Request BTC withdrawal (burn zBTC)
- * 3. privateClaim() - Claim zBTC tokens with ZK proof
- * 4. privateSplit() - Split one commitment into two outputs
- * 5. sendLink() - Create global claim link (off-chain)
- * 6. sendStealth() - Send to specific recipient via stealth ECDH
+ * ## DEPOSIT (BTC → zkBTC)
+ * - deposit() - Generate deposit credentials (taproot address + claim link)
+ * - claimNote() - Claim zkBTC tokens with ZK proof
+ * - sendStealth() - Send to specific recipient via stealth ECDH
+ *
+ * ## TRANSFER (zkBTC → Someone)
+ * - splitNote() - Split one note into two outputs
+ * - createClaimLink() - Create shareable claim URL (off-chain)
+ * - sendPrivate() - Transfer existing zkBTC to recipient's stealth address
+ *
+ * ## WITHDRAW (zkBTC → BTC)
+ * - withdraw() - Request BTC withdrawal (burn zkBTC)
  *
  * Note: This SDK uses Noir circuits with Poseidon2 hashing for ZK proofs.
  */
@@ -34,15 +39,17 @@ import { bigintToBytes } from "./crypto";
 import {
   deposit as apiDeposit,
   withdraw as apiWithdraw,
-  privateClaim as apiPrivateClaim,
-  privateSplit as apiPrivateSplit,
-  sendLink as apiSendLink,
+  claimNote as apiClaimNote,
+  splitNote as apiSplitNote,
+  createClaimLinkFromNote as apiCreateClaimLink,
   sendStealth as apiSendStealth,
+  sendPrivate as apiSendPrivate,
   type DepositResult,
   type WithdrawResult,
   type ClaimResult as ApiClaimResultType,
   type SplitResult as ApiSplitResultType,
   type StealthResult,
+  type StealthTransferResult,
   type ApiClientConfig,
   type StealthMetaAddress,
 } from "./api";
@@ -100,12 +107,19 @@ interface LocalMerkleState {
  * const client = createClient(connection);
  * client.setPayer(myKeypair);
  *
- * // Generate deposit credentials
+ * // 1. Generate deposit credentials
  * const deposit = await client.deposit(100_000n);
  * console.log('Send BTC to:', deposit.taprootAddress);
  *
- * // Later: claim zBTC
- * const result = await client.privateClaim(deposit.claimLink);
+ * // 2. Claim zkBTC after BTC confirmed
+ * const claimed = await client.claimNote(deposit.claimLink);
+ *
+ * // 3. Split into two notes
+ * const { output1, output2 } = await client.splitNote(deposit.note, 60_000n);
+ *
+ * // 4. Send via link or stealth
+ * const link = client.createClaimLink(output1);
+ * await client.sendPrivate(output2, recipientMeta);
  * ```
  */
 export class ZVaultClient {
@@ -146,11 +160,11 @@ export class ZVaultClient {
   }
 
   // ==========================================================================
-  // 6 Main Functions
+  // DEPOSIT Functions (BTC → zkBTC)
   // ==========================================================================
 
   /**
-   * 1. DEPOSIT - Generate deposit credentials
+   * Generate deposit credentials
    *
    * Creates new secrets, derives taproot address, and creates claim link.
    * User should send BTC to the taproot address externally.
@@ -164,9 +178,75 @@ export class ZVaultClient {
   }
 
   /**
-   * 2. WITHDRAW - Request BTC withdrawal
+   * Claim zkBTC with ZK proof
    *
-   * Burns zBTC and creates redemption request. Relayer will send BTC.
+   * Claims zkBTC tokens to wallet using ZK proof of commitment ownership.
+   */
+  async claimNote(claimLinkOrNote: string | Note): Promise<ApiClaimResultType> {
+    let note: Note;
+    if (typeof claimLinkOrNote === "string") {
+      const parsed = parseClaimLink(claimLinkOrNote);
+      if (!parsed) {
+        throw new Error("Invalid claim link");
+      }
+      note = parsed;
+    } else {
+      note = claimLinkOrNote;
+    }
+
+    const merkleProof = this.generateMerkleProofForNote(note);
+    return apiClaimNote(this.getApiConfig(), note, merkleProof);
+  }
+
+  /**
+   * Send to specific recipient via dual-key ECDH (for new deposits)
+   */
+  async sendStealth(
+    recipientMeta: StealthMetaAddress,
+    amountSats: bigint,
+    leafIndex: number = 0
+  ): Promise<StealthResult> {
+    return apiSendStealth(this.getApiConfig(), recipientMeta, amountSats, leafIndex);
+  }
+
+  // ==========================================================================
+  // TRANSFER Functions (zkBTC → Someone)
+  // ==========================================================================
+
+  /**
+   * Split one note into two outputs
+   */
+  async splitNote(inputNote: Note, amount1: bigint): Promise<ApiSplitResultType> {
+    const merkleProof = this.generateMerkleProofForNote(inputNote);
+    return apiSplitNote(this.getApiConfig(), inputNote, amount1, merkleProof);
+  }
+
+  /**
+   * Create shareable claim link (off-chain)
+   */
+  createClaimLink(note: Note, baseUrl?: string): string {
+    return apiCreateClaimLink(note, baseUrl);
+  }
+
+  /**
+   * Send existing zkBTC to recipient's stealth address (private transfer)
+   */
+  async sendPrivate(
+    inputNote: Note,
+    recipientMeta: StealthMetaAddress
+  ): Promise<StealthTransferResult> {
+    const merkleProof = this.generateMerkleProofForNote(inputNote);
+    return apiSendPrivate(this.getApiConfig(), inputNote, recipientMeta, merkleProof);
+  }
+
+  // ==========================================================================
+  // WITHDRAW Functions (zkBTC → BTC)
+  // ==========================================================================
+
+  /**
+   * Request BTC withdrawal
+   *
+   * Burns zkBTC and creates redemption request. Relayer will send BTC.
    */
   async withdraw(
     note: Note,
@@ -181,55 +261,6 @@ export class ZVaultClient {
       withdrawAmount,
       merkleProof
     );
-  }
-
-  /**
-   * 3. PRIVATE_CLAIM - Claim zBTC with ZK proof
-   *
-   * Claims zBTC tokens to wallet using ZK proof of commitment ownership.
-   */
-  async privateClaim(claimLinkOrNote: string | Note): Promise<ApiClaimResultType> {
-    let note: Note;
-    if (typeof claimLinkOrNote === "string") {
-      const parsed = parseClaimLink(claimLinkOrNote);
-      if (!parsed) {
-        throw new Error("Invalid claim link");
-      }
-      note = parsed;
-    } else {
-      note = claimLinkOrNote;
-    }
-
-    const merkleProof = this.generateMerkleProofForNote(note);
-    return apiPrivateClaim(this.getApiConfig(), note, merkleProof);
-  }
-
-  /**
-   * 4. PRIVATE_SPLIT - Split one commitment into two
-   *
-   * Splits an input commitment into two outputs.
-   */
-  async privateSplit(inputNote: Note, amount1: bigint): Promise<ApiSplitResultType> {
-    const merkleProof = this.generateMerkleProofForNote(inputNote);
-    return apiPrivateSplit(this.getApiConfig(), inputNote, amount1, merkleProof);
-  }
-
-  /**
-   * 5. SEND_LINK - Create global claim link (off-chain)
-   */
-  sendLink(note: Note, baseUrl?: string): string {
-    return apiSendLink(note, baseUrl);
-  }
-
-  /**
-   * 6. SEND_STEALTH - Send to specific recipient via dual-key ECDH
-   */
-  async sendStealth(
-    recipientMeta: StealthMetaAddress,
-    amountSats: bigint,
-    leafIndex: number = 0
-  ): Promise<StealthResult> {
-    return apiSendStealth(this.getApiConfig(), recipientMeta, amountSats, leafIndex);
   }
 
   // ==========================================================================

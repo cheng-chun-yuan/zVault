@@ -1,14 +1,20 @@
 /**
  * ZVault Simplified API
  *
- * 7 main user-facing functions:
+ * Organized into categories:
+ *
+ * DEPOSIT (BTC → zkBTC):
  * - deposit: Generate deposit credentials (taproot address + claim link)
- * - withdraw: Request BTC withdrawal (burn zBTC)
- * - privateClaim: Claim zBTC tokens with ZK proof
- * - privateSplit: Split one commitment into two outputs
- * - sendLink: Create global claim link (anyone with URL can claim)
- * - sendStealth: Send to specific recipient via stealth ECDH
- * - transferStealth: Transfer existing zkBTC to recipient's stealth address (with ZK proof)
+ * - claimNote: Claim zkBTC tokens with ZK proof
+ * - sendStealth: Send to specific recipient via stealth ECDH (new deposit)
+ *
+ * TRANSFER (zkBTC → Someone):
+ * - splitNote: Split one note into two outputs
+ * - createClaimLink: Create shareable claim URL (off-chain)
+ * - sendPrivate: Transfer existing zkBTC to recipient's stealth address (with ZK proof)
+ *
+ * WITHDRAW (zkBTC → BTC):
+ * - withdraw: Request BTC withdrawal (burn zkBTC)
  *
  * @module api
  */
@@ -65,7 +71,7 @@ export interface WithdrawResult {
 }
 
 /**
- * Result from privateClaim()
+ * Result from claimNote()
  */
 export interface ClaimResult {
   /** Transaction signature */
@@ -77,7 +83,7 @@ export interface ClaimResult {
 }
 
 /**
- * Result from privateSplit()
+ * Result from splitNote()
  */
 export interface SplitResult {
   /** Transaction signature */
@@ -103,7 +109,7 @@ export interface StealthResult {
 }
 
 /**
- * Result from transferStealth()
+ * Result from sendPrivate()
  */
 export interface StealthTransferResult {
   /** Transaction signature */
@@ -364,21 +370,21 @@ export async function withdraw(
 }
 
 // ============================================================================
-// 3. PRIVATE_CLAIM
+// 3. CLAIM_NOTE
 // ============================================================================
 
 /**
- * Claim zBTC tokens with ZK proof
+ * Claim zkBTC tokens with ZK proof
  *
  * Parses claim link (or uses provided note), generates a claim proof,
- * and mints zBTC tokens to the user's wallet.
+ * and mints zkBTC tokens to the user's wallet.
  *
  * **Flow:**
  * 1. Parse claim link to recover note (if link provided)
  * 2. Get merkle proof for commitment
  * 3. Generate claim ZK proof
  * 4. Call CLAIM instruction
- * 5. Program verifies proof, mints zBTC
+ * 5. Program verifies proof, mints zkBTC
  *
  * @param config - Client configuration
  * @param claimLinkOrNote - Claim link URL or Note object
@@ -388,13 +394,13 @@ export async function withdraw(
  * @example
  * ```typescript
  * // Claim from link
- * const result = await privateClaim(config, 'https://zkbtc.app/claim?note=...');
+ * const result = await claimNote(config, 'https://zkbtc.app/claim?note=...');
  *
  * // Claim from note
- * const result = await privateClaim(config, myNote);
+ * const result = await claimNote(config, myNote);
  * ```
  */
-export async function privateClaim(
+export async function claimNote(
   config: ApiClientConfig,
   claimLinkOrNote: string | Note,
   merkleProof?: MerkleProof
@@ -457,11 +463,11 @@ export async function privateClaim(
 }
 
 // ============================================================================
-// 4. PRIVATE_SPLIT
+// 4. SPLIT_NOTE
 // ============================================================================
 
 /**
- * Split one commitment into two outputs
+ * Split one note into two outputs
  *
  * Generates a split proof and adds two new commitments to the tree
  * while spending the input commitment.
@@ -481,16 +487,16 @@ export async function privateClaim(
  * @example
  * ```typescript
  * // Split 1 BTC into 0.3 + 0.7
- * const { output1, output2 } = await privateSplit(config, myNote, 30_000_000n);
+ * const { output1, output2 } = await splitNote(config, myNote, 30_000_000n);
  *
  * // Send 0.3 to Alice via stealth
- * await sendStealth(config, output1, alicePubKey);
+ * await sendPrivate(config, output1, alicePubKey);
  *
  * // Keep 0.7 as claim link
- * const myLink = sendLink(output2);
+ * const myLink = createClaimLink(output2);
  * ```
  */
-export async function privateSplit(
+export async function splitNote(
   config: ApiClientConfig,
   inputNote: Note,
   amount1: bigint,
@@ -553,11 +559,11 @@ export async function privateSplit(
 }
 
 // ============================================================================
-// 5. SEND_LINK (Claim Link Mode)
+// 5. CREATE_CLAIM_LINK (Off-chain URL Encoding)
 // ============================================================================
 
 /**
- * Create a global claim link
+ * Create a shareable claim link (off-chain)
  *
  * Encodes a note into a shareable URL. Anyone with the link can claim.
  * This is purely client-side - no on-chain transaction.
@@ -570,14 +576,14 @@ export async function privateSplit(
  *
  * @example
  * ```typescript
- * const link = sendLink(myNote);
+ * const link = createClaimLinkFromNote(myNote);
  * // => "https://zkbtc.app/claim?note=eyJhbW91bnQ..."
  *
  * // Share link with recipient
- * // Recipient calls: await privateClaim(config, link);
+ * // Recipient calls: await claimNote(config, link);
  * ```
  */
-export function sendLink(note: Note, baseUrl?: string): string {
+export function createClaimLinkFromNote(note: Note, baseUrl?: string): string {
   return createClaimLink(note, baseUrl);
 }
 
@@ -671,11 +677,11 @@ export async function sendStealth(
 }
 
 // ============================================================================
-// 7. TRANSFER_STEALTH (Private Transfer to Stealth Address)
+// 7. SEND_PRIVATE (Private Transfer to Stealth Address)
 // ============================================================================
 
 /**
- * Transfer existing zkBTC commitment to recipient's stealth address
+ * Send existing zkBTC to recipient's stealth address (private transfer)
  *
  * Privately transfers an existing commitment to a recipient using stealth
  * address derivation. Requires ZK proof of ownership of the input commitment.
@@ -701,14 +707,14 @@ export async function sendStealth(
  * @example
  * ```typescript
  * // Transfer existing note to Alice's stealth address
- * const result = await transferStealth(config, myNote, aliceMetaAddress, merkleProof);
+ * const result = await sendPrivate(config, myNote, aliceMetaAddress, merkleProof);
  *
  * // Alice scans and finds the deposit
  * const found = await scanAnnouncements(aliceKeys, announcements);
  * // Alice can now claim with her spending key
  * ```
  */
-export async function transferStealth(
+export async function sendPrivate(
   config: ApiClientConfig,
   inputNote: Note,
   recipientMeta: StealthMetaAddress,

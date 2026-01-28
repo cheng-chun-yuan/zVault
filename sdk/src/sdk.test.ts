@@ -1,0 +1,349 @@
+/**
+ * zVault SDK Tests (Consolidated)
+ *
+ * Core tests for all SDK functionality:
+ * - DEPOSIT: deposit, claimNote, sendStealth
+ * - TRANSFER: splitNote, createClaimLinkFromNote, sendPrivate
+ * - WITHDRAW: withdraw
+ * - KEYS: deriveKeysFromSeed, createStealthMetaAddress
+ * - YIELD POOL: createStealthPoolDeposit, scanPoolAnnouncements
+ * - NAME REGISTRY: registerName utilities
+ */
+
+import { expect, test, describe } from "bun:test";
+import { Connection, Keypair, PublicKey, SystemProgram } from "@solana/web3.js";
+
+// Core SDK imports
+import { deposit, claimNote, splitNote, sendStealth, sendPrivate, createClaimLinkFromNote } from "./api";
+import { generateNote, formatBtc, parseBtc } from "./note";
+import { createClaimLink, parseClaimLink } from "./claim-link";
+import { deriveKeysFromSeed, createStealthMetaAddress, encodeStealthMetaAddress, decodeStealthMetaAddress } from "./keys";
+import { createStealthDeposit, scanAnnouncements } from "./stealth";
+import { createStealthPoolDeposit, scanPoolAnnouncements, calculateYield, calculateTotalValue } from "./yield-pool";
+import { createEmptyMerkleProof, TREE_DEPTH } from "./merkle";
+import { poseidon2Hash } from "./poseidon2";
+import { generateKeyPair, pointMul, GRUMPKIN_GENERATOR, isOnCurve } from "./grumpkin";
+import { buildRegisterNameData, hashName, isValidName, NAME_REGISTRY_SEED, ZVAULT_PROGRAM_ID } from "./name-registry";
+import { createClient, ZVaultClient } from "./zvault";
+
+// Test constants
+const TEST_SEED = new Uint8Array(32).fill(0x42);
+const POOL_ID = new Uint8Array(8).fill(0x01);
+
+// ============================================================================
+// 1. DEPOSIT Functions (BTC → zkBTC)
+// ============================================================================
+
+describe("DEPOSIT", () => {
+  test("deposit() generates valid credentials", async () => {
+    const result = await deposit(100_000n, "testnet");
+
+    expect(result.note.amount).toBe(100_000n);
+    expect(result.taprootAddress).toMatch(/^tb1p/);
+    expect(result.claimLink).toContain("zvault.app/claim");
+    expect(result.displayAmount).toBe("0.00100000 BTC");
+  });
+
+  test("different deposits have unique addresses", async () => {
+    const d1 = await deposit(100_000n, "testnet");
+    const d2 = await deposit(100_000n, "testnet");
+    expect(d1.taprootAddress).not.toBe(d2.taprootAddress);
+  });
+
+  test("claimNote/sendStealth functions exist", () => {
+    expect(typeof claimNote).toBe("function");
+    expect(typeof sendStealth).toBe("function");
+  });
+});
+
+// ============================================================================
+// 2. TRANSFER Functions (zkBTC → Someone)
+// ============================================================================
+
+describe("TRANSFER", () => {
+  test("createClaimLinkFromNote() creates parseable link", () => {
+    const note = generateNote(50_000n);
+    const link = createClaimLinkFromNote(note);
+
+    expect(link).toContain("zvault.app/claim");
+    const parsed = parseClaimLink(link);
+    expect(parsed?.amount).toBe(note.amount);
+  });
+
+  test("note serialization roundtrip", () => {
+    const note = generateNote(100_000n);
+    const link = createClaimLink(note);
+    const parsed = parseClaimLink(link);
+
+    expect(parsed?.nullifier).toBe(note.nullifier);
+    expect(parsed?.secret).toBe(note.secret);
+  });
+
+  test("splitNote/sendPrivate functions exist", () => {
+    expect(typeof splitNote).toBe("function");
+    expect(typeof sendPrivate).toBe("function");
+  });
+});
+
+// ============================================================================
+// 3. KEY & STEALTH Functions
+// ============================================================================
+
+describe("KEY & STEALTH", () => {
+  test("deriveKeysFromSeed() is deterministic", () => {
+    const k1 = deriveKeysFromSeed(TEST_SEED);
+    const k2 = deriveKeysFromSeed(TEST_SEED);
+    expect(k1.spendingPrivKey).toBe(k2.spendingPrivKey);
+    expect(k1.viewingPrivKey).toBe(k2.viewingPrivKey);
+  });
+
+  test("different seeds produce different keys", () => {
+    const k1 = deriveKeysFromSeed(new Uint8Array(32).fill(0x11));
+    const k2 = deriveKeysFromSeed(new Uint8Array(32).fill(0x22));
+    expect(k1.spendingPrivKey).not.toBe(k2.spendingPrivKey);
+  });
+
+  test("createStealthMetaAddress() creates 33-byte compressed keys", () => {
+    const keys = deriveKeysFromSeed(TEST_SEED);
+    const meta = createStealthMetaAddress(keys);
+
+    expect(meta.spendingPubKey.length).toBe(33);
+    expect(meta.viewingPubKey.length).toBe(33);
+  });
+
+  test("stealth meta-address encode/decode roundtrip", () => {
+    const keys = deriveKeysFromSeed(TEST_SEED);
+    const meta = createStealthMetaAddress(keys);
+    const encoded = encodeStealthMetaAddress(meta);
+    const decoded = decodeStealthMetaAddress(encoded);
+
+    expect(decoded.spendingPubKey).toEqual(meta.spendingPubKey);
+    expect(decoded.viewingPubKey).toEqual(meta.viewingPubKey);
+  });
+
+  test("createStealthDeposit() creates valid deposit", async () => {
+    const keys = deriveKeysFromSeed(TEST_SEED);
+    const meta = createStealthMetaAddress(keys);
+    const deposit = await createStealthDeposit(meta, 100_000n);
+
+    expect(deposit.commitment.length).toBe(32);
+    expect(deposit.ephemeralPub.length).toBe(33);
+  });
+
+  test("scanAnnouncements() finds own deposits", async () => {
+    const keys = deriveKeysFromSeed(TEST_SEED);
+    const meta = createStealthMetaAddress(keys);
+    const deposit = await createStealthDeposit(meta, 50_000n);
+
+    const found = await scanAnnouncements(keys, [{
+      ephemeralPub: deposit.ephemeralPub,
+      amountSats: deposit.amountSats,
+      commitment: deposit.commitment,
+      leafIndex: 0,
+    }]);
+
+    expect(found.length).toBe(1);
+    expect(found[0].amount).toBe(50_000n);
+  });
+
+  test("wrong keys cannot find deposits", async () => {
+    const realKeys = deriveKeysFromSeed(new Uint8Array(32).fill(0x11));
+    const wrongKeys = deriveKeysFromSeed(new Uint8Array(32).fill(0x22));
+    const meta = createStealthMetaAddress(realKeys);
+    const deposit = await createStealthDeposit(meta, 50_000n);
+
+    const found = await scanAnnouncements(wrongKeys, [{
+      ephemeralPub: deposit.ephemeralPub,
+      amountSats: deposit.amountSats,
+      commitment: deposit.commitment,
+      leafIndex: 0,
+    }]);
+
+    expect(found.length).toBe(0);
+  });
+});
+
+// ============================================================================
+// 4. YIELD POOL Functions
+// ============================================================================
+
+describe("YIELD POOL", () => {
+  test("createStealthPoolDeposit() creates valid position", () => {
+    const keys = deriveKeysFromSeed(TEST_SEED);
+    const meta = createStealthMetaAddress(keys);
+
+    const pos = createStealthPoolDeposit(meta, 1_000_000n, 10n, POOL_ID);
+
+    expect(pos.principal).toBe(1_000_000n);
+    expect(pos.depositEpoch).toBe(10n);
+    expect(pos.commitment).toBeGreaterThan(0n);
+  });
+
+  test("scanPoolAnnouncements() finds own positions", () => {
+    const keys = deriveKeysFromSeed(TEST_SEED);
+    const meta = createStealthMetaAddress(keys);
+    const pos = createStealthPoolDeposit(meta, 1_000_000n, 10n, POOL_ID);
+
+    const found = scanPoolAnnouncements(keys, [{
+      poolId: pos.poolId,
+      ephemeralPub: pos.ephemeralPub,
+      principal: pos.principal,
+      depositEpoch: pos.depositEpoch,
+      poolCommitment: pos.commitmentBytes,
+      leafIndex: 0,
+      createdAt: BigInt(Date.now()),
+    }]);
+
+    expect(found.length).toBe(1);
+  });
+
+  test("calculateYield() computes correctly", () => {
+    // 1 BTC, 10 epochs, 5% rate
+    const yield_ = calculateYield(100_000_000n, 10n, 20n, 500);
+    expect(yield_).toBe(50_000_000n); // 0.5 BTC
+  });
+
+  test("calculateTotalValue() returns principal + yield", () => {
+    const keys = deriveKeysFromSeed(TEST_SEED);
+    const meta = createStealthMetaAddress(keys);
+    const pos = createStealthPoolDeposit(meta, 100_000_000n, 10n, POOL_ID);
+
+    const found = scanPoolAnnouncements(keys, [{
+      poolId: pos.poolId,
+      ephemeralPub: pos.ephemeralPub,
+      principal: pos.principal,
+      depositEpoch: pos.depositEpoch,
+      poolCommitment: pos.commitmentBytes,
+      leafIndex: 0,
+      createdAt: BigInt(Date.now()),
+    }]);
+
+    const total = calculateTotalValue(found[0], 20n, 500);
+    expect(total).toBe(150_000_000n); // 1 BTC + 0.5 BTC yield
+  });
+});
+
+// ============================================================================
+// 5. NAME REGISTRY
+// ============================================================================
+
+describe("NAME REGISTRY", () => {
+  test("isValidName() validates correctly", () => {
+    expect(isValidName("alice")).toBe(true);
+    expect(isValidName("bob123")).toBe(true);
+    expect(isValidName("Alice")).toBe(false); // uppercase
+    expect(isValidName("test-name")).toBe(false); // hyphen
+    expect(isValidName("")).toBe(false);
+  });
+
+  test("hashName() is deterministic", () => {
+    expect(hashName("alice")).toEqual(hashName("alice"));
+    expect(hashName("alice")).not.toEqual(hashName("bob"));
+    expect(hashName("alice")).toEqual(hashName("Alice.zkey")); // normalizes
+  });
+
+  test("buildRegisterNameData() creates valid instruction", () => {
+    const keys = deriveKeysFromSeed(TEST_SEED);
+    const meta = createStealthMetaAddress(keys);
+
+    const data = buildRegisterNameData("test", meta.spendingPubKey, meta.viewingPubKey);
+
+    expect(data[0]).toBe(17); // REGISTER_NAME discriminator
+    expect(data[1]).toBe(4);  // name length
+  });
+
+  test("PDA derivation works", () => {
+    const nameHash = hashName("alice");
+    const [pda, bump] = PublicKey.findProgramAddressSync(
+      [Buffer.from(NAME_REGISTRY_SEED), Buffer.from(nameHash)],
+      new PublicKey(ZVAULT_PROGRAM_ID)
+    );
+
+    expect(pda).toBeInstanceOf(PublicKey);
+    expect(bump).toBeGreaterThanOrEqual(0);
+  });
+});
+
+// ============================================================================
+// 6. CRYPTOGRAPHY
+// ============================================================================
+
+describe("CRYPTOGRAPHY", () => {
+  test("Poseidon2 hash is deterministic", () => {
+    const h1 = poseidon2Hash([123n, 456n]);
+    const h2 = poseidon2Hash([123n, 456n]);
+    expect(h1).toBe(h2);
+  });
+
+  test("Grumpkin keypair is valid", () => {
+    const { privKey, pubKey } = generateKeyPair();
+    expect(privKey).toBeGreaterThan(0n);
+    expect(isOnCurve(pubKey)).toBe(true);
+  });
+
+  test("Grumpkin scalar multiplication", () => {
+    const { privKey, pubKey } = generateKeyPair();
+    const computed = pointMul(privKey, GRUMPKIN_GENERATOR);
+    expect(computed.x).toBe(pubKey.x);
+    expect(computed.y).toBe(pubKey.y);
+  });
+});
+
+// ============================================================================
+// 7. ZVaultClient
+// ============================================================================
+
+describe("ZVaultClient", () => {
+  test("createClient() returns valid client", () => {
+    const client = createClient(new Connection("https://api.devnet.solana.com"));
+    expect(client).toBeInstanceOf(ZVaultClient);
+  });
+
+  test("client has all methods", () => {
+    const client = createClient(new Connection("https://api.devnet.solana.com"));
+
+    // Deposit
+    expect(typeof client.deposit).toBe("function");
+    expect(typeof client.claimNote).toBe("function");
+    expect(typeof client.sendStealth).toBe("function");
+
+    // Transfer
+    expect(typeof client.splitNote).toBe("function");
+    expect(typeof client.createClaimLink).toBe("function");
+    expect(typeof client.sendPrivate).toBe("function");
+
+    // Withdraw
+    expect(typeof client.withdraw).toBe("function");
+  });
+
+  test("client.deposit() works", async () => {
+    const client = createClient(new Connection("https://api.devnet.solana.com"));
+    const result = await client.deposit(100_000n, "testnet");
+
+    expect(result.note.amount).toBe(100_000n);
+    expect(result.taprootAddress).toMatch(/^tb1p/);
+  });
+});
+
+// ============================================================================
+// 8. UTILITIES
+// ============================================================================
+
+describe("UTILITIES", () => {
+  test("BTC formatting", () => {
+    expect(formatBtc(100_000_000n)).toBe("1.00000000 BTC");
+    expect(formatBtc(50_000n)).toBe("0.00050000 BTC");
+  });
+
+  test("BTC parsing", () => {
+    expect(parseBtc("1 BTC")).toBe(100_000_000n);
+    expect(parseBtc("0.001 BTC")).toBe(100_000n);
+  });
+
+  test("Merkle proof structure", () => {
+    const proof = createEmptyMerkleProof();
+    expect(proof.pathElements.length).toBe(TREE_DEPTH);
+    expect(proof.pathIndices.length).toBe(TREE_DEPTH);
+    expect(proof.root.length).toBe(32);
+  });
+});
