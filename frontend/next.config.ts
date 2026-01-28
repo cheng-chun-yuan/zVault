@@ -6,7 +6,8 @@ const nextConfig: NextConfig = {
   },
   transpilePackages: ["@zvault/sdk"],
   webpack: (config, { isServer }) => {
-    config.resolve.symlinks = false;
+    // Enable symlinks for bun workspace compatibility
+    config.resolve.symlinks = true;
     config.experiments = {
       ...config.experiments,
       topLevelAwait: true,
@@ -24,6 +25,15 @@ const nextConfig: NextConfig = {
         ...config.resolve.fallback,
         fs: false,
         path: false,
+        child_process: false,
+        crypto: false,
+        stream: false,
+        os: false,
+        net: false,
+        tls: false,
+        http: false,
+        https: false,
+        zlib: false,
       };
     }
     return config;

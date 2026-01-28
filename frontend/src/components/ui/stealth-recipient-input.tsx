@@ -54,15 +54,17 @@ export function StealthRecipientInput({
         const connection = new Connection(
           process.env.NEXT_PUBLIC_SOLANA_RPC_URL || "https://api.devnet.solana.com"
         );
+        // Wrap connection to match SDK expected type (v2 Address is a string)
         const connectionAdapter = {
-          getAccountInfo: async (pubkey: { toBytes(): Uint8Array }) => {
+          getAccountInfo: async (pubkey: string) => {
             const { PublicKey } = await import("@solana/web3.js");
-            const pk = new PublicKey(pubkey.toBytes());
+            const pk = new PublicKey(pubkey);
             const info = await connection.getAccountInfo(pk);
             return info ? { data: new Uint8Array(info.data) } : null;
           },
         };
-        const result = await lookupZkeyName(connectionAdapter, name);
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const result = await lookupZkeyName(connectionAdapter as any, name);
         if (!result) {
           // If in address mode, also try as hex
           if (recipientType === "address") {

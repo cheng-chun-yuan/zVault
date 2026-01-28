@@ -1,7 +1,7 @@
 "use client";
 
 import { useRouter } from "next/navigation";
-import { ArrowRight, Clock, Shield } from "lucide-react";
+import { ArrowRight, Clock, Shield, Send } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { formatBtc } from "@/lib/utils/formatting";
 import type { InboxNote } from "@/hooks/use-zvault";
@@ -37,6 +37,16 @@ export function InboxItem({ note }: InboxItemProps) {
       amount: note.amount.toString(),
     });
     router.push(`/claim?${params.toString()}`);
+  };
+
+  const handleSendPrivate = () => {
+    const params = new URLSearchParams({
+      noteId: note.commitmentHex,
+      commitment: note.commitmentHex,
+      leafIndex: note.leafIndex.toString(),
+      amount: note.amount.toString(),
+    });
+    router.push(`/bridge/stealth-send?${params.toString()}`);
   };
 
   return (
@@ -85,14 +95,23 @@ export function InboxItem({ note }: InboxItemProps) {
         </code>
       </div>
 
-      {/* Claim button */}
-      <button
-        onClick={handleClaim}
-        className="w-full flex items-center justify-center gap-2 px-4 py-3 rounded-[10px] bg-privacy/10 hover:bg-privacy/20 text-privacy transition-colors"
-      >
-        Claim zBTC
-        <ArrowRight className="w-4 h-4" />
-      </button>
+      {/* Action buttons */}
+      <div className="flex gap-2">
+        <button
+          onClick={handleClaim}
+          className="flex-1 flex items-center justify-center gap-2 px-4 py-3 rounded-[10px] bg-privacy/10 hover:bg-privacy/20 text-privacy transition-colors"
+        >
+          Claim zBTC
+          <ArrowRight className="w-4 h-4" />
+        </button>
+        <button
+          onClick={handleSendPrivate}
+          className="flex-1 flex items-center justify-center gap-2 px-4 py-3 rounded-[10px] bg-accent/10 hover:bg-accent/20 text-accent transition-colors"
+        >
+          Send Private
+          <Send className="w-4 h-4" />
+        </button>
+      </div>
     </div>
   );
 }

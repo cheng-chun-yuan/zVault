@@ -1,6 +1,7 @@
 "use client";
 
-import { useState, useCallback } from "react";
+import { useState, useCallback, useEffect } from "react";
+import { useSearchParams } from "next/navigation";
 import { useWallet } from "@solana/wallet-adapter-react";
 import { useWalletModal } from "@solana/wallet-adapter-react-ui";
 import { Connection, PublicKey } from "@solana/web3.js";
@@ -19,9 +20,9 @@ import {
   Inbox,
   Loader2,
   ArrowRight,
-  Bitcoin,
-  Repeat,
+  ArrowDownToLine,
 } from "lucide-react";
+import Link from "next/link";
 import { QRCodeSVG } from "qrcode.react";
 import { cn } from "@/lib/utils";
 import { useCopyToClipboard } from "@/hooks/use-copy-to-clipboard";
@@ -51,36 +52,25 @@ interface TransferResult {
   amount: bigint;
 }
 
-type SendMode = "transfer" | "deposit";
-
 export function StealthSendFlow() {
+  const searchParams = useSearchParams();
   const wallet = useWallet();
   const { setVisible } = useWalletModal();
   const { keys, deriveKeys, isLoading: keysLoading } = useZVaultKeys();
   const { copied, copy } = useCopyToClipboard();
   const { notes: inboxNotes, totalAmountSats, depositCount, isLoading: inboxLoading, refresh: refreshInbox } = useStealthInbox();
 
-  // Mode selection
-  const [sendMode, setSendMode] = useState<SendMode>("transfer");
-
   // Form state
   const [recipientInput, setRecipientInput] = useState("");
-  const [amountBtc, setAmountBtc] = useState("");
-  const [showQR, setShowQR] = useState(false);
   const [selectedNote, setSelectedNote] = useState<OwnedNote | null>(null);
 
   // Process state
   const [loading, setLoading] = useState(false);
   const [resolving, setResolving] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [depositData, setDepositData] = useState<DepositData | null>(null);
   const [transferResult, setTransferResult] = useState<TransferResult | null>(null);
   const [resolvedMeta, setResolvedMeta] = useState<StealthMetaAddress | null>(null);
   const [resolvedName, setResolvedName] = useState<string | null>(null);
-
-  // For deposit mode
-  const amountSats = amountBtc ? BigInt(Math.floor(parseFloat(amountBtc) * 100_000_000)) : 0n;
-  const isValidAmount = amountSats > 0n && amountSats <= 21_000_000n * 100_000_000n;
 
   // Convert inbox notes to OwnedNote format
   const ownedNotes: OwnedNote[] = (inboxNotes || []).map((d, i) => ({
@@ -91,6 +81,33 @@ export function StealthSendFlow() {
     status: "claimable" as const,
     createdAt: d.createdAt,
   }));
+
+  // Pre-select note from URL params (when navigating from inbox)
+  useEffect(() => {
+    const noteId = searchParams.get("noteId");
+    const commitment = searchParams.get("commitment");
+    const amount = searchParams.get("amount");
+    const leafIndex = searchParams.get("leafIndex");
+
+    if (noteId && commitment && amount && leafIndex) {
+      // Check if note exists in ownedNotes, otherwise create from params
+      const existingNote = ownedNotes.find(n => n.commitment === commitment);
+      if (existingNote) {
+        setSelectedNote(existingNote);
+      } else {
+        // Create note from URL params
+        const noteFromParams: OwnedNote = {
+          id: noteId,
+          amountSats: BigInt(amount),
+          commitment,
+          leafIndex: parseInt(leafIndex, 10),
+          status: "claimable",
+          createdAt: Date.now(),
+        };
+        setSelectedNote(noteFromParams);
+      }
+    }
+  }, [searchParams, ownedNotes.length]); // Re-run when notes load
 
   // Resolve recipient - supports both zkey names and raw hex addresses
   const resolveRecipient = useCallback(async () => {
@@ -120,14 +137,16 @@ export function StealthSendFlow() {
         const connection = new Connection(
           process.env.NEXT_PUBLIC_SOLANA_RPC_URL || "https://api.devnet.solana.com"
         );
+        // Wrap connection to match SDK expected type (v2 Address is a string)
         const connectionAdapter = {
-          getAccountInfo: async (pubkey: { toBytes(): Uint8Array }) => {
-            const pk = new PublicKey(pubkey.toBytes());
+          getAccountInfo: async (pubkey: string) => {
+            const pk = new PublicKey(pubkey);
             const info = await connection.getAccountInfo(pk);
             return info ? { data: new Uint8Array(info.data) } : null;
           },
         };
-        const result = await lookupZkeyName(connectionAdapter, name);
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const result = await lookupZkeyName(connectionAdapter as any, name);
         if (result) {
           setResolvedMeta({
             spendingPubKey: result.spendingPubKey,
@@ -150,40 +169,6 @@ export function StealthSendFlow() {
       setResolving(false);
     }
   }, [recipientInput]);
-
-  // Handle stealth deposit creation (BTC deposit mode)
-  const handleCreateDeposit = async () => {
-    if (!resolvedMeta || !isValidAmount) {
-      setError("Please resolve recipient and enter a valid amount");
-      return;
-    }
-
-    setLoading(true);
-    setError(null);
-
-    try {
-      // Create stealth deposit
-      const stealthDeposit = await createStealthDeposit(resolvedMeta, amountSats);
-
-      // Generate taproot address from commitment
-      const { address } = await deriveTaprootAddress(
-        stealthDeposit.commitment,
-        "testnet"
-      );
-
-      setDepositData({
-        taprootAddress: address,
-        stealthDeposit,
-        recipientAddress: resolvedName ? `${resolvedName}.zkey` : recipientInput.trim(),
-        amountSats,
-      });
-    } catch (err) {
-      console.error("Failed to create stealth deposit:", err);
-      setError(err instanceof Error ? err.message : "Failed to create stealth deposit");
-    } finally {
-      setLoading(false);
-    }
-  };
 
   // Handle stealth transfer (transfer existing zkBTC)
   const handleStealthTransfer = async () => {
@@ -232,14 +217,11 @@ export function StealthSendFlow() {
 
   const resetFlow = () => {
     setRecipientInput("");
-    setAmountBtc("");
-    setDepositData(null);
     setTransferResult(null);
     setResolvedMeta(null);
     setResolvedName(null);
     setSelectedNote(null);
     setError(null);
-    setShowQR(false);
   };
 
   // Not connected
@@ -356,245 +338,31 @@ export function StealthSendFlow() {
     );
   }
 
-  // Show deposit result (BTC deposit mode)
-  if (depositData) {
-    const btcAmount = Number(depositData.amountSats) / 100_000_000;
-
-    return (
-      <div className="flex flex-col gap-4">
-        {/* Success message */}
-        <div className="p-3 bg-privacy/10 border border-privacy/20 rounded-[10px]">
-          <div className="flex items-center gap-2 text-privacy">
-            <Check className="w-4 h-4" />
-            <span className="text-body2-semibold">Stealth deposit created</span>
-          </div>
-        </div>
-
-        {/* Amount */}
-        <div className="p-3 bg-muted border border-gray/15 rounded-[10px]">
-          <div className="flex items-center justify-between">
-            <span className="text-caption text-gray">Amount</span>
-            <span className="text-body2 text-btc font-mono">{btcAmount} BTC</span>
-          </div>
-        </div>
-
-        {/* Recipient */}
-        <div className="p-3 bg-muted border border-gray/15 rounded-[10px]">
-          <div className="flex items-center gap-2 mb-1">
-            <User className="w-3 h-3 text-gray" />
-            <span className="text-caption text-gray">Recipient</span>
-          </div>
-          <code className="text-caption font-mono text-gray-light break-all">
-            {depositData.recipientAddress.slice(0, 24)}...{depositData.recipientAddress.slice(-24)}
-          </code>
-        </div>
-
-        {/* Deposit Address */}
-        <div className="p-4 bg-btc/5 border border-btc/20 rounded-[12px]">
-          <div className="flex items-center justify-between mb-2">
-            <span className="text-caption text-btc">Send BTC to this address</span>
-            <div className="flex items-center gap-1">
-              <button
-                onClick={() => setShowQR(!showQR)}
-                className={cn(
-                  "p-1.5 rounded-[6px] transition-colors",
-                  showQR ? "bg-btc/20 text-btc" : "bg-btc/10 text-btc hover:bg-btc/20"
-                )}
-                title={showQR ? "Hide QR" : "Show QR"}
-              >
-                <QrCode className="w-4 h-4" />
-              </button>
-              <button
-                onClick={() => copy(depositData.taprootAddress)}
-                className="p-1.5 rounded-[6px] bg-btc/10 hover:bg-btc/20 transition-colors"
-                title="Copy address"
-              >
-                {copied ? (
-                  <Check className="w-4 h-4 text-green-400" />
-                ) : (
-                  <Copy className="w-4 h-4 text-btc" />
-                )}
-              </button>
-            </div>
-          </div>
-          <code className="text-body2 font-mono text-btc break-all block">
-            {depositData.taprootAddress}
-          </code>
-        </div>
-
-        {/* QR Code */}
-        {showQR && (
-          <div className="flex justify-center p-4 bg-white rounded-[12px]">
-            <QRCodeSVG
-              value={depositData.taprootAddress}
-              size={200}
-              level="M"
-              bgColor="#FFFFFF"
-              fgColor="#F7931A"
-            />
-          </div>
-        )}
-
-        {/* Info */}
-        <div className="p-3 bg-muted border border-gray/15 rounded-[10px]">
-          <p className="text-caption text-gray">
-            Send exactly <span className="text-btc font-mono">{btcAmount} BTC</span> to the address above.
-            The recipient will be able to claim the funds privately using their stealth address.
-          </p>
-        </div>
-
-        {/* Testnet faucet */}
-        <div className="flex items-center justify-between p-3 bg-muted border border-gray/15 rounded-[10px]">
-          <span className="text-caption text-gray">Need testnet BTC?</span>
-          <a
-            href="https://coinfaucet.eu/en/btc-testnet/"
-            target="_blank"
-            rel="noopener noreferrer"
-            className="text-caption text-btc hover:text-btc/80 transition-colors flex items-center gap-1"
-          >
-            Get from faucet
-            <ExternalLink className="w-3 h-3" />
-          </a>
-        </div>
-
-        {/* View on explorer */}
-        <a
-          href={`https://mempool.space/testnet/address/${depositData.taprootAddress}`}
-          target="_blank"
-          rel="noopener noreferrer"
-          className={cn(
-            "flex items-center justify-center gap-2 p-3 rounded-[10px]",
-            "bg-muted border border-gray/15 text-gray hover:text-gray-light transition-colors"
-          )}
-        >
-          View on Mempool
-          <ExternalLink className="w-4 h-4" />
-        </a>
-
-        {/* Reset */}
-        <button
-          onClick={resetFlow}
-          className={cn(
-            "flex items-center justify-center gap-2 p-3 rounded-[10px]",
-            "bg-privacy/10 border border-privacy/20 text-privacy hover:bg-privacy/20 transition-colors"
-          )}
-        >
-          <RefreshCw className="w-4 h-4" />
-          New Stealth Send
-        </button>
-      </div>
-    );
-  }
-
   // Show form
   return (
     <div className="flex flex-col gap-4">
-      {/* Mode selector */}
-      <div className="flex gap-2 p-1 bg-muted rounded-[12px]">
-        <button
-          onClick={() => setSendMode("transfer")}
-          className={cn(
-            "flex-1 flex items-center justify-center gap-2 py-2.5 rounded-[10px] text-body2 transition-colors",
-            sendMode === "transfer"
-              ? "bg-privacy text-background"
-              : "text-gray hover:text-gray-light"
-          )}
-        >
-          <Repeat className="w-4 h-4" />
-          Transfer zkBTC
-        </button>
-        <button
-          onClick={() => setSendMode("deposit")}
-          className={cn(
-            "flex-1 flex items-center justify-center gap-2 py-2.5 rounded-[10px] text-body2 transition-colors",
-            sendMode === "deposit"
-              ? "bg-btc text-background"
-              : "text-gray hover:text-gray-light"
-          )}
-        >
-          <Bitcoin className="w-4 h-4" />
-          New BTC Deposit
-        </button>
+      {/* Note selector */}
+      <div>
+        <label className="text-body2 text-gray-light pl-2 mb-2 block">
+          Select Note to Send
+        </label>
+        <NoteSelector
+          notes={ownedNotes}
+          selectedNote={selectedNote}
+          onSelect={setSelectedNote}
+          isLoading={inboxLoading}
+        />
       </div>
 
-      {/* Transfer mode: Show note selector */}
-      {sendMode === "transfer" && (
-        <>
-          <div>
-            <label className="text-body2 text-gray-light pl-2 mb-2 block">
-              Select Note to Send
-            </label>
-            <NoteSelector
-              notes={ownedNotes}
-              selectedNote={selectedNote}
-              onSelect={setSelectedNote}
-              isLoading={inboxLoading}
-            />
+      {selectedNote && (
+        <div className="p-3 bg-privacy/5 border border-privacy/20 rounded-[10px]">
+          <div className="flex items-center justify-between">
+            <span className="text-caption text-gray">Sending</span>
+            <span className="text-body2 text-privacy font-mono">
+              {formatBtc(selectedNote.amountSats)} BTC
+            </span>
           </div>
-
-          {selectedNote && (
-            <div className="p-3 bg-privacy/5 border border-privacy/20 rounded-[10px]">
-              <div className="flex items-center justify-between">
-                <span className="text-caption text-gray">Sending</span>
-                <span className="text-body2 text-privacy font-mono">
-                  {formatBtc(selectedNote.amountSats)} BTC
-                </span>
-              </div>
-            </div>
-          )}
-        </>
-      )}
-
-      {/* Deposit mode: Show balance and amount input */}
-      {sendMode === "deposit" && (
-        <>
-          {/* Your balance summary */}
-          <div className="p-3 bg-btc/5 border border-btc/20 rounded-[10px]">
-            <div className="flex items-center justify-between">
-              <div className="flex items-center gap-2">
-                <Inbox className="w-4 h-4 text-btc" />
-                <span className="text-caption text-gray">Your Received zBTC</span>
-              </div>
-              {inboxLoading ? (
-                <Loader2 className="w-4 h-4 animate-spin text-btc" />
-              ) : (
-                <div className="flex items-center gap-2">
-                  <span className="text-body2 text-btc font-mono">
-                    {formatBtc(totalAmountSats)} BTC
-                  </span>
-                  {depositCount > 0 && (
-                    <span className="text-caption text-gray">({depositCount})</span>
-                  )}
-                </div>
-              )}
-            </div>
-          </div>
-
-          {/* Amount input */}
-          <div>
-            <div className="flex items-center justify-between pl-2 mb-2">
-              <label className="text-body2 text-gray-light">Amount (BTC)</label>
-            </div>
-            <input
-              type="number"
-              value={amountBtc}
-              onChange={(e) => setAmountBtc(e.target.value)}
-              placeholder="0.001"
-              step="0.00000001"
-              min="0"
-              className={cn(
-                "w-full p-3 bg-muted border border-gray/30 rounded-[10px]",
-                "text-body2 font-mono text-foreground placeholder:text-gray",
-                "outline-none focus:border-btc/50 transition-colors"
-              )}
-            />
-            {amountBtc && isValidAmount && (
-              <p className="text-caption text-gray mt-1 pl-2">
-                = {amountSats.toLocaleString()} satoshis
-              </p>
-            )}
-          </div>
-        </>
+        </div>
       )}
 
       {/* Recipient input - supports zkey or hex */}
@@ -655,76 +423,54 @@ export function StealthSendFlow() {
       )}
 
       {/* Action button */}
-      {sendMode === "transfer" ? (
-        <button
-          onClick={handleStealthTransfer}
-          disabled={loading || !resolvedMeta || !selectedNote}
-          className={cn(
-            "flex items-center justify-center gap-2 p-3 rounded-[10px]",
-            "bg-privacy hover:bg-privacy/80 text-background",
-            "disabled:bg-gray/30 disabled:text-gray disabled:cursor-not-allowed",
-            "transition-colors"
-          )}
-        >
-          {loading ? (
-            <>
-              <Loader2 className="w-4 h-4 animate-spin" />
-              Transferring...
-            </>
-          ) : (
-            <>
-              <Send className="w-4 h-4" />
-              Send Privately
-              {selectedNote && (
-                <>
-                  <ArrowRight className="w-3 h-3" />
-                  <span className="font-mono">{formatBtc(selectedNote.amountSats)}</span>
-                </>
-              )}
-            </>
-          )}
-        </button>
-      ) : (
-        <button
-          onClick={handleCreateDeposit}
-          disabled={loading || !resolvedMeta || !isValidAmount}
-          className={cn(
-            "flex items-center justify-center gap-2 p-3 rounded-[10px]",
-            "bg-btc hover:bg-btc/80 text-background",
-            "disabled:bg-gray/30 disabled:text-gray disabled:cursor-not-allowed",
-            "transition-colors"
-          )}
-        >
-          {loading ? (
-            <>
-              <Loader2 className="w-4 h-4 animate-spin" />
-              Creating...
-            </>
-          ) : (
-            <>
-              <Bitcoin className="w-4 h-4" />
-              Create BTC Deposit
-            </>
-          )}
-        </button>
-      )}
+      <button
+        onClick={handleStealthTransfer}
+        disabled={loading || !resolvedMeta || !selectedNote}
+        className={cn(
+          "flex items-center justify-center gap-2 p-3 rounded-[10px]",
+          "bg-privacy hover:bg-privacy/80 text-background",
+          "disabled:bg-gray/30 disabled:text-gray disabled:cursor-not-allowed",
+          "transition-colors"
+        )}
+      >
+        {loading ? (
+          <>
+            <Loader2 className="w-4 h-4 animate-spin" />
+            Transferring...
+          </>
+        ) : (
+          <>
+            <Send className="w-4 h-4" />
+            Send Privately
+            {selectedNote && (
+              <>
+                <ArrowRight className="w-3 h-3" />
+                <span className="font-mono">{formatBtc(selectedNote.amountSats)}</span>
+              </>
+            )}
+          </>
+        )}
+      </button>
 
       {/* Info */}
       <div className="p-3 bg-muted border border-gray/15 rounded-[10px]">
         <p className="text-caption text-gray">
-          {sendMode === "transfer" ? (
-            <>
-              Transfer your existing zkBTC directly to the recipient. The transfer happens on-chain
-              and is fully private - only the recipient can claim it with their stealth keys.
-            </>
-          ) : (
-            <>
-              Create a new BTC deposit for the recipient. You&apos;ll get a BTC address to send funds to.
-              The recipient can scan and claim using their stealth viewing key.
-            </>
-          )}
+          Transfer your existing zkBTC directly to the recipient. The transfer happens on-chain
+          and is fully private - only the recipient can claim it with their stealth keys.
         </p>
       </div>
+
+      {/* Link to deposit page */}
+      <Link
+        href="/bridge/deposit"
+        className={cn(
+          "flex items-center justify-center gap-2 p-3 rounded-[10px]",
+          "bg-btc/10 border border-btc/20 text-btc hover:bg-btc/20 transition-colors"
+        )}
+      >
+        <ArrowDownToLine className="w-4 h-4" />
+        New BTC Deposit
+      </Link>
     </div>
   );
 }
