@@ -10,12 +10,21 @@
  * 5. Adds demo notes for testing
  *
  * Prerequisites:
- *   - solana-test-validator running (run: solana-test-validator --reset)
- *   - Programs built (run: cargo build-sbf)
+ *   - solana-test-validator running with Poseidon feature enabled:
+ *
+ *     # Option 1: Clone feature set from devnet (recommended)
+ *     solana-test-validator --clone-feature-set --url devnet --reset
+ *
+ *     # Option 2: Use localnet feature (SHA256 fallback, for testing only)
+ *     # Build with: cargo build-sbf --features localnet
+ *     # Then run: solana-test-validator --reset
+ *
+ *   - Programs built (run: cargo build-sbf --features devnet)
  *
  * Usage:
  *   bun run scripts/deploy-localnet.ts
  *   bun run scripts/deploy-localnet.ts --skip-deploy  # Skip deployment, only initialize
+ *   bun run scripts/deploy-localnet.ts --skip-demo    # Skip demo notes
  */
 
 import {
@@ -590,11 +599,13 @@ function saveLocalnetConfig(
 async function main() {
   const args = process.argv.slice(2);
   const skipDeploy = args.includes("--skip-deploy");
+  const skipDemo = args.includes("--skip-demo");
 
   logSection("zVault Localnet Deploy & Initialize");
 
   log(`RPC URL: ${RPC_URL}`);
   log(`Skip Deploy: ${skipDeploy}`);
+  log(`Skip Demo Notes: ${skipDemo}`);
 
   // Connect to localnet
   const connection = new Connection(RPC_URL, "confirmed");
@@ -604,8 +615,11 @@ async function main() {
     log(`Solana version: ${version["solana-core"]}`);
   } catch (e) {
     console.error("\nError: Cannot connect to localnet.");
-    console.error("Make sure solana-test-validator is running:");
-    console.error("  solana-test-validator --reset\n");
+    console.error("Make sure solana-test-validator is running with Poseidon support:");
+    console.error("");
+    console.error("  # With Poseidon syscall (clone devnet features):");
+    console.error("  solana-test-validator --clone-feature-set --url devnet --reset");
+    console.error("");
     process.exit(1);
   }
 
@@ -655,16 +669,20 @@ async function main() {
   initResult.btcLightClientPda = btcLightClientPda;
 
   // Add demo notes (now also mints zBTC to pool vault)
-  await addDemoNotes(
-    connection,
-    authority,
-    deployResult.zvaultProgramId,
-    initResult.poolStatePda,
-    initResult.commitmentTreePda,
-    initResult.zkbtcMint,
-    initResult.poolVault,
-    3
-  );
+  if (!skipDemo) {
+    await addDemoNotes(
+      connection,
+      authority,
+      deployResult.zvaultProgramId,
+      initResult.poolStatePda,
+      initResult.commitmentTreePda,
+      initResult.zkbtcMint,
+      initResult.poolVault,
+      3
+    );
+  } else {
+    log("Skipping demo notes (--skip-demo flag)");
+  }
 
   // Save configuration
   saveLocalnetConfig(deployResult, initResult);

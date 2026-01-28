@@ -4,7 +4,7 @@ use pinocchio::{
     account_info::AccountInfo,
     program_error::ProgramError,
     pubkey::{find_program_address, Pubkey},
-    sysvars::{clock::Clock, Sysvar},
+    sysvars::{clock::Clock, rent::Rent, Sysvar},
     ProgramResult,
 };
 
@@ -15,7 +15,7 @@ use crate::state::{
     NULLIFIER_RECORD_DISCRIMINATOR,
 };
 use crate::utils::{
-    get_test_verification_key, verify_split_proof, Groth16Proof,
+    create_pda_account, get_test_verification_key, verify_split_proof, Groth16Proof,
     validate_program_owner, validate_account_writable,
 };
 
@@ -137,20 +137,47 @@ pub fn process_split_commitment(
 
     // Verify nullifier PDA
     let nullifier_seeds: &[&[u8]] = &[NullifierRecord::SEED, &ix_data.nullifier_hash];
-    let (expected_nullifier_pda, _) = find_program_address(nullifier_seeds, program_id);
+    let (expected_nullifier_pda, nullifier_bump) = find_program_address(nullifier_seeds, program_id);
     if accounts.nullifier_record.key() != &expected_nullifier_pda {
         return Err(ProgramError::InvalidSeeds);
     }
 
-    // Check if nullifier already spent
+    // Get clock and rent for account creation
+    let clock = Clock::get()?;
+    let rent = Rent::get()?;
+
+    // SECURITY: Create nullifier PDA FIRST to prevent race conditions
+    // If account already exists, create_pda_account will fail (double-spend prevented)
+    // This is defense-in-depth: even if ZK proof fails later, nullifier is marked spent
     {
-        let nullifier_data = accounts.nullifier_record.try_borrow_data()?;
-        if !nullifier_data.is_empty() && nullifier_data[0] == NULLIFIER_RECORD_DISCRIMINATOR {
-            return Err(ZVaultError::NullifierAlreadyUsed.into());
+        let nullifier_data_len = accounts.nullifier_record.data_len();
+        if nullifier_data_len > 0 {
+            let nullifier_data = accounts.nullifier_record.try_borrow_data()?;
+            if !nullifier_data.is_empty() && nullifier_data[0] == NULLIFIER_RECORD_DISCRIMINATOR {
+                return Err(ZVaultError::NullifierAlreadyUsed.into());
+            }
+        } else {
+            // Account doesn't exist - create it atomically
+            let lamports = rent.minimum_balance(NullifierRecord::LEN);
+            let bump_bytes = [nullifier_bump];
+            let signer_seeds: &[&[u8]] = &[
+                NullifierRecord::SEED,
+                &ix_data.nullifier_hash,
+                &bump_bytes,
+            ];
+
+            create_pda_account(
+                accounts.user,
+                accounts.nullifier_record,
+                program_id,
+                lamports,
+                NullifierRecord::LEN as u64,
+                signer_seeds,
+            )?;
         }
     }
 
-    // Verify Groth16 proof
+    // Verify Groth16 proof (after nullifier is claimed)
     let groth16_proof = Groth16Proof::from_bytes(&ix_data.proof);
     let vk = get_test_verification_key(4); // 4 public inputs
 
@@ -165,10 +192,7 @@ pub fn process_split_commitment(
         return Err(ZVaultError::ZkVerificationFailed.into());
     }
 
-    // Get clock for timestamp
-    let clock = Clock::get()?;
-
-    // Record nullifier
+    // Initialize nullifier record
     {
         let mut nullifier_data = accounts.nullifier_record.try_borrow_mut_data()?;
         let nullifier = NullifierRecord::init(&mut nullifier_data)?;

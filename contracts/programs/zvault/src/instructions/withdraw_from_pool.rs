@@ -4,7 +4,7 @@ use pinocchio::{
     account_info::AccountInfo,
     program_error::ProgramError,
     pubkey::{find_program_address, Pubkey},
-    sysvars::{clock::Clock, Sysvar},
+    sysvars::{clock::Clock, rent::Rent, Sysvar},
     ProgramResult,
 };
 
@@ -14,7 +14,7 @@ use crate::state::{
     CommitmentTree, PoolCommitmentTree, PoolNullifierRecord, PoolOperationType, YieldPool,
     POOL_NULLIFIER_RECORD_DISCRIMINATOR,
 };
-use crate::utils::{get_test_verification_key, verify_pool_withdraw_proof, Groth16Proof, validate_program_owner, validate_account_writable};
+use crate::utils::{create_pda_account, get_test_verification_key, verify_pool_withdraw_proof, Groth16Proof, validate_program_owner, validate_account_writable};
 
 /// Withdraw from pool instruction data
 pub struct WithdrawFromPoolData {
@@ -118,6 +118,11 @@ pub fn process_withdraw_from_pool(
     let accounts = WithdrawFromPoolAccounts::from_accounts(accounts)?;
     let ix_data = WithdrawFromPoolData::from_bytes(data)?;
 
+    // SECURITY: Validate non-zero principal
+    if ix_data.principal == 0 {
+        return Err(ZVaultError::ZeroAmount.into());
+    }
+
     // SECURITY: Validate account owners
     validate_program_owner(accounts.yield_pool, program_id)?;
     validate_program_owner(accounts.pool_commitment_tree, program_id)?;
@@ -145,9 +150,9 @@ pub fn process_withdraw_from_pool(
         current_epoch = pool.current_epoch();
         yield_rate_bps = pool.yield_rate_bps();
 
-        // Calculate yield
+        // Calculate yield with overflow protection
         let epochs_staked = current_epoch.saturating_sub(ix_data.deposit_epoch);
-        yield_amount = pool.calculate_yield(ix_data.principal, epochs_staked);
+        yield_amount = pool.calculate_yield_checked(ix_data.principal, epochs_staked)?;
 
         // Check yield reserve
         if yield_amount > pool.yield_reserve() {
@@ -175,20 +180,44 @@ pub fn process_withdraw_from_pool(
         &pool_id,
         &ix_data.pool_nullifier_hash,
     ];
-    let (expected_nullifier_pda, _) = find_program_address(nullifier_seeds, program_id);
+    let (expected_nullifier_pda, nullifier_bump) = find_program_address(nullifier_seeds, program_id);
     if accounts.pool_nullifier_record.key() != &expected_nullifier_pda {
         return Err(ProgramError::InvalidSeeds);
     }
 
-    // Check if pool nullifier already spent
+    let clock = Clock::get()?;
+    let rent = Rent::get()?;
+
+    // SECURITY: Create pool nullifier PDA FIRST to prevent race conditions
     {
-        let nullifier_data = accounts.pool_nullifier_record.try_borrow_data()?;
-        if !nullifier_data.is_empty() && nullifier_data[0] == POOL_NULLIFIER_RECORD_DISCRIMINATOR {
-            return Err(ZVaultError::PoolNullifierAlreadyUsed.into());
+        let nullifier_data_len = accounts.pool_nullifier_record.data_len();
+        if nullifier_data_len > 0 {
+            let nullifier_data = accounts.pool_nullifier_record.try_borrow_data()?;
+            if !nullifier_data.is_empty() && nullifier_data[0] == POOL_NULLIFIER_RECORD_DISCRIMINATOR {
+                return Err(ZVaultError::PoolNullifierAlreadyUsed.into());
+            }
+        } else {
+            let lamports = rent.minimum_balance(PoolNullifierRecord::LEN);
+            let bump_bytes = [nullifier_bump];
+            let signer_seeds: &[&[u8]] = &[
+                PoolNullifierRecord::SEED,
+                &pool_id,
+                &ix_data.pool_nullifier_hash,
+                &bump_bytes,
+            ];
+
+            create_pda_account(
+                accounts.withdrawer,
+                accounts.pool_nullifier_record,
+                program_id,
+                lamports,
+                PoolNullifierRecord::LEN as u64,
+                signer_seeds,
+            )?;
         }
     }
 
-    // Verify Groth16 proof for pool withdrawal
+    // Verify Groth16 proof for pool withdrawal (after nullifier claimed)
     let groth16_proof = Groth16Proof::from_bytes(&ix_data.proof);
     let vk = get_test_verification_key(6); // pool_withdraw has 6 public inputs
 
@@ -204,9 +233,7 @@ pub fn process_withdraw_from_pool(
         return Err(ZVaultError::ZkVerificationFailed.into());
     }
 
-    let clock = Clock::get()?;
-
-    // Record pool nullifier as spent
+    // Initialize pool nullifier record
     {
         let mut nullifier_data = accounts.pool_nullifier_record.try_borrow_mut_data()?;
         let nullifier = PoolNullifierRecord::init(&mut nullifier_data)?;

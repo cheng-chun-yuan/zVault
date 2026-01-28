@@ -1,12 +1,12 @@
 {
   "programs": {
     "devnet": {
-      "zVault": "5S5ynMni8Pgd6tKkpYaXiPJiEXgw927s7T2txDtDivRK",
-      "btc_light_client": "95vWurTc9BhjBvEbBdUKoTZHMPPyB1iQZEuXEaR7wPpd"
+      "zVault": "4ynAqCa7zDTXhDKKAW8sFQY1eudx9YZr2gQPzaDe6N8L",
+      "btc_light_client": "DVcaH9ravmnBTyR6msdc4YTaan85A5obGP236XBKeeCZ"
     },
     "localnet": {
-      "zVault": "BDH9iTYp2nBptboCcSmTn7GTkzYTzaMr7MMG5D5sXXRp",
-      "btc_light_client": "8qntLj65faXiqMKcQypyJ389Yq6MBU5X7AB5qsLnvKgy"
+      "zVault": "3mr1UrVKftimqB5rBEmKiGFBMAo9VUZuJLRDMdac42JV",
+      "btc_light_client": "AvXLG43quQpc9aaE1fUxXdd1UFVBCMBkX9vFgjZSShrn"
     },
     "mainnet": {
       "zVault": "",

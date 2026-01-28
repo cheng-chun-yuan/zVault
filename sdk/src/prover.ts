@@ -431,6 +431,14 @@ export async function generateTransferProof(inputs: TransferInputs): Promise<Pro
   const pathElements = inputs.merkleProof.siblings.map((s) => s.toString());
   const pathIndices = inputs.merkleProof.indices;
 
+  // Compute nullifier hash and output commitment
+  const nullifierHash = computeNullifierHashLegacy(inputs.inputNullifier);
+  const outputCommitment = computeCommitmentLegacy(
+    inputs.outputNullifier,
+    inputs.outputSecret,
+    inputs.amount
+  );
+
   const circuitInputs: InputMap = {
     nullifier: inputs.inputNullifier.toString(),
     secret: inputs.inputSecret.toString(),
@@ -440,8 +448,8 @@ export async function generateTransferProof(inputs: TransferInputs): Promise<Pro
     output_nullifier: inputs.outputNullifier.toString(),
     output_secret: inputs.outputSecret.toString(),
     merkle_root: inputs.merkleRoot.toString(),
-    nullifier_hash: "0",
-    output_commitment: "0",
+    nullifier_hash: nullifierHash.toString(),
+    output_commitment: outputCommitment.toString(),
   };
 
   return generateProof("transfer", circuitInputs);

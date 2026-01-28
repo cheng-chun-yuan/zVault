@@ -83,6 +83,10 @@ pub mod instruction {
     pub const COMPOUND_YIELD: u8 = 34;
     pub const UPDATE_YIELD_RATE: u8 = 35;
     pub const HARVEST_YIELD: u8 = 36;
+
+    // VK Registry (deployment/admin)
+    pub const INIT_VK_REGISTRY: u8 = 40;
+    pub const UPDATE_VK_REGISTRY: u8 = 41;
 }
 
 entrypoint!(process_instruction);
@@ -168,6 +172,13 @@ pub fn process_instruction(
         instruction::HARVEST_YIELD => {
             instructions::process_harvest_yield(program_id, accounts, data)
         }
+        // VK Registry
+        instruction::INIT_VK_REGISTRY => {
+            instructions::process_init_vk_registry(program_id, accounts, data)
+        }
+        instruction::UPDATE_VK_REGISTRY => {
+            instructions::process_update_vk_registry(program_id, accounts, data)
+        }
         _ => Err(ProgramError::InvalidInstructionData),
     }
 }
@@ -229,7 +240,7 @@ mod tests {
 
     #[test]
     fn test_discriminators_unique() {
-        let mut discriminators = vec![
+        let discriminators: &[u8] = &[
             instruction::INITIALIZE,
             instruction::SPLIT_COMMITMENT,
             instruction::REQUEST_REDEMPTION,
@@ -250,14 +261,14 @@ mod tests {
             instruction::COMPOUND_YIELD,
             instruction::UPDATE_YIELD_RATE,
             instruction::HARVEST_YIELD,
+            instruction::INIT_VK_REGISTRY,
+            instruction::UPDATE_VK_REGISTRY,
+            // Demo instructions (only in devnet builds)
+            #[cfg(feature = "devnet")]
+            instruction::ADD_DEMO_NOTE,
+            #[cfg(feature = "devnet")]
+            instruction::ADD_DEMO_STEALTH,
         ];
-
-        // Demo instructions only available in devnet builds
-        #[cfg(feature = "devnet")]
-        {
-            discriminators.push(instruction::ADD_DEMO_NOTE);
-            discriminators.push(instruction::ADD_DEMO_STEALTH);
-        }
 
         for (i, &d1) in discriminators.iter().enumerate() {
             for (j, &d2) in discriminators.iter().enumerate() {

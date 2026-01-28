@@ -283,13 +283,44 @@ impl YieldPool {
     }
 
     /// Calculate yield for a given principal over epochs
-    pub fn calculate_yield(&self, principal: u64, epochs_staked: u64) -> u64 {
-        // yield = (principal * epochs * rate_bps) / 10000
+    ///
+    /// Uses checked arithmetic to prevent silent overflow.
+    /// Returns error if calculation would overflow.
+    ///
+    /// Formula: yield = (principal * epochs * rate_bps) / 10000
+    pub fn calculate_yield_checked(
+        &self,
+        principal: u64,
+        epochs_staked: u64,
+    ) -> Result<u64, ProgramError> {
+        use crate::constants::{MAX_POOL_PRINCIPAL, MAX_YIELD_EPOCHS};
+
+        // Bounds validation - prevents overflow in multiplication
+        if principal > MAX_POOL_PRINCIPAL {
+            return Err(ProgramError::ArithmeticOverflow);
+        }
+        if epochs_staked > MAX_YIELD_EPOCHS {
+            return Err(ProgramError::ArithmeticOverflow);
+        }
+
         let rate = self.yield_rate_bps() as u64;
-        principal
-            .saturating_mul(epochs_staked)
-            .saturating_mul(rate)
-            / 10000
+
+        // Safe multiplication with checked arithmetic
+        let step1 = principal
+            .checked_mul(epochs_staked)
+            .ok_or(ProgramError::ArithmeticOverflow)?;
+        let step2 = step1
+            .checked_mul(rate)
+            .ok_or(ProgramError::ArithmeticOverflow)?;
+
+        Ok(step2 / 10000)
+    }
+
+    /// Calculate yield (legacy - saturating, for backwards compatibility)
+    #[deprecated(note = "Use calculate_yield_checked for proper error handling")]
+    pub fn calculate_yield(&self, principal: u64, epochs_staked: u64) -> u64 {
+        self.calculate_yield_checked(principal, epochs_staked)
+            .unwrap_or(0)
     }
 
     /// Advance epoch if enough time has passed

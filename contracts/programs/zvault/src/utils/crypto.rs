@@ -1,21 +1,41 @@
 //! Cryptographic utilities for zVault
 //!
-//! Provides Poseidon2 hashing for Merkle tree operations.
+//! Provides Poseidon hashing for Merkle tree operations.
 //! Uses Solana's native Poseidon syscall for efficiency.
 
 use pinocchio::program_error::ProgramError;
 
-/// Poseidon2 hash of two 32-byte inputs (for Merkle tree nodes)
+#[cfg(all(target_os = "solana", feature = "localnet"))]
+use super::sha256;
+
+/// BN254 scalar field modulus (Fr)
+/// = 21888242871839275222246405745257275088548364400416034343698204186575808495617
+/// Inputs to Poseidon must be < this value
+#[cfg(all(target_os = "solana", not(feature = "localnet")))]
+const BN254_FR_MODULUS: [u8; 32] = [
+    0x30, 0x64, 0x4e, 0x72, 0xe1, 0x31, 0xa0, 0x29,
+    0xb8, 0x50, 0x45, 0xb6, 0x81, 0x81, 0x58, 0x5d,
+    0x97, 0x81, 0x6a, 0x91, 0x68, 0x71, 0xca, 0x8d,
+    0x3c, 0x20, 0x8c, 0x16, 0xd8, 0x7c, 0xfd, 0x47,
+]; // Big-endian representation
+
+/// Poseidon hash of two 32-byte inputs (for Merkle tree nodes)
 ///
-/// Uses the BN254 field with Poseidon2 parameters optimized for
+/// Uses the BN254 field with Poseidon parameters optimized for
 /// binary Merkle trees (2 inputs → 1 output).
 ///
 /// # On-chain Implementation
-/// Uses Solana's `sol_poseidon` syscall when available (Solana 1.16+).
-/// Falls back to a reference implementation for testing.
+/// Uses Solana's `sol_poseidon` syscall (requires v1.17.5+).
+/// With `localnet` feature, uses SHA256 (test validator lacks Poseidon syscall).
 #[inline]
 pub fn poseidon2_hash(left: &[u8; 32], right: &[u8; 32]) -> Result<[u8; 32], ProgramError> {
-    #[cfg(target_os = "solana")]
+    // For localnet testing, use SHA256 since test validator doesn't have Poseidon syscall
+    #[cfg(all(target_os = "solana", feature = "localnet"))]
+    {
+        sha256_hash_for_localnet(left, right)
+    }
+
+    #[cfg(all(target_os = "solana", not(feature = "localnet")))]
     {
         poseidon2_hash_syscall(left, right)
     }
@@ -26,19 +46,60 @@ pub fn poseidon2_hash(left: &[u8; 32], right: &[u8; 32]) -> Result<[u8; 32], Pro
     }
 }
 
-/// Poseidon2 hash using Solana syscall
-#[cfg(target_os = "solana")]
+/// SHA256 hash for localnet testing (test validator lacks Poseidon syscall)
+#[cfg(all(target_os = "solana", feature = "localnet"))]
+fn sha256_hash_for_localnet(left: &[u8; 32], right: &[u8; 32]) -> Result<[u8; 32], ProgramError> {
+    let mut input = [0u8; 64];
+    input[0..32].copy_from_slice(left);
+    input[32..64].copy_from_slice(right);
+    Ok(sha256(&input))
+}
+
+/// Check if a big-endian 32-byte value is >= BN254 Fr modulus
+#[cfg(all(target_os = "solana", not(feature = "localnet")))]
+#[inline]
+fn is_ge_modulus(val: &[u8; 32]) -> bool {
+    for i in 0..32 {
+        if val[i] < BN254_FR_MODULUS[i] {
+            return false;
+        }
+        if val[i] > BN254_FR_MODULUS[i] {
+            return true;
+        }
+    }
+    true // Equal to modulus
+}
+
+/// Reduce a big-endian value modulo BN254 Fr if needed
+/// For values >= modulus, we XOR with a mask to bring into range
+/// This is a simple reduction that maintains determinism
+#[cfg(all(target_os = "solana", not(feature = "localnet")))]
+#[inline]
+fn reduce_to_field(val: &[u8; 32]) -> [u8; 32] {
+    if !is_ge_modulus(val) {
+        return *val;
+    }
+    // Simple reduction: clear top bits to ensure < modulus
+    // The modulus starts with 0x30, so clearing to 0x2F or less ensures < modulus
+    let mut result = *val;
+    result[0] &= 0x2F;
+    result
+}
+
+/// Poseidon hash using Solana syscall
+/// Inputs are automatically reduced to valid BN254 field elements
+#[cfg(all(target_os = "solana", not(feature = "localnet")))]
 fn poseidon2_hash_syscall(left: &[u8; 32], right: &[u8; 32]) -> Result<[u8; 32], ProgramError> {
-    use solana_poseidon::{hashv, PoseidonHash, Parameters, Endianness};
+    use solana_poseidon::{hashv, Parameters, Endianness};
 
-    // Use Light Protocol's parameters (standard for ZK on Solana)
-    let hash = hashv(
-        Parameters::Bn254X5,
-        Endianness::BigEndian,
-        &[left, right],
-    ).map_err(|_| ProgramError::InvalidArgument)?;
+    // Reduce inputs to valid field elements if needed
+    let left_reduced = reduce_to_field(left);
+    let right_reduced = reduce_to_field(right);
 
-    Ok(hash.to_bytes())
+    // Call Poseidon syscall - no fallback, this MUST work
+    hashv(Parameters::Bn254X5, Endianness::BigEndian, &[&left_reduced, &right_reduced])
+        .map(|hash| hash.to_bytes())
+        .map_err(|_| ProgramError::InvalidArgument)
 }
 
 /// Reference implementation for testing (not for production on-chain use)

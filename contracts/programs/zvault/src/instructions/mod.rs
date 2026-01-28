@@ -47,6 +47,9 @@ pub mod compound_yield;
 pub mod update_yield_rate;
 pub mod harvest_yield;
 
+// VK registry (deployment)
+pub mod init_vk_registry;
+
 // Re-exports
 pub use initialize::*;
 pub use verify_deposit::*;
@@ -68,3 +71,6 @@ pub use claim_pool_yield::*;
 pub use compound_yield::*;
 pub use update_yield_rate::*;
 pub use harvest_yield::*;
+
+// VK registry re-exports
+pub use init_vk_registry::*;

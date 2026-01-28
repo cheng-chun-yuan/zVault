@@ -143,6 +143,11 @@ pub fn process_transfer_stealth(
     let accounts = TransferStealthAccounts::from_accounts(accounts)?;
     let ix_data = TransferStealthData::from_bytes(data)?;
 
+    // SECURITY: Validate non-zero amount
+    if ix_data.amount_sats == 0 {
+        return Err(ZVaultError::ZeroAmount.into());
+    }
+
     // SECURITY: Validate account owners BEFORE deserializing any data
     validate_program_owner(accounts.pool_state, program_id)?;
     validate_program_owner(accounts.commitment_tree, program_id)?;
@@ -181,14 +186,6 @@ pub fn process_transfer_stealth(
         return Err(ProgramError::InvalidSeeds);
     }
 
-    // Check if nullifier already spent
-    {
-        let nullifier_data = accounts.nullifier_record.try_borrow_data()?;
-        if !nullifier_data.is_empty() && nullifier_data[0] == NULLIFIER_RECORD_DISCRIMINATOR {
-            return Err(ZVaultError::NullifierAlreadyUsed.into());
-        }
-    }
-
     // Verify stealth announcement PDA
     let stealth_seeds: &[&[u8]] = &[StealthAnnouncement::SEED, &ix_data.ephemeral_pub];
     let (expected_stealth_pda, stealth_bump) = find_program_address(stealth_seeds, program_id);
@@ -196,37 +193,19 @@ pub fn process_transfer_stealth(
         return Err(ProgramError::InvalidSeeds);
     }
 
-    // Check if stealth announcement already exists
-    {
-        let ann_data_len = accounts.stealth_announcement.data_len();
-        if ann_data_len > 0 {
-            let ann_data = accounts.stealth_announcement.try_borrow_data()?;
-            if ann_data[0] == STEALTH_ANNOUNCEMENT_DISCRIMINATOR {
-                return Err(ProgramError::AccountAlreadyInitialized);
-            }
-        }
-    }
-
-    // Verify Groth16 proof (proves knowledge of input note)
-    // Public inputs: [root, input_nullifier_hash, output_commitment]
-    let groth16_proof = Groth16Proof::from_bytes(&ix_data.proof);
-    let vk = get_test_verification_key(3); // 3 public inputs
-
-    if !verify_transfer_proof(
-        &vk,
-        &groth16_proof,
-        &ix_data.merkle_root,
-        &ix_data.input_nullifier_hash,
-        &ix_data.output_commitment,
-    ) {
-        return Err(ZVaultError::ZkVerificationFailed.into());
-    }
-
     let clock = Clock::get()?;
     let rent = Rent::get()?;
 
-    // Create nullifier record PDA
+    // SECURITY: Create nullifier PDA FIRST to prevent race conditions
+    // This atomically claims the nullifier, preventing double-spend even if
+    // two transactions are processed in the same slot
     {
+        let nullifier_data = accounts.nullifier_record.try_borrow_data()?;
+        if !nullifier_data.is_empty() && nullifier_data[0] == NULLIFIER_RECORD_DISCRIMINATOR {
+            return Err(ZVaultError::NullifierAlreadyUsed.into());
+        }
+        drop(nullifier_data);
+
         let lamports = rent.minimum_balance(NullifierRecord::LEN);
         let bump_bytes = [nullifier_bump];
         let signer_seeds: &[&[u8]] = &[
@@ -243,6 +222,32 @@ pub fn process_transfer_stealth(
             NullifierRecord::LEN as u64,
             signer_seeds,
         )?;
+    }
+
+    // Check if stealth announcement already exists
+    {
+        let ann_data_len = accounts.stealth_announcement.data_len();
+        if ann_data_len > 0 {
+            let ann_data = accounts.stealth_announcement.try_borrow_data()?;
+            if ann_data[0] == STEALTH_ANNOUNCEMENT_DISCRIMINATOR {
+                return Err(ProgramError::AccountAlreadyInitialized);
+            }
+        }
+    }
+
+    // Verify Groth16 proof (after nullifier is claimed)
+    // Public inputs: [root, input_nullifier_hash, output_commitment]
+    let groth16_proof = Groth16Proof::from_bytes(&ix_data.proof);
+    let vk = get_test_verification_key(3); // 3 public inputs
+
+    if !verify_transfer_proof(
+        &vk,
+        &groth16_proof,
+        &ix_data.merkle_root,
+        &ix_data.input_nullifier_hash,
+        &ix_data.output_commitment,
+    ) {
+        return Err(ZVaultError::ZkVerificationFailed.into());
     }
 
     // Initialize nullifier record

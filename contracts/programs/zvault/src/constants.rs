@@ -6,6 +6,15 @@ pub const MIN_DEPOSIT_SATS: u64 = 10_000;
 /// Maximum deposit amount in satoshis (1000 BTC)
 pub const MAX_DEPOSIT_SATS: u64 = 100_000_000_000;
 
+/// Maximum stakeable amount in yield pool (100 BTC = 10B sats)
+/// This prevents overflow in yield calculations:
+/// max_principal * max_epochs * max_rate < u64::MAX
+/// 10_000_000_000 * 100_000 * 10_000 = 10^19 < 1.8*10^19 (u64::MAX)
+pub const MAX_POOL_PRINCIPAL: u64 = 10_000_000_000;
+
+/// Maximum epochs for yield calculation (prevents overflow)
+pub const MAX_YIELD_EPOCHS: u64 = 100_000;
+
 /// Required Bitcoin confirmations
 pub const REQUIRED_CONFIRMATIONS: u32 = 2;
 
