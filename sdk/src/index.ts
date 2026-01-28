@@ -530,6 +530,22 @@ export {
 } from "./demo";
 
 // ==========================================================================
+// Commitment Tree (for merkle proof generation)
+// ==========================================================================
+
+export {
+  // Note: TREE_DEPTH, ROOT_HISTORY_SIZE, MAX_LEAVES already exported from merkle.ts
+  COMMITMENT_TREE_DISCRIMINATOR,
+  parseCommitmentTreeData,
+  isValidRoot,
+  fetchCommitmentTree,
+  getCommitmentIndex,
+  saveCommitmentIndex,
+  CommitmentTreeIndex,
+  type CommitmentTreeState,
+} from "./commitment-tree";
+
+// ==========================================================================
 // Yield Pool (zkEarn) - Stealth Address Based Privacy Yield
 // ==========================================================================
 

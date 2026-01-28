@@ -25,8 +25,15 @@ import {
   isProverAvailable,
   pointMul,
   GRUMPKIN_GENERATOR,
+  deriveCommitmentTreePDA,
+  fetchCommitmentTree,
+  getCommitmentIndex,
+  saveCommitmentIndex,
+  computeUnifiedCommitment,
+  bytesToBigint,
   type ProofData,
   type ClaimInputs,
+  type CommitmentTreeState,
 } from "@zvault/sdk";
 import { useConnection } from "@solana/wallet-adapter-react";
 import { buildClaimTransaction } from "@/lib/solana/instructions";
@@ -343,24 +350,50 @@ function ClaimContent() {
       // Derive note from seed
       const note = deriveNote(secretPhrase.trim(), 0, BigInt(0));
 
-      // Get commitment and nullifier hash (may be 0n if not computed)
-      const commitment = note.commitment ?? 0n;
+      // Unified Model: derive pubKeyX from nullifier (as privKey)
+      const privKey = note.nullifier;
+      const pubKeyPoint = pointMul(privKey, GRUMPKIN_GENERATOR);
+      const pubKeyX = pubKeyPoint[0]; // x-coordinate
+
+      // Get nullifier hash (computed from privKey + leafIndex in circuit)
       const nullifierHash = note.nullifierHash ?? 0n;
-      const commitmentHex = commitment.toString(16).padStart(64, "0");
       const nullifierHashHex = nullifierHash.toString(16).padStart(64, "0");
 
-      // TODO: In production, query on-chain state to:
-      // 1. Check if commitment exists in Merkle tree
-      // 2. Check if nullifier has been used (already claimed)
-      // 3. Get the deposited amount
+      // Try to find this commitment in local index with different amounts
+      const commitmentIndex = getCommitmentIndex();
+      let foundAmount: number | null = null;
+      let foundCommitmentHex: string | null = null;
 
-      // For demo, show verification success with placeholder amount
-      const demoAmountSats = 100000;
+      // Try common demo amounts: 10000 (demo note), 100000 (0.001 BTC)
+      const tryAmounts = [10000, 100000, 50000, 25000, 1000000];
+      for (const amt of tryAmounts) {
+        const testCommitment = computeUnifiedCommitment(pubKeyX, BigInt(amt));
+        const testHex = testCommitment.toString(16).padStart(64, "0");
+        const entry = commitmentIndex.getCommitment(testHex);
+        if (entry) {
+          foundAmount = amt;
+          foundCommitmentHex = testHex;
+          console.log("[Verify] Found commitment in index with amount:", amt);
+          break;
+        }
+      }
+
+      // If not in index, check on-chain by fetching commitment tree
+      // For now, use demo amount of 10000 sats (standard addDemoNote amount)
+      const amountSats = foundAmount ?? 10000; // Default to demo note amount
+
+      // Compute commitment with found/default amount
+      const commitment = computeUnifiedCommitment(pubKeyX, BigInt(amountSats));
+      const commitmentHex = commitment.toString(16).padStart(64, "0");
+
+      console.log("[Verify] Commitment:", commitmentHex.slice(0, 16) + "...");
+      console.log("[Verify] Amount:", amountSats, "sats");
+      console.log("[Verify] Found in index:", foundAmount !== null);
 
       setVerifyResult({
         commitment: commitmentHex,
         nullifierHash: nullifierHashHex,
-        amountSats: demoAmountSats,
+        amountSats,
       });
       setStep("input"); // Stay on input but show verified state
     } catch (err) {
@@ -390,35 +423,87 @@ function ClaimContent() {
     try {
       // Derive note from seed
       const note = deriveNote(secretPhrase.trim(), 0, BigInt(0));
-      const amountSats = verifyResult?.amountSats ?? 100000;
+
+      // Unified Model: use nullifier as privKey, derive pubKeyX from Grumpkin curve
+      const privKey = note.nullifier;
+      const pubKeyPoint = pointMul(privKey, GRUMPKIN_GENERATOR);
+      const pubKeyX = pubKeyPoint[0]; // x-coordinate
+
+      // Compute commitment = Poseidon2(pubKeyX, amount)
+      // First try to get amount from index, fallback to verified amount or demo amount
+      const commitmentIndex = getCommitmentIndex();
+      let amountSats = verifyResult?.amountSats ?? 10000; // Demo amount default
+      let leafIndexBigint = 0n;
+      let merkleRoot = 0n;
+      let merkleSiblings: bigint[] = Array(20).fill(0n);
+      let merkleIndices: number[] = Array(20).fill(0);
 
       let proofBytes: Uint8Array | null = null;
-      const merkleRootHex = "0x" + "00".repeat(32);
-      const leafIndex = 0;
-      let proofStatus = "demo_mode";
+      let proofStatus = "pending";
+
+      // Try to fetch commitment tree state from Solana
+      try {
+        console.log("[Claim] Fetching commitment tree state...");
+        const [commitmentTreePDA] = await deriveCommitmentTreePDA(ZVAULT_PROGRAM_ID.toBase58());
+        const treeState = await fetchCommitmentTree(
+          { getAccountInfo: async (pk: unknown) => {
+            const info = await connection.getAccountInfo(new PublicKey(pk as string));
+            return info ? { data: new Uint8Array(info.data) } : null;
+          }},
+          commitmentTreePDA
+        );
+
+        if (treeState) {
+          merkleRoot = bytesToBigint(treeState.currentRoot);
+          console.log("[Claim] On-chain merkle root:", merkleRoot.toString(16).slice(0, 16) + "...");
+          console.log("[Claim] Next leaf index:", treeState.nextIndex.toString());
+        }
+      } catch (fetchErr) {
+        console.warn("[Claim] Could not fetch commitment tree:", fetchErr);
+      }
+
+      // Try to look up commitment in local index
+      const commitment = computeUnifiedCommitment(pubKeyX, BigInt(amountSats));
+      const commitmentHex = commitment.toString(16).padStart(64, "0");
+      const indexEntry = commitmentIndex.getCommitment(commitmentHex);
+
+      if (indexEntry) {
+        amountSats = Number(indexEntry.amount);
+        leafIndexBigint = indexEntry.index;
+        console.log("[Claim] Found commitment in index at leaf:", leafIndexBigint.toString());
+
+        // Get merkle proof from index
+        const proof = commitmentIndex.getMerkleProof(commitment);
+        if (proof) {
+          merkleSiblings = proof.siblings;
+          merkleIndices = proof.indices;
+          merkleRoot = proof.root;
+          console.log("[Claim] Using merkle proof from local index");
+        }
+      } else {
+        console.log("[Claim] Commitment not in local index, using on-chain root only");
+        // For demo notes added via addDemoNote, we need to track them
+        // If not tracked, we'll use the current root and empty siblings
+        // This will work if the contract accepts the proof
+      }
+
+      const merkleRootHex = "0x" + merkleRoot.toString(16).padStart(64, "0");
+      const leafIndex = Number(leafIndexBigint);
 
       // Try to generate real proof if prover is ready
       if (proverReady) {
         try {
-          console.log("[Claim] Generating real ZK proof...");
-
-          // TODO: Fetch actual merkle proof from on-chain commitment tree
-          // For now, use placeholder data that will be validated on-chain
-          // In production, query the CommitmentTree PDA for the merkle path
-          const merkleRoot = 0n; // Placeholder - would come from on-chain
-          const merkleSiblings = Array(20).fill(0n); // 20-level tree
-          const merkleIndices = Array(20).fill(0);
-
-          // Unified Model: use nullifier as privKey, derive pubKeyX from Grumpkin curve
-          const privKey = note.nullifier;
-          const pubKeyPoint = pointMul(privKey, GRUMPKIN_GENERATOR);
-          const pubKeyX = pubKeyPoint[0]; // x-coordinate
+          console.log("[Claim] Generating ZK proof...");
+          console.log("[Claim] - privKey:", privKey.toString(16).slice(0, 16) + "...");
+          console.log("[Claim] - pubKeyX:", pubKeyX.toString(16).slice(0, 16) + "...");
+          console.log("[Claim] - amount:", amountSats);
+          console.log("[Claim] - leafIndex:", leafIndex);
 
           const claimInputs: ClaimInputs = {
             privKey,
             pubKeyX,
             amount: BigInt(amountSats),
-            leafIndex: 0n, // Placeholder - would come from on-chain
+            leafIndex: leafIndexBigint,
             merkleRoot,
             merkleProof: {
               siblings: merkleSiblings,
@@ -432,9 +517,13 @@ function ClaimContent() {
           proofStatus = "zk_verified";
           console.log("[Claim] Proof generated:", proofBytes.length, "bytes");
         } catch (proofErr) {
-          console.warn("[Claim] Proof generation failed, using demo mode:", proofErr);
-          // Fall back to demo mode
+          console.warn("[Claim] Proof generation failed:", proofErr);
+          proofStatus = "proof_failed";
+          // Don't fall back to demo mode - show error
+          throw new Error(`ZK proof generation failed: ${proofErr instanceof Error ? proofErr.message : proofErr}`);
         }
+      } else {
+        throw new Error("Prover not ready. Please wait for initialization.");
       }
 
       setClaimProgress("submitting");
