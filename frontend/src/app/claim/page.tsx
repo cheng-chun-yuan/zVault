@@ -390,8 +390,8 @@ function ClaimContent() {
       const amountSats = verifyResult?.amountSats ?? 100000;
 
       let proofBytes: Uint8Array | null = null;
-      let merkleRootHex = "0x" + "00".repeat(32);
-      let leafIndex = 0;
+      const merkleRootHex = "0x" + "00".repeat(32);
+      const leafIndex = 0;
       let proofStatus = "demo_mode";
 
       // Try to generate real proof if prover is ready

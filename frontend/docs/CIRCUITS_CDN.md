@@ -13,9 +13,15 @@ ZK circuit artifacts are hosted on Cloudflare R2 for better performance and to r
 | File | Description |
 |------|-------------|
 | `zvault_claim.json` | Claim circuit artifact |
+| `zvault_claim_v2.json` | Claim circuit v2 (with Poseidon syscall) |
 | `zvault_transfer.json` | Transfer circuit artifact |
+| `zvault_stealth_transfer.json` | Stealth transfer circuit artifact |
 | `zvault_split.json` | Split circuit artifact |
 | `zvault_partial_withdraw.json` | Partial withdraw circuit artifact |
+| `zvault_helpers.json` | Helper functions circuit |
+| `zvault_pool_deposit.json` | Yield pool deposit circuit |
+| `zvault_pool_withdraw.json` | Yield pool withdraw circuit |
+| `zvault_pool_claim_yield.json` | Yield pool claim circuit |
 
 ## Updating Circuits
 
