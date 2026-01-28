@@ -26,6 +26,7 @@ export type CircuitType =
   | "transfer"
   | "split"
   | "partial_withdraw"
+  | "stealth_transfer"
   | "pool_deposit"
   | "pool_withdraw"
   | "pool_claim_yield";
@@ -59,6 +60,7 @@ const CIRCUIT_NAMES: Record<CircuitType, string> = {
   transfer: "zvault_transfer.json",
   split: "zvault_split.json",
   partial_withdraw: "zvault_partial_withdraw.json",
+  stealth_transfer: "zvault_stealth_transfer.json",
   pool_deposit: "zvault_pool_deposit.json",
   pool_withdraw: "zvault_pool_withdraw.json",
   pool_claim_yield: "zvault_pool_claim_yield.json",

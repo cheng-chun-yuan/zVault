@@ -14,7 +14,10 @@
     },
     "ios": {
       "supportsTablet": true,
-      "bundleIdentifier": "com.zvault.wallet"
+      "bundleIdentifier": "com.zvault.wallet",
+      "infoPlist": {
+        "ITSAppUsesNonExemptEncryption": false
+      }
     },
     "android": {
       "package": "com.zvault.wallet",
@@ -36,13 +39,22 @@
       [
         "expo-font",
         {
-          "fonts": ["./assets/fonts/SpaceMono-Regular.ttf"]
+          "fonts": [
+            "./assets/fonts/SpaceMono-Regular.ttf"
+          ]
         }
       ]
     ],
     "experiments": {
       "typedRoutes": true,
       "reactCompiler": true
-    }
+    },
+    "extra": {
+      "router": {},
+      "eas": {
+        "projectId": "e2cfa8b4-0997-40a3-b0b1-fde4645bc737"
+      }
+    },
+    "owner": "albertcheng"
   }
 }
