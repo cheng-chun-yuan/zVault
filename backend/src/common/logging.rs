@@ -9,13 +9,13 @@
 //! # Usage
 //!
 //! ```rust,ignore
-//! use zbtc::logging::{init_logging, LogLevel};
+//! use crate::common::logging::{init_logging, LogLevel};
 //!
 //! // Initialize at startup
 //! init_logging(LogLevel::Info, true)?; // JSON mode for production
 //!
 //! // Log events
-//! tracing::info!(target: "zvault::api", request_id = %id, "Processing withdrawal");
+//! info!(target: "zvault::api", request_id = %id, "Processing withdrawal");
 //! ```
 
 use serde::Serialize;
@@ -26,6 +26,8 @@ use tracing_subscriber::{
     util::SubscriberInitExt,
     EnvFilter, Layer,
 };
+
+use super::config::{Network, ZVaultConfig};
 
 // ============================================================================
 // Log Levels
@@ -326,7 +328,6 @@ pub fn log_withdrawal_event(
 ///
 /// # Example
 /// ```rust,ignore
-/// use zbtc::logging::{init_logging, LogLevel};
 /// init_logging(LogLevel::Info, true)?; // JSON for production
 /// init_logging(LogLevel::Debug, false)?; // Pretty print for development
 /// ```
@@ -378,9 +379,9 @@ pub fn init_logging(level: LogLevel, json_format: bool) -> Result<(), LoggingErr
 }
 
 /// Initialize logging from ZVaultConfig
-pub fn init_from_config(config: &crate::config::ZVaultConfig) -> Result<(), LoggingError> {
+pub fn init_from_config(config: &ZVaultConfig) -> Result<(), LoggingError> {
     let level = LogLevel::from(config.log_level.as_str());
-    let json_format = config.network == crate::config::Network::Mainnet;
+    let json_format = config.network == Network::Mainnet;
 
     init_logging(level, json_format)
 }

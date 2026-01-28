@@ -16,8 +16,36 @@
 //! - Noir ZK proof generation
 //! - Merkle tree operations
 //! - Transaction building and signing
+//!
+//! ## Module Organization
+//!
+//! The codebase is organized into these layers:
+//! - `common/` - Configuration, logging, error handling
+//! - `bitcoin/` - Esplora client, signing, taproot, SPV
+//! - `solana/` - Solana RPC client
+//! - `storage/` - Storage traits and implementations
+//! - `types/` - Shared data types
+//! - `services/` - Domain services (deposit, redemption, stealth)
+//! - `api/` - HTTP server, routes, middleware, WebSocket
 
+// =============================================================================
+// New Module Organization
+// =============================================================================
+
+pub mod common;
+pub mod bitcoin;
+pub mod solana;
+pub mod storage;
+pub mod types;
+pub mod services;
 pub mod api;
+
+// =============================================================================
+// Legacy Modules (for backward compatibility)
+// =============================================================================
+
+#[path = "api_legacy.rs"]
+pub mod api_legacy;
 pub mod btc_client;
 pub mod btc_spv;
 pub mod config;

@@ -14,7 +14,7 @@
 //!   cargo run -- tracker         - Start deposit tracker (background)
 //!   cargo run -- demo            - Run interactive demo
 
-use zbtc::api;
+use zbtc::api_legacy as api;
 use zbtc::deposit_tracker::{self, TrackerConfig};
 use zbtc::redemption::{RedemptionConfig, RedemptionService, SingleKeySigner};
 use zbtc::stealth::StealthDepositService;
