@@ -45,8 +45,10 @@ zVault is the first privacy-preserving Bitcoin bridge. We start with Solana, the
 - [x] Remove demo mode bypass in redemption ✅
 
 **Medium Priority:**
-- [ ] Safe zero-copy deserialization (`#[repr(C, packed)]`)
-- [ ] Alignment checks in state parsing
+- [x] Safe zero-copy deserialization (`#[repr(C)]` + byte arrays) ✅
+- [x] Rent-exempt validation helper ✅
+- [x] Duplicate account prevention ✅
+- [x] Secure account closure (anti-revival) ✅
 
 ### Infrastructure
 - [ ] PostgreSQL persistence layer
