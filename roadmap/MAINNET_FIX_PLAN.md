@@ -12,16 +12,16 @@ Pre-mainnet security fixes identified from Trail of Bits vulnerability scan.
 
 **Risk:** Silent state corruption, double-spending
 
-**Files to Fix:**
-- [ ] `split_commitment.rs`
-- [ ] `transfer_stealth.rs`
-- [ ] `verify_stealth_deposit_v2.rs`
-- [ ] `request_redemption.rs`
-- [ ] `deposit_to_pool.rs`
-- [ ] `withdraw_from_pool.rs`
-- [ ] `claim_pool_yield.rs`
-- [ ] `harvest_yield.rs`
-- [ ] `compound_yield.rs`
+**Files Fixed:** ✅ COMPLETE
+- [x] `split_commitment.rs`
+- [x] `transfer_stealth.rs`
+- [x] `verify_stealth_deposit_v2.rs`
+- [x] `request_redemption.rs`
+- [x] `deposit_to_pool.rs`
+- [x] `withdraw_from_pool.rs`
+- [x] `claim_pool_yield.rs`
+- [x] `harvest_yield.rs`
+- [x] `compound_yield.rs`
 
 **Implementation:**
 
@@ -78,14 +78,14 @@ fn ensure_not_mainnet(program_id: &Pubkey) -> ProgramResult {
 
 ## Priority 2: HIGH (Fix Before Launch)
 
-### Fix 2.1: Token Account Validation
+### Fix 2.1: Token Account Validation ✅ COMPLETE
 
 **Issue:** No verification that token account mint matches expected mint
 
 **Risk:** Token account spoofing
 
-**Files to Fix:**
-- [ ] `utils/token.rs`
+**Files Fixed:**
+- [x] `utils/validation.rs` - Added `validate_token_mint()` function
 
 **Implementation:**
 
@@ -137,13 +137,13 @@ if !rent.is_exempt(lamports, SIZE) {
 
 ---
 
-### Fix 2.3: Remove Demo Mode Bypass in Redemption
+### Fix 2.3: Remove Demo Mode Bypass in Redemption ✅ COMPLETE
 
 **Issue:** VK hash == 0 skips root validation
 
 **Risk:** Double-spending in demo mode
 
-**File:** `request_redemption.rs`
+**File Fixed:** `request_redemption.rs`
 
 **Implementation:**
 
@@ -203,9 +203,9 @@ pub fn from_bytes(data: &[u8]) -> Result<&Self, ProgramError> {
 
 ---
 
-### Fix 3.2: Add Error Enum for New Checks
+### Fix 3.2: Add Error Enum for New Checks ✅ COMPLETE
 
-**File:** `error.rs`
+**File Fixed:** `error.rs`
 
 ```rust
 pub enum ZVaultError {
