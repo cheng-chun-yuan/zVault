@@ -8,12 +8,13 @@
 
 use pinocchio::{
     account_info::AccountInfo,
-    instruction::{Seed, Signer},
     program_error::ProgramError,
     pubkey::{find_program_address, Pubkey},
     sysvars::{clock::Clock, rent::Rent, Sysvar},
     ProgramResult,
 };
+
+use crate::utils::create_pda_account;
 
 use crate::state::{NameRegistry, NAME_REGISTRY_DISCRIMINATOR, validate_name};
 
@@ -98,30 +99,6 @@ impl UpdateNameData {
     }
 }
 
-/// Create PDA account via CPI to system program
-fn create_pda_account<'a>(
-    payer: &'a AccountInfo,
-    pda_account: &'a AccountInfo,
-    _system_program: &'a AccountInfo,
-    program_id: &Pubkey,
-    lamports: u64,
-    space: u64,
-    signer_seeds: &[&[u8]],
-) -> ProgramResult {
-    let create_account = pinocchio_system::instructions::CreateAccount {
-        from: payer,
-        to: pda_account,
-        lamports,
-        space,
-        owner: program_id,
-    };
-
-    let seeds: Vec<Seed> = signer_seeds.iter().map(|s| Seed::from(*s)).collect();
-    let signer = Signer::from(&seeds[..]);
-
-    create_account.invoke_signed(&[signer])
-}
-
 /// Register a .zkey name
 ///
 /// Creates a PDA seeded by the name hash that stores the stealth address.
@@ -142,7 +119,7 @@ pub fn process_register_name(
 
     let name_registry = &accounts[0];
     let owner = &accounts[1];
-    let system_program = &accounts[2];
+    let _system_program = &accounts[2];
 
     let ix_data = RegisterNameData::from_bytes(data)?;
 
@@ -182,7 +159,6 @@ pub fn process_register_name(
         create_pda_account(
             owner,
             name_registry,
-            system_program,
             program_id,
             lamports,
             NameRegistry::SIZE as u64,

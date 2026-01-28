@@ -2,12 +2,13 @@
 
 use pinocchio::{
     account_info::AccountInfo,
-    instruction::{Seed, Signer},
     program_error::ProgramError,
     pubkey::{find_program_address, Pubkey},
     sysvars::{clock::Clock, rent::Rent, Sysvar},
     ProgramResult,
 };
+
+use crate::utils::create_pda_account;
 
 use crate::constants::{MAX_DEPOSIT_SATS, MIN_DEPOSIT_SATS, TOKEN_2022_PROGRAM_ID};
 use crate::error::ZVaultError;
@@ -76,31 +77,6 @@ impl<'a> InitializeAccounts<'a> {
     }
 }
 
-/// Create account via CPI to system program using pinocchio-system
-fn create_pda_account<'a>(
-    payer: &'a AccountInfo,
-    pda_account: &'a AccountInfo,
-    _system_program: &'a AccountInfo,
-    program_id: &Pubkey,
-    lamports: u64,
-    space: u64,
-    signer_seeds: &[&[u8]],
-) -> ProgramResult {
-    // Use pinocchio-system CreateAccount helper
-    let create_account = pinocchio_system::instructions::CreateAccount {
-        from: payer,
-        to: pda_account,
-        lamports,
-        space,
-        owner: program_id,
-    };
-
-    let seeds: Vec<Seed> = signer_seeds.iter().map(|s| Seed::from(*s)).collect();
-    let signer = Signer::from(&seeds[..]);
-
-    create_account.invoke_signed(&[signer])
-}
-
 /// Initialize the zVault pool
 pub fn process_initialize(
     program_id: &Pubkey,
@@ -153,7 +129,6 @@ pub fn process_initialize(
         create_pda_account(
             accounts.authority,
             accounts.pool_state,
-            accounts.system_program,
             program_id,
             pool_lamports,
             PoolState::LEN as u64,
@@ -172,7 +147,6 @@ pub fn process_initialize(
         create_pda_account(
             accounts.authority,
             accounts.commitment_tree,
-            accounts.system_program,
             program_id,
             tree_lamports,
             CommitmentTree::LEN as u64,

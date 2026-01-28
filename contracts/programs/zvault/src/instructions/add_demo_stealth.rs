@@ -17,7 +17,6 @@
 
 use pinocchio::{
     account_info::AccountInfo,
-    instruction::{Seed, Signer},
     program_error::ProgramError,
     pubkey::{find_program_address, Pubkey},
     sysvars::{clock::Clock, rent::Rent, Sysvar},
@@ -26,7 +25,7 @@ use pinocchio::{
 
 use crate::error::ZVaultError;
 use crate::state::{CommitmentTree, PoolState, StealthAnnouncement, STEALTH_ANNOUNCEMENT_DISCRIMINATOR};
-use crate::utils::{mint_zbtc, validate_program_owner, validate_token_2022_owner, validate_token_program_key};
+use crate::utils::{mint_zbtc, validate_program_owner, validate_token_2022_owner, validate_token_program_key, create_pda_account};
 
 /// Add demo stealth instruction data (single ephemeral key)
 /// Layout:
@@ -62,30 +61,6 @@ impl AddDemoStealthData {
     }
 }
 
-/// Create PDA account
-fn create_pda_account<'a>(
-    payer: &'a AccountInfo,
-    pda_account: &'a AccountInfo,
-    _system_program: &'a AccountInfo,
-    program_id: &Pubkey,
-    lamports: u64,
-    space: u64,
-    signer_seeds: &[&[u8]],
-) -> ProgramResult {
-    let create_account = pinocchio_system::instructions::CreateAccount {
-        from: payer,
-        to: pda_account,
-        lamports,
-        space,
-        owner: program_id,
-    };
-
-    let seeds: Vec<Seed> = signer_seeds.iter().map(|s| Seed::from(*s)).collect();
-    let signer = Signer::from(&seeds[..]);
-
-    create_account.invoke_signed(&[signer])
-}
-
 /// Add a demo stealth deposit (admin only)
 ///
 /// Creates a private deposit that user can find with viewing key
@@ -114,7 +89,7 @@ pub fn process_add_demo_stealth(
     let commitment_tree = &accounts[1];
     let stealth_announcement = &accounts[2];
     let authority = &accounts[3];
-    let system_program = &accounts[4];
+    let _system_program = &accounts[4];
     let zbtc_mint = &accounts[5];
     let pool_vault = &accounts[6];
     let token_program = &accounts[7];
@@ -192,7 +167,6 @@ pub fn process_add_demo_stealth(
         create_pda_account(
             authority,
             stealth_announcement,
-            system_program,
             program_id,
             lamports,
             StealthAnnouncement::SIZE as u64,

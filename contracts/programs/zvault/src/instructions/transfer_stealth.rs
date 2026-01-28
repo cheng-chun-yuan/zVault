@@ -12,7 +12,6 @@
 
 use pinocchio::{
     account_info::AccountInfo,
-    instruction::{Seed, Signer},
     program_error::ProgramError,
     pubkey::{find_program_address, Pubkey},
     sysvars::{clock::Clock, rent::Rent, Sysvar},
@@ -27,7 +26,7 @@ use crate::state::{
 };
 use crate::utils::{
     get_test_verification_key, verify_transfer_proof, Groth16Proof,
-    validate_program_owner, validate_account_writable,
+    validate_program_owner, validate_account_writable, create_pda_account,
 };
 
 /// Transfer stealth instruction data
@@ -121,30 +120,6 @@ impl<'a> TransferStealthAccounts<'a> {
             system_program,
         })
     }
-}
-
-/// Create PDA account via CPI to system program
-fn create_pda_account<'a>(
-    payer: &'a AccountInfo,
-    pda_account: &'a AccountInfo,
-    _system_program: &'a AccountInfo,
-    program_id: &Pubkey,
-    lamports: u64,
-    space: u64,
-    signer_seeds: &[&[u8]],
-) -> ProgramResult {
-    let create_account = pinocchio_system::instructions::CreateAccount {
-        from: payer,
-        to: pda_account,
-        lamports,
-        space,
-        owner: program_id,
-    };
-
-    let seeds: Vec<Seed> = signer_seeds.iter().map(|s| Seed::from(*s)).collect();
-    let signer = Signer::from(&seeds[..]);
-
-    create_account.invoke_signed(&[signer])
 }
 
 /// Process transfer stealth instruction
@@ -261,7 +236,6 @@ pub fn process_transfer_stealth(
         create_pda_account(
             accounts.sender,
             accounts.nullifier_record,
-            accounts.system_program,
             program_id,
             lamports,
             NullifierRecord::LEN as u64,
@@ -293,7 +267,6 @@ pub fn process_transfer_stealth(
         create_pda_account(
             accounts.sender,
             accounts.stealth_announcement,
-            accounts.system_program,
             program_id,
             lamports,
             StealthAnnouncement::SIZE as u64,

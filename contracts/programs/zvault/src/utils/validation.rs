@@ -5,12 +5,88 @@
 
 use pinocchio::{
     account_info::AccountInfo,
+    instruction::{Seed, Signer},
     program_error::ProgramError,
     pubkey::Pubkey,
+    ProgramResult,
 };
 
 use crate::constants::TOKEN_2022_PROGRAM_ID;
 use crate::error::ZVaultError;
+
+// ============================================================================
+// PDA CREATION HELPER (shared across all instructions)
+// ============================================================================
+
+/// Create a PDA account via CPI to system program
+///
+/// This is a shared helper to eliminate duplication across instruction files.
+/// Previously duplicated in: announce_stealth, transfer_stealth, add_demo_stealth,
+/// initialize, register_name (5 files, ~100 lines saved)
+#[inline]
+pub fn create_pda_account<'a>(
+    payer: &'a AccountInfo,
+    pda_account: &'a AccountInfo,
+    program_id: &Pubkey,
+    lamports: u64,
+    space: u64,
+    signer_seeds: &[&[u8]],
+) -> ProgramResult {
+    let create_account = pinocchio_system::instructions::CreateAccount {
+        from: payer,
+        to: pda_account,
+        lamports,
+        space,
+        owner: program_id,
+    };
+
+    // Convert seeds to Pinocchio format
+    let seeds: [Seed; 4] = [
+        if signer_seeds.len() > 0 { Seed::from(signer_seeds[0]) } else { Seed::from(&[][..]) },
+        if signer_seeds.len() > 1 { Seed::from(signer_seeds[1]) } else { Seed::from(&[][..]) },
+        if signer_seeds.len() > 2 { Seed::from(signer_seeds[2]) } else { Seed::from(&[][..]) },
+        if signer_seeds.len() > 3 { Seed::from(signer_seeds[3]) } else { Seed::from(&[][..]) },
+    ];
+
+    let signer = Signer::from(&seeds[..signer_seeds.len()]);
+    create_account.invoke_signed(&[signer])
+}
+
+// ============================================================================
+// BATCH VALIDATION HELPERS
+// ============================================================================
+
+/// Validate multiple accounts are owned by program and writable
+///
+/// Combines owner + writable validation for common patterns.
+/// Reduces boilerplate in instruction handlers.
+#[inline]
+pub fn validate_program_accounts_writable(
+    accounts: &[&AccountInfo],
+    program_id: &Pubkey,
+) -> Result<(), ProgramError> {
+    for account in accounts {
+        validate_program_owner(account, program_id)?;
+        validate_account_writable(account)?;
+    }
+    Ok(())
+}
+
+/// Validate multiple accounts are owned by program (read-only)
+#[inline]
+pub fn validate_program_accounts(
+    accounts: &[&AccountInfo],
+    program_id: &Pubkey,
+) -> Result<(), ProgramError> {
+    for account in accounts {
+        validate_program_owner(account, program_id)?;
+    }
+    Ok(())
+}
+
+// ============================================================================
+// SINGLE ACCOUNT VALIDATION
+// ============================================================================
 
 /// Validate that an account is owned by the program
 ///
