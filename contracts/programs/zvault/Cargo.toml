@@ -10,8 +10,14 @@ name = "zvault_pinocchio"
 
 [features]
 default = []
-testing = []
+# SECURITY: The `testing` feature is removed for production.
+# It was used to bypass ZK proof verification during development.
+# If you need to run tests, use `cargo test` which doesn't require this feature.
+# DO NOT re-add this feature for production builds.
 idl-build = []
+# Enable demo instructions (ADD_DEMO_NOTE, ADD_DEMO_STEALTH) for devnet/testnet only.
+# SECURITY: DO NOT enable in production/mainnet builds.
+devnet = []
 
 [dependencies]
 pinocchio = "0.9"

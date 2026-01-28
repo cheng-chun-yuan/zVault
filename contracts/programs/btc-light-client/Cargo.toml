@@ -10,7 +10,8 @@ name = "btc_light_client"
 
 [features]
 default = []
-testing = []
+# SECURITY: The `testing` feature is removed for production.
+# DO NOT re-add this feature for production builds.
 
 [dependencies]
 pinocchio = "0.9"

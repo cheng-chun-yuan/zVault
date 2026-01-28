@@ -134,16 +134,10 @@ pub fn verify_groth16_proof(
     }
 
     // Use syscalls for actual verification
+    // SECURITY: Never bypass verification - always return false on error
     match verify_groth16_with_syscalls(vk, proof, public_inputs) {
         Ok(valid) => valid,
-        Err(_) => {
-            #[cfg(feature = "testing")]
-            {
-                return true;
-            }
-            #[cfg(not(feature = "testing"))]
-            false
-        }
+        Err(_) => false,
     }
 }
 
@@ -433,24 +427,29 @@ pub fn verify_pool_compound_proof(
     verify_groth16_proof(vk, proof, &public_inputs)
 }
 
-/// Get placeholder verification key for testing
-/// In production, load from on-chain account
+/// Get placeholder verification key
+///
+/// # SECURITY WARNING
+/// This function returns an invalid verification key that will FAIL verification.
+/// In production, verification keys MUST be loaded from on-chain accounts that
+/// contain real Groth16 verification keys generated during trusted setup.
+///
+/// # TODO for Production
+/// Replace all usages of this function with proper VK loading from on-chain accounts:
+/// 1. Deploy VK accounts during setup
+/// 2. Load VK data in each instruction that needs verification
+/// 3. Remove this placeholder function
+///
+/// Current usage is a development shortcut that MUST be replaced before mainnet.
 pub fn get_test_verification_key(num_public_inputs: usize) -> VerificationKey {
+    // Log warning in development builds
+    #[cfg(feature = "devnet")]
+    pinocchio::msg!("WARNING: Using placeholder VK - proofs will fail in production!");
+
     let mut vk = VerificationKey::default();
     vk.ic_length = (num_public_inputs + 1) as u8;
-
-    #[cfg(feature = "testing")]
-    {
-        // Set non-zero values to pass validation checks
-        vk.alpha[0] = 1;
-        vk.beta[0] = 1;
-        vk.gamma[0] = 1;
-        vk.delta[0] = 1;
-        for i in 0..vk.ic_length as usize {
-            vk.ic[i][0] = 1;
-        }
-    }
-
+    // Returns a zero-initialized VK that will fail all verifications
+    // This ensures no proofs can be validated without proper VK setup
     vk
 }
 

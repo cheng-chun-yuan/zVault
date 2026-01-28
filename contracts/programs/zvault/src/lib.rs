@@ -63,8 +63,13 @@ pub mod instruction {
     pub const UPDATE_NAME: u8 = 18;
     pub const TRANSFER_NAME: u8 = 19;
 
-    // Demo/testing (admin only)
+    // Demo/testing (admin only) - DISABLED IN PRODUCTION
+    // SECURITY: These instructions are only available on devnet/testnet.
+    // Set ZVAULT_DEMO_MODE=1 environment variable to enable.
+    // DO NOT enable in production builds.
+    #[cfg(feature = "devnet")]
     pub const ADD_DEMO_NOTE: u8 = 21;
+    #[cfg(feature = "devnet")]
     pub const ADD_DEMO_STEALTH: u8 = 22;
 
     // Backend-managed stealth deposit v2 (authority only)
@@ -128,10 +133,12 @@ pub fn process_instruction(
         instruction::TRANSFER_NAME => {
             instructions::process_transfer_name(program_id, accounts, data)
         }
-        // Demo/testing
+        // Demo/testing - DISABLED IN PRODUCTION
+        #[cfg(feature = "devnet")]
         instruction::ADD_DEMO_NOTE => {
             instructions::process_add_demo_note(program_id, accounts, data)
         }
+        #[cfg(feature = "devnet")]
         instruction::ADD_DEMO_STEALTH => {
             instructions::process_add_demo_stealth(program_id, accounts, data)
         }
@@ -222,7 +229,7 @@ mod tests {
 
     #[test]
     fn test_discriminators_unique() {
-        let discriminators = [
+        let mut discriminators = vec![
             instruction::INITIALIZE,
             instruction::SPLIT_COMMITMENT,
             instruction::REQUEST_REDEMPTION,
@@ -234,8 +241,6 @@ mod tests {
             instruction::REGISTER_NAME,
             instruction::UPDATE_NAME,
             instruction::TRANSFER_NAME,
-            instruction::ADD_DEMO_NOTE,
-            instruction::ADD_DEMO_STEALTH,
             instruction::VERIFY_STEALTH_DEPOSIT_V2,
             // Yield pool operations
             instruction::CREATE_YIELD_POOL,
@@ -246,6 +251,13 @@ mod tests {
             instruction::UPDATE_YIELD_RATE,
             instruction::HARVEST_YIELD,
         ];
+
+        // Demo instructions only available in devnet builds
+        #[cfg(feature = "devnet")]
+        {
+            discriminators.push(instruction::ADD_DEMO_NOTE);
+            discriminators.push(instruction::ADD_DEMO_STEALTH);
+        }
 
         for (i, &d1) in discriminators.iter().enumerate() {
             for (j, &d2) in discriminators.iter().enumerate() {

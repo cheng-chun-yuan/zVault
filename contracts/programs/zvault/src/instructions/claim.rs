@@ -185,11 +185,12 @@ pub fn process_claim(
         return Err(ZVaultError::AmountTooLarge.into());
     }
 
-    // Check if demo mode (VK hash is all zeros)
-    let is_demo_mode = ix_data.vk_hash == [0u8; 32];
+    // SECURITY: Demo mode bypass has been removed for production.
+    // All claims must provide valid merkle roots and ZK proofs.
+    // VK hash validation is done by off-chain relayers.
 
-    // Verify root is valid in commitment tree (skip in demo mode)
-    if !is_demo_mode {
+    // Verify root is valid in commitment tree
+    {
         let tree_data = accounts.commitment_tree.try_borrow_data()?;
         let tree = CommitmentTree::from_bytes(&tree_data)?;
 
