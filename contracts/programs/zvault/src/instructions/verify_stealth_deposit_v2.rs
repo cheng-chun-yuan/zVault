@@ -41,7 +41,10 @@ use crate::state::{
 };
 use crate::utils::bitcoin::compute_tx_hash;
 use crate::utils::chadbuffer::read_transaction_from_buffer;
-use crate::utils::{mint_zbtc, validate_program_owner, validate_token_2022_owner, validate_token_program_key, validate_account_writable};
+use crate::utils::{
+    mint_zbtc, validate_program_owner, validate_token_2022_owner,
+    validate_token_program_key, validate_account_writable,
+};
 
 /// Required confirmations for demo mode (reduced from 6)
 pub const DEMO_REQUIRED_CONFIRMATIONS: u64 = 1;

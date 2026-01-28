@@ -143,6 +143,12 @@ pub enum ZVaultError {
 
     #[error("Account not rent exempt")]
     NotRentExempt = 6063,
+
+    #[error("Duplicate accounts detected")]
+    DuplicateAccounts = 6064,
+
+    #[error("Account is closed")]
+    AccountClosed = 6065,
 }
 
 impl From<ZVaultError> for ProgramError {

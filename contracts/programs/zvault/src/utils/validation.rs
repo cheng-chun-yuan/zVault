@@ -127,6 +127,118 @@ pub fn validate_token_mint(
     Ok(())
 }
 
+/// Validate that an account is rent-exempt
+///
+/// # Security
+/// Accounts that are not rent-exempt may be garbage collected,
+/// causing data loss and potential security issues.
+#[inline(always)]
+pub fn validate_rent_exempt(
+    account: &AccountInfo,
+    rent: &pinocchio::sysvars::rent::Rent,
+) -> Result<(), ProgramError> {
+    let lamports = account.lamports();
+    let data_len = account.data_len();
+    let min_balance = rent.minimum_balance(data_len);
+
+    if lamports < min_balance {
+        return Err(ZVaultError::NotRentExempt.into());
+    }
+    Ok(())
+}
+
+/// Validate that two accounts are different (prevent duplicate mutable account attacks)
+///
+/// # Security
+/// Passing the same account for multiple parameters can cause the program
+/// to overwrite its own changes, leading to unexpected behavior.
+#[inline(always)]
+pub fn validate_accounts_different(
+    account1: &AccountInfo,
+    account2: &AccountInfo,
+) -> Result<(), ProgramError> {
+    if account1.key() == account2.key() {
+        return Err(ProgramError::InvalidArgument);
+    }
+    Ok(())
+}
+
+/// Validate that an account is initialized (has discriminator set)
+///
+/// # Security
+/// Prevents use of uninitialized accounts that may contain garbage data.
+#[inline(always)]
+pub fn validate_initialized(
+    account: &AccountInfo,
+    expected_discriminator: u8,
+) -> Result<(), ProgramError> {
+    let data = account.try_borrow_data()?;
+    if data.is_empty() || data[0] != expected_discriminator {
+        return Err(ZVaultError::NotInitialized.into());
+    }
+    Ok(())
+}
+
+/// Validate that an account is NOT initialized (for safe initialization)
+///
+/// # Security
+/// Prevents reinitialization attacks that could overwrite existing data.
+#[inline(always)]
+pub fn validate_not_initialized(
+    account: &AccountInfo,
+    discriminator: u8,
+) -> Result<(), ProgramError> {
+    let data = account.try_borrow_data()?;
+    if !data.is_empty() && data[0] == discriminator {
+        return Err(ZVaultError::AlreadyInitialized.into());
+    }
+    Ok(())
+}
+
+/// Securely close an account (prevents revival attacks)
+///
+/// # Security
+/// 1. Marks account as closed with special discriminator
+/// 2. Transfers all lamports to destination
+/// 3. Zeroes remaining data to prevent data leakage
+///
+/// This prevents "revival attacks" where a closed account is
+/// refunded within the same transaction.
+pub fn close_account_securely(
+    account: &AccountInfo,
+    destination: &AccountInfo,
+) -> Result<(), ProgramError> {
+    // Mark as closed with special discriminator
+    {
+        let mut data = account.try_borrow_mut_data()?;
+        if !data.is_empty() {
+            data[0] = 0xFF; // Closed account marker
+            // Zero remaining data for security
+            for byte in data[1..].iter_mut() {
+                *byte = 0;
+            }
+        }
+    }
+
+    // Transfer all lamports to destination
+    let account_lamports = account.lamports();
+    if account_lamports > 0 {
+        // Subtract from source
+        unsafe {
+            *account.borrow_mut_lamports_unchecked() = 0;
+        }
+        // Add to destination
+        unsafe {
+            *destination.borrow_mut_lamports_unchecked() = destination
+                .lamports()
+                .checked_add(account_lamports)
+                .ok_or(ProgramError::ArithmeticOverflow)?;
+        }
+    }
+
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     // Tests would go here with mock AccountInfo
