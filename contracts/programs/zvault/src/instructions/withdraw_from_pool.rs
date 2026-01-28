@@ -183,7 +183,7 @@ pub fn process_withdraw_from_pool(
     // Check if pool nullifier already spent
     {
         let nullifier_data = accounts.pool_nullifier_record.try_borrow_data()?;
-        if nullifier_data.len() >= 1 && nullifier_data[0] == POOL_NULLIFIER_RECORD_DISCRIMINATOR {
+        if !nullifier_data.is_empty() && nullifier_data[0] == POOL_NULLIFIER_RECORD_DISCRIMINATOR {
             return Err(ZVaultError::PoolNullifierAlreadyUsed.into());
         }
     }

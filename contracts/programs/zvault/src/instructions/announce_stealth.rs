@@ -20,10 +20,12 @@ use crate::state::{StealthAnnouncement, STEALTH_ANNOUNCEMENT_DISCRIMINATOR};
 use crate::utils::create_pda_account;
 
 /// Announce stealth instruction data (single ephemeral key)
+///
 /// Layout:
 /// - ephemeral_pub: [u8; 33] (Grumpkin compressed)
 /// - amount_sats: u64 (8 bytes, public amount from BTC tx)
 /// - commitment: [u8; 32]
+///
 /// Total: 73 bytes (was 105 with dual keys)
 pub struct AnnounceStealthData {
     pub ephemeral_pub: [u8; 33],

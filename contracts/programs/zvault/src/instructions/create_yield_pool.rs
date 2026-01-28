@@ -12,7 +12,6 @@ use crate::error::ZVaultError;
 use crate::state::{
     PoolCommitmentTree, YieldPool, POOL_COMMITMENT_TREE_DISCRIMINATOR, YIELD_POOL_DISCRIMINATOR,
 };
-use crate::utils::validate_program_owner;
 
 /// Create yield pool instruction data
 pub struct CreateYieldPoolData {
@@ -123,7 +122,7 @@ pub fn process_create_yield_pool(
     // Check if pool already exists
     {
         let pool_data = accounts.yield_pool.try_borrow_data()?;
-        if pool_data.len() >= 1 && pool_data[0] == YIELD_POOL_DISCRIMINATOR {
+        if !pool_data.is_empty() && pool_data[0] == YIELD_POOL_DISCRIMINATOR {
             return Err(ZVaultError::AlreadyInitialized.into());
         }
     }
@@ -131,7 +130,7 @@ pub fn process_create_yield_pool(
     // Check if tree already exists
     {
         let tree_data = accounts.pool_commitment_tree.try_borrow_data()?;
-        if tree_data.len() >= 1 && tree_data[0] == POOL_COMMITMENT_TREE_DISCRIMINATOR {
+        if !tree_data.is_empty() && tree_data[0] == POOL_COMMITMENT_TREE_DISCRIMINATOR {
             return Err(ZVaultError::AlreadyInitialized.into());
         }
     }

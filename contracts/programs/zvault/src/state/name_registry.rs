@@ -142,9 +142,7 @@ pub fn validate_name(name: &[u8]) -> Result<(), ProgramError> {
 
     for &c in name {
         // Allow lowercase letters, numbers, and underscores
-        let valid = (c >= b'a' && c <= b'z')
-            || (c >= b'0' && c <= b'9')
-            || c == b'_';
+        let valid = c.is_ascii_lowercase() || c.is_ascii_digit() || c == b'_';
 
         if !valid {
             return Err(ProgramError::InvalidArgument);

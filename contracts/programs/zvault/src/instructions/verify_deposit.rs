@@ -224,7 +224,7 @@ pub fn process_verify_deposit(
         let tree = CommitmentTree::from_bytes_mut(&mut tree_data)?;
 
         let index = tree.next_index();
-        if index >= CommitmentTree::MAX_LEAVES as u64 {
+        if index >= CommitmentTree::MAX_LEAVES {
             return Err(ZVaultError::TreeFull.into());
         }
 

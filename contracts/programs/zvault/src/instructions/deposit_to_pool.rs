@@ -12,7 +12,7 @@ use crate::constants::PROOF_SIZE;
 use crate::error::ZVaultError;
 use crate::state::{
     CommitmentTree, NullifierOperationType, NullifierRecord, PoolCommitmentTree,
-    PoolNullifierRecord, PoolOperationType, YieldPool, NULLIFIER_RECORD_DISCRIMINATOR,
+    YieldPool, NULLIFIER_RECORD_DISCRIMINATOR,
 };
 use crate::utils::{get_test_verification_key, verify_pool_deposit_proof, Groth16Proof, validate_program_owner, validate_account_writable};
 
@@ -175,7 +175,7 @@ pub fn process_deposit_to_pool(
     // Check if nullifier already spent
     {
         let nullifier_data = accounts.input_nullifier_record.try_borrow_data()?;
-        if nullifier_data.len() >= 1 && nullifier_data[0] == NULLIFIER_RECORD_DISCRIMINATOR {
+        if !nullifier_data.is_empty() && nullifier_data[0] == NULLIFIER_RECORD_DISCRIMINATOR {
             return Err(ZVaultError::NullifierAlreadyUsed.into());
         }
     }

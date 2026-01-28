@@ -42,7 +42,7 @@ pub fn create_pda_account<'a>(
 
     // Convert seeds to Pinocchio format
     let seeds: [Seed; 4] = [
-        if signer_seeds.len() > 0 { Seed::from(signer_seeds[0]) } else { Seed::from(&[][..]) },
+        if !signer_seeds.is_empty() { Seed::from(signer_seeds[0]) } else { Seed::from(&[][..]) },
         if signer_seeds.len() > 1 { Seed::from(signer_seeds[1]) } else { Seed::from(&[][..]) },
         if signer_seeds.len() > 2 { Seed::from(signer_seeds[2]) } else { Seed::from(&[][..]) },
         if signer_seeds.len() > 3 { Seed::from(signer_seeds[3]) } else { Seed::from(&[][..]) },
@@ -197,7 +197,7 @@ pub fn validate_token_mint(
         .try_into()
         .map_err(|_| ZVaultError::InvalidAccountData)?;
 
-    if &mint_bytes != expected_mint.as_ref() {
+    if mint_bytes != expected_mint.as_ref() {
         return Err(ZVaultError::InvalidMint.into());
     }
     Ok(())

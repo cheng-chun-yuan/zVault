@@ -33,10 +33,10 @@ pub const BUFFER_HEADER_SIZE: usize = 32;
 /// ```text
 /// [authority (32 bytes)][raw_tx_data...]
 /// ```
-pub fn read_transaction_from_buffer<'a>(
-    buffer_data: &'a [u8],
+pub fn read_transaction_from_buffer(
+    buffer_data: &[u8],
     transaction_size: usize,
-) -> Result<&'a [u8], ProgramError> {
+) -> Result<&[u8], ProgramError> {
     // Minimum size: header + at least 1 byte of tx data
     if buffer_data.len() < BUFFER_HEADER_SIZE + 1 {
         return Err(ProgramError::InvalidAccountData);

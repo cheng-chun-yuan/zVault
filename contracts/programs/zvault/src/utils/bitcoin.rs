@@ -378,12 +378,8 @@ impl<'a> ParsedTransaction<'a> {
 
     /// Find deposit output (non-OP_RETURN with value > 0)
     pub fn find_deposit_output(&self) -> Option<TxOutput<'a>> {
-        for output in self.outputs() {
-            if !output.is_op_return() && output.value > 0 {
-                return Some(output);
-            }
-        }
-        None
+        self.outputs()
+            .find(|output| !output.is_op_return() && output.value > 0)
     }
 
     /// Find stealth OP_RETURN and parse stealth data

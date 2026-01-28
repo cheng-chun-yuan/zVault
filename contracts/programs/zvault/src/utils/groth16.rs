@@ -135,10 +135,7 @@ pub fn verify_groth16_proof(
 
     // Use syscalls for actual verification
     // SECURITY: Never bypass verification - always return false on error
-    match verify_groth16_with_syscalls(vk, proof, public_inputs) {
-        Ok(valid) => valid,
-        Err(_) => false,
-    }
+    verify_groth16_with_syscalls(vk, proof, public_inputs).unwrap_or_default()
 }
 
 /// Perform full Groth16 verification using Solana alt_bn128 syscalls
@@ -195,15 +192,15 @@ fn compute_vk_x_optimized(
 
     let n = public_inputs.len().min(7);
 
-    for i in 0..n {
+    for (i, input) in public_inputs.iter().take(n).enumerate() {
         // Skip zero inputs (saves ~6500 CU per skip)
-        if is_zero_32(&public_inputs[i]) {
+        if is_zero_32(input) {
             continue;
         }
 
         // Scalar multiplication: pub_input[i] * ic[i+1]
         mul_input[0..64].copy_from_slice(&vk.ic[i + 1]);
-        mul_input[64..96].copy_from_slice(&public_inputs[i]);
+        mul_input[64..96].copy_from_slice(input);
 
         let product =
             alt_bn128_multiplication(&mul_input).map_err(|_| ProgramError::InvalidArgument)?;
@@ -382,6 +379,7 @@ pub fn verify_pool_withdraw_proof(
 
 /// Verify pool claim yield proof
 /// Public inputs: [pool_merkle_root, old_nullifier_hash, new_pool_commitment, yield_commitment, current_epoch, yield_rate_bps]
+#[allow(clippy::too_many_arguments)]
 pub fn verify_pool_claim_yield_proof(
     vk: &VerificationKey,
     proof: &Groth16Proof,
@@ -446,11 +444,12 @@ pub fn get_test_verification_key(num_public_inputs: usize) -> VerificationKey {
     #[cfg(feature = "devnet")]
     pinocchio::msg!("WARNING: Using placeholder VK - proofs will fail in production!");
 
-    let mut vk = VerificationKey::default();
-    vk.ic_length = (num_public_inputs + 1) as u8;
     // Returns a zero-initialized VK that will fail all verifications
     // This ensures no proofs can be validated without proper VK setup
-    vk
+    VerificationKey {
+        ic_length: (num_public_inputs + 1) as u8,
+        ..Default::default()
+    }
 }
 
 #[cfg(test)]

@@ -31,3 +31,7 @@ num-derive = "0.4"
 [dev-dependencies]
 mollusk-svm = "0.0.13"
 solana-sdk = "2.1"
+
+[lints.rust]
+# Solana programs use target_os = "solana" which is not a standard cfg value
+unexpected_cfgs = { level = "allow", check-cfg = ["cfg(target_os, values(\"solana\"))"] }

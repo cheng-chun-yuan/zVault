@@ -129,7 +129,6 @@ pub fn process_compound_yield(
     let current_epoch: u64;
     let yield_rate_bps: u16;
     let yield_amount: u64;
-    let new_principal: u64;
     {
         let pool_data = accounts.yield_pool.try_borrow_data()?;
         let pool = YieldPool::from_bytes(&pool_data)?;
@@ -156,8 +155,8 @@ pub fn process_compound_yield(
             return Err(ZVaultError::ZeroAmount.into());
         }
 
-        // Calculate new principal (old + yield)
-        new_principal = ix_data
+        // Validate new principal doesn't overflow (actual value verified in ZK proof)
+        ix_data
             .old_principal
             .checked_add(yield_amount)
             .ok_or(ProgramError::ArithmeticOverflow)?;
@@ -196,7 +195,7 @@ pub fn process_compound_yield(
     // Check if pool nullifier already spent
     {
         let nullifier_data = accounts.pool_nullifier_record.try_borrow_data()?;
-        if nullifier_data.len() >= 1 && nullifier_data[0] == POOL_NULLIFIER_RECORD_DISCRIMINATOR {
+        if !nullifier_data.is_empty() && nullifier_data[0] == POOL_NULLIFIER_RECORD_DISCRIMINATOR {
             return Err(ZVaultError::PoolNullifierAlreadyUsed.into());
         }
     }

@@ -30,6 +30,7 @@ use crate::utils::{
 };
 
 /// Transfer stealth instruction data
+///
 /// Layout:
 /// - proof: [u8; 256] (Groth16 proof)
 /// - merkle_root: [u8; 32] (Input merkle root)
@@ -37,6 +38,7 @@ use crate::utils::{
 /// - output_commitment: [u8; 32] (New commitment for recipient)
 /// - ephemeral_pub: [u8; 33] (For recipient to scan)
 /// - amount_sats: u64 (Transfer amount)
+///
 /// Total: 256 + 32 + 32 + 32 + 33 + 8 = 393 bytes
 pub struct TransferStealthData {
     pub proof: [u8; PROOF_SIZE],
@@ -182,7 +184,7 @@ pub fn process_transfer_stealth(
     // Check if nullifier already spent
     {
         let nullifier_data = accounts.nullifier_record.try_borrow_data()?;
-        if nullifier_data.len() >= 1 && nullifier_data[0] == NULLIFIER_RECORD_DISCRIMINATOR {
+        if !nullifier_data.is_empty() && nullifier_data[0] == NULLIFIER_RECORD_DISCRIMINATOR {
             return Err(ZVaultError::NullifierAlreadyUsed.into());
         }
     }

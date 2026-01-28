@@ -225,7 +225,7 @@ pub fn process_request_redemption(
     // Check if nullifier already spent (account already exists and initialized)
     {
         let nullifier_data = accounts.nullifier_record.try_borrow_data()?;
-        if nullifier_data.len() >= 1 && nullifier_data[0] == NULLIFIER_RECORD_DISCRIMINATOR {
+        if !nullifier_data.is_empty() && nullifier_data[0] == NULLIFIER_RECORD_DISCRIMINATOR {
             return Err(ZVaultError::NullifierAlreadyUsed.into());
         }
     }
@@ -245,7 +245,7 @@ pub fn process_request_redemption(
     // Check if redemption already exists
     {
         let redemption_data = accounts.redemption_request.try_borrow_data()?;
-        if redemption_data.len() >= 1 && redemption_data[0] == REDEMPTION_REQUEST_DISCRIMINATOR {
+        if !redemption_data.is_empty() && redemption_data[0] == REDEMPTION_REQUEST_DISCRIMINATOR {
             return Err(ZVaultError::AlreadyInitialized.into());
         }
     }

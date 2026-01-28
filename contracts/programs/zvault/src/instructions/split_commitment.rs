@@ -145,7 +145,7 @@ pub fn process_split_commitment(
     // Check if nullifier already spent
     {
         let nullifier_data = accounts.nullifier_record.try_borrow_data()?;
-        if nullifier_data.len() >= 1 && nullifier_data[0] == NULLIFIER_RECORD_DISCRIMINATOR {
+        if !nullifier_data.is_empty() && nullifier_data[0] == NULLIFIER_RECORD_DISCRIMINATOR {
             return Err(ZVaultError::NullifierAlreadyUsed.into());
         }
     }

@@ -28,10 +28,12 @@ use crate::state::{CommitmentTree, PoolState, StealthAnnouncement, STEALTH_ANNOU
 use crate::utils::{mint_zbtc, validate_program_owner, validate_token_2022_owner, validate_token_program_key, create_pda_account};
 
 /// Add demo stealth instruction data (single ephemeral key)
+///
 /// Layout:
 /// - ephemeral_pub: [u8; 33] (Grumpkin compressed)
 /// - commitment: [u8; 32] (pre-computed by SDK)
 /// - amount: u64 (8 bytes)
+///
 /// Total: 73 bytes (was 105 with dual keys)
 pub struct AddDemoStealthData {
     pub ephemeral_pub: [u8; 33],
