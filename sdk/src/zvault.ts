@@ -20,11 +20,20 @@
  */
 
 import {
-  address,
   type Address,
-  getProgramDerivedAddress,
-  getAddressEncoder,
 } from "@solana/kit";
+
+import {
+  ZVAULT_PROGRAM_ID,
+  derivePoolStatePDA,
+  deriveLightClientPDA,
+  deriveCommitmentTreePDA,
+  deriveBlockHeaderPDA,
+  deriveDepositRecordPDA,
+  deriveNullifierRecordPDA,
+  deriveStealthAnnouncementPDA,
+  commitmentToBytes,
+} from "./pda";
 
 import {
   generateNote,
@@ -59,10 +68,8 @@ import {
   type StealthMetaAddress,
 } from "./api";
 
-// Program ID (Solana Devnet)
-export const ZVAULT_PROGRAM_ID: Address = address(
-  "5S5ynMni8Pgd6tKkpYaXiPJiEXgw927s7T2txDtDivRK"
-);
+// Re-export program ID from pda module
+export { ZVAULT_PROGRAM_ID } from "./pda";
 
 /**
  * Deposit credentials returned after generating a deposit
@@ -98,8 +105,19 @@ export interface SplitResult {
  */
 interface LocalMerkleState {
   leaves: Uint8Array[];
+  /** Index map for O(1) commitment lookups */
+  leafIndex: Map<string, number>;
   filledSubtrees: Uint8Array[];
   root: Uint8Array;
+}
+
+/** Convert Uint8Array to hex string for Map key */
+function toHexKey(bytes: Uint8Array): string {
+  let hex = '';
+  for (let i = 0; i < bytes.length; i++) {
+    hex += bytes[i].toString(16).padStart(2, '0');
+  }
+  return hex;
 }
 
 /**
@@ -141,6 +159,7 @@ export class ZVaultClient {
     this.programId = programId;
     this.merkleState = {
       leaves: [],
+      leafIndex: new Map(),
       filledSubtrees: Array(TREE_DEPTH).fill(null).map(() => new Uint8Array(ZERO_VALUE)),
       root: new Uint8Array(ZERO_VALUE),
     };
@@ -269,73 +288,36 @@ export class ZVaultClient {
   }
 
   // ==========================================================================
-  // PDA Derivation
+  // PDA Derivation (delegated to shared pda module)
   // ==========================================================================
 
-  async derivePoolStatePDA(): Promise<[Address, number]> {
-    const encoder = getAddressEncoder();
-    const programIdBytes = encoder.encode(this.programId);
-    const result = await getProgramDerivedAddress({
-      seeds: [new TextEncoder().encode("pool_state")],
-      programAddress: this.programId,
-    });
-    return [result[0], result[1]];
+  derivePoolStatePDA(): Promise<[Address, number]> {
+    return derivePoolStatePDA(this.programId);
   }
 
-  async deriveLightClientPDA(): Promise<[Address, number]> {
-    const result = await getProgramDerivedAddress({
-      seeds: [new TextEncoder().encode("btc_light_client")],
-      programAddress: this.programId,
-    });
-    return [result[0], result[1]];
+  deriveLightClientPDA(): Promise<[Address, number]> {
+    return deriveLightClientPDA(this.programId);
   }
 
-  async deriveCommitmentTreePDA(): Promise<[Address, number]> {
-    const result = await getProgramDerivedAddress({
-      seeds: [new TextEncoder().encode("commitment_tree")],
-      programAddress: this.programId,
-    });
-    return [result[0], result[1]];
+  deriveCommitmentTreePDA(): Promise<[Address, number]> {
+    return deriveCommitmentTreePDA(this.programId);
   }
 
-  async deriveBlockHeaderPDA(height: number): Promise<[Address, number]> {
-    const heightBuffer = new Uint8Array(8);
-    const view = new DataView(heightBuffer.buffer);
-    view.setBigUint64(0, BigInt(height), true);
-    const result = await getProgramDerivedAddress({
-      seeds: [new TextEncoder().encode("block_header"), heightBuffer],
-      programAddress: this.programId,
-    });
-    return [result[0], result[1]];
+  deriveBlockHeaderPDA(height: number): Promise<[Address, number]> {
+    return deriveBlockHeaderPDA(height, this.programId);
   }
 
-  async deriveDepositRecordPDA(txid: Uint8Array): Promise<[Address, number]> {
-    const result = await getProgramDerivedAddress({
-      seeds: [new TextEncoder().encode("deposit"), txid],
-      programAddress: this.programId,
-    });
-    return [result[0], result[1]];
+  deriveDepositRecordPDA(txid: Uint8Array): Promise<[Address, number]> {
+    return deriveDepositRecordPDA(txid, this.programId);
   }
 
-  async deriveNullifierRecordPDA(nullifierHash: Uint8Array): Promise<[Address, number]> {
-    const result = await getProgramDerivedAddress({
-      seeds: [new TextEncoder().encode("nullifier"), nullifierHash],
-      programAddress: this.programId,
-    });
-    return [result[0], result[1]];
+  deriveNullifierRecordPDA(nullifierHash: Uint8Array): Promise<[Address, number]> {
+    return deriveNullifierRecordPDA(nullifierHash, this.programId);
   }
 
-  async deriveStealthAnnouncementPDA(commitment: bigint): Promise<[Address, number]> {
-    const commitmentHex = commitment.toString(16).padStart(64, "0");
-    const commitmentBuffer = new Uint8Array(32);
-    for (let i = 0; i < 32; i++) {
-      commitmentBuffer[i] = parseInt(commitmentHex.slice(i * 2, i * 2 + 2), 16);
-    }
-    const result = await getProgramDerivedAddress({
-      seeds: [new TextEncoder().encode("stealth"), commitmentBuffer],
-      programAddress: this.programId,
-    });
-    return [result[0], result[1]];
+  deriveStealthAnnouncementPDA(commitment: bigint): Promise<[Address, number]> {
+    const commitmentBuffer = commitmentToBytes(commitment);
+    return deriveStealthAnnouncementPDA(commitmentBuffer, this.programId);
   }
 
   // ==========================================================================
@@ -380,11 +362,15 @@ export class ZVaultClient {
 
   insertCommitment(commitment: Uint8Array): number {
     const index = this.merkleState.leaves.length;
-    this.merkleState.leaves.push(new Uint8Array(commitment));
+    const commitmentCopy = new Uint8Array(commitment);
+    this.merkleState.leaves.push(commitmentCopy);
+
+    // Add to index map for O(1) lookup
+    this.merkleState.leafIndex.set(toHexKey(commitmentCopy), index);
 
     const isLeft = index % 2 === 0;
     if (isLeft && this.merkleState.filledSubtrees[0]) {
-      this.merkleState.filledSubtrees[0] = new Uint8Array(commitment);
+      this.merkleState.filledSubtrees[0] = commitmentCopy;
     }
 
     return index;
@@ -407,12 +393,10 @@ export class ZVaultClient {
   }
 
   private findLeafIndex(commitment: Uint8Array): number {
-    for (let i = 0; i < this.merkleState.leaves.length; i++) {
-      if (this.arraysEqual(this.merkleState.leaves[i], commitment)) {
-        return i;
-      }
-    }
-    return -1;
+    // O(1) lookup using index map
+    const key = toHexKey(commitment);
+    const index = this.merkleState.leafIndex.get(key);
+    return index ?? -1;
   }
 
   private generateMerkleProof(leafIndex: number): MerkleProof {
@@ -431,13 +415,6 @@ export class ZVaultClient {
     };
   }
 
-  private arraysEqual(a: Uint8Array, b: Uint8Array): boolean {
-    if (a.length !== b.length) return false;
-    for (let i = 0; i < a.length; i++) {
-      if (a[i] !== b[i]) return false;
-    }
-    return true;
-  }
 }
 
 /**

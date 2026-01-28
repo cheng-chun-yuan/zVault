@@ -13,7 +13,7 @@
  * - TypeScript support
  */
 
-import { useEffect, useState, useCallback, useRef } from "react";
+import { useEffect, useState, useCallback, useRef, useMemo } from "react";
 import { WebDepositWatcher, createWebWatcher } from "../watcher/web";
 import { NativeDepositWatcher, createNativeWatcher } from "../watcher/native";
 import {
@@ -159,6 +159,13 @@ export function useDepositWatcher(
   // Watcher ref
   const watcherRef = useRef<BaseDepositWatcher | null>(null);
 
+  // Store user callbacks in ref to avoid stale closures
+  const userCallbacksRef = useRef(userCallbacks);
+  userCallbacksRef.current = userCallbacks;
+
+  // Store config in ref to avoid re-initialization
+  const configRef = useRef(config);
+
   // Update deposits state from watcher
   const syncDeposits = useCallback(() => {
     if (watcherRef.current) {
@@ -166,37 +173,37 @@ export function useDepositWatcher(
     }
   }, []);
 
-  // Combined callbacks that update state and call user callbacks
-  const internalCallbacks: WatcherCallbacks = {
+  // Memoize internal callbacks to prevent recreation on every render
+  const internalCallbacks = useMemo<WatcherCallbacks>(() => ({
     onDetected: (deposit) => {
       syncDeposits();
-      userCallbacks?.onDetected?.(deposit);
+      userCallbacksRef.current?.onDetected?.(deposit);
     },
     onConfirming: (deposit, confirmations) => {
       syncDeposits();
-      userCallbacks?.onConfirming?.(deposit, confirmations);
+      userCallbacksRef.current?.onConfirming?.(deposit, confirmations);
     },
     onConfirmed: (deposit) => {
       syncDeposits();
-      userCallbacks?.onConfirmed?.(deposit);
+      userCallbacksRef.current?.onConfirmed?.(deposit);
     },
     onVerified: (deposit) => {
       syncDeposits();
-      userCallbacks?.onVerified?.(deposit);
+      userCallbacksRef.current?.onVerified?.(deposit);
     },
     onClaimed: (deposit) => {
       syncDeposits();
-      userCallbacks?.onClaimed?.(deposit);
+      userCallbacksRef.current?.onClaimed?.(deposit);
     },
     onError: (deposit, err) => {
       syncDeposits();
-      userCallbacks?.onError?.(deposit, err);
+      userCallbacksRef.current?.onError?.(deposit, err);
     },
     onStatusChange: (deposit, oldStatus, newStatus) => {
       syncDeposits();
-      userCallbacks?.onStatusChange?.(deposit, oldStatus, newStatus);
+      userCallbacksRef.current?.onStatusChange?.(deposit, oldStatus, newStatus);
     },
-  };
+  }), [syncDeposits]);
 
   // Initialize watcher on mount
   useEffect(() => {
@@ -206,12 +213,13 @@ export function useDepositWatcher(
     }
 
     let watcher: BaseDepositWatcher;
+    let mounted = true;
 
     // Create platform-specific watcher
     if (isReactNative()) {
-      watcher = createNativeWatcher(internalCallbacks, config);
+      watcher = createNativeWatcher(internalCallbacks, configRef.current);
     } else {
-      watcher = createWebWatcher(internalCallbacks, config);
+      watcher = createWebWatcher(internalCallbacks, configRef.current);
     }
 
     watcherRef.current = watcher;
@@ -220,21 +228,26 @@ export function useDepositWatcher(
     watcher
       .init()
       .then(() => {
-        setIsReady(true);
-        setIsLoading(false);
-        syncDeposits();
+        if (mounted) {
+          setIsReady(true);
+          setIsLoading(false);
+          syncDeposits();
+        }
       })
       .catch((err) => {
-        setError(err);
-        setIsLoading(false);
+        if (mounted) {
+          setError(err);
+          setIsLoading(false);
+        }
       });
 
     // Cleanup on unmount
     return () => {
+      mounted = false;
       watcher.destroy();
       watcherRef.current = null;
     };
-  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [autoInit, internalCallbacks, syncDeposits]);
 
   // Actions
   const createDeposit = useCallback(

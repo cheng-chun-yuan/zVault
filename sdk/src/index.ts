@@ -279,16 +279,34 @@ export {
 } from "./chadbuffer";
 
 // ==========================================================================
+// PDA Derivation (centralized module)
+// ==========================================================================
+
+export {
+  ZVAULT_PROGRAM_ID,
+  BTC_LIGHT_CLIENT_PROGRAM_ID,
+  PDA_SEEDS,
+  derivePoolStatePDA,
+  deriveCommitmentTreePDA,
+  deriveNullifierRecordPDA,
+  deriveStealthAnnouncementPDA,
+  deriveDepositRecordPDA,
+  deriveLightClientPDA,
+  deriveBlockHeaderPDA,
+  deriveNameRegistryPDA,
+  deriveYieldPoolPDA,
+  derivePoolCommitmentTreePDA,
+  derivePoolNullifierPDA,
+  deriveStealthPoolAnnouncementPDA,
+  commitmentToBytes,
+} from "./pda";
+
+// ==========================================================================
 // Verify deposit helpers
 // ==========================================================================
 
 export {
   verifyDeposit,
-  derivePoolStatePDA,
-  deriveLightClientPDA,
-  deriveBlockHeaderPDA,
-  deriveCommitmentTreePDA,
-  deriveDepositRecordPDA,
   buildMerkleProof,
 } from "./verify-deposit";
 
@@ -329,7 +347,7 @@ export {
   buildStealthOpReturn,
   parseStealthOpReturn,
   verifyStealthDeposit,
-  deriveStealthAnnouncementPDA,
+  // deriveStealthAnnouncementPDA exported from pda module
   STEALTH_OP_RETURN_SIZE,
   VERIFY_STEALTH_DEPOSIT_DISCRIMINATOR,
   type PreparedStealthDeposit,
@@ -453,7 +471,7 @@ export {
   NAME_REGISTRY_SEED,
   NAME_REGISTRY_DISCRIMINATOR,
   NAME_REGISTRY_SIZE,
-  ZVAULT_PROGRAM_ID,
+  // ZVAULT_PROGRAM_ID exported from pda module
   // Types
   type NameRegistryEntry,
   type ZkeyStealthAddress,
