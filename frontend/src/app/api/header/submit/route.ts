@@ -9,6 +9,8 @@ import {
 } from "@solana/web3.js";
 import { createHash } from "crypto";
 
+export const runtime = "nodejs";
+
 // Compute Anchor instruction discriminator
 function getAnchorDiscriminator(instructionName: string): Buffer {
   const hash = createHash("sha256")

@@ -9,6 +9,8 @@ import {
   buildAddDemoStealthTransaction,
 } from "@/lib/solana/demo-instructions";
 
+export const runtime = "nodejs";
+
 // Load admin keypair from environment variable
 // Demo instructions require admin signature to add mock deposits
 function getAdminKeypair(): Keypair | null {

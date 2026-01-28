@@ -9,6 +9,8 @@ import {
 } from "@solana/web3.js";
 import { createHash } from "crypto";
 
+export const runtime = "nodejs";
+
 // Load relayer keypair from environment variable
 function getRelayerKeypair(): Keypair | null {
   if (!process.env.RELAYER_KEYPAIR) {
