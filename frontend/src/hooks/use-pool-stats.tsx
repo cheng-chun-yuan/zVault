@@ -35,7 +35,7 @@ export interface PoolStats {
  * - 228-235: max_deposit (u64 LE)
  * - 236-243: total_shielded (u64 LE)
  */
-function decodePoolState(data: Buffer): PoolStats | null {
+function decodePoolState(data: Uint8Array): PoolStats | null {
   if (data.length < 244) {
     console.warn("Pool state data too short:", data.length);
     return null;
@@ -47,8 +47,11 @@ function decodePoolState(data: Buffer): PoolStats | null {
     return null;
   }
 
+  // Use DataView for cross-platform bigint reading
+  const view = new DataView(data.buffer, data.byteOffset, data.byteLength);
+
   const readU64LE = (offset: number): bigint => {
-    return data.readBigUInt64LE(offset);
+    return view.getBigUint64(offset, true); // true = little-endian
   };
 
   return {
