@@ -1,6 +1,6 @@
 {
   "name": "@zvault/sdk",
-  "version": "1.0.0",
+  "version": "1.0.3",
   "description": "ZVault SDK - Privacy-preserving Bitcoin to Solana bridge",
   "type": "module",
   "main": "dist/index.js",

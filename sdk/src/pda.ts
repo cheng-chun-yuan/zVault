@@ -4,24 +4,39 @@
  * Centralized module for all zVault PDA derivations.
  * Prevents code duplication across api.ts, zvault.ts, etc.
  *
+ * NOTE: Program IDs are defined in config.ts and re-exported here
+ * for backwards compatibility. Use config.ts for all new code.
+ *
  * @module pda
  */
 
 import {
-  address,
   getProgramDerivedAddress,
   type Address,
 } from "@solana/kit";
 
-/** Default zVault program ID (Solana Devnet) */
-export const ZVAULT_PROGRAM_ID: Address = address(
-  "5S5ynMni8Pgd6tKkpYaXiPJiEXgw927s7T2txDtDivRK"
-);
+// Import program IDs from config for local use
+import {
+  ZVAULT_PROGRAM_ID as _ZVAULT_PROGRAM_ID,
+  BTC_LIGHT_CLIENT_PROGRAM_ID as _BTC_LIGHT_CLIENT_PROGRAM_ID,
+} from "./config";
 
-/** BTC Light Client program ID */
-export const BTC_LIGHT_CLIENT_PROGRAM_ID: Address = address(
-  "95vWurTc9BhjBvEbBdUKoTZHMPPyB1iQZEuXEaR7wPpd"
-);
+// Re-export everything from config for backwards compatibility
+export {
+  ZVAULT_PROGRAM_ID,
+  BTC_LIGHT_CLIENT_PROGRAM_ID,
+  getConfig,
+  setConfig,
+  DEVNET_CONFIG,
+  MAINNET_CONFIG,
+  LOCALNET_CONFIG,
+  type NetworkConfig,
+  type NetworkType,
+} from "./config";
+
+// Local aliases for use in this file
+const ZVAULT_PROGRAM_ID = _ZVAULT_PROGRAM_ID;
+const BTC_LIGHT_CLIENT_PROGRAM_ID = _BTC_LIGHT_CLIENT_PROGRAM_ID;
 
 // =============================================================================
 // PDA Seeds

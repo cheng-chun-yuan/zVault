@@ -279,6 +279,29 @@ export {
 } from "./chadbuffer";
 
 // ==========================================================================
+// Configuration (SINGLE SOURCE OF TRUTH for addresses)
+// ==========================================================================
+
+export {
+  // Network configuration
+  getConfig,
+  setConfig,
+  createConfig,
+  DEVNET_CONFIG,
+  MAINNET_CONFIG,
+  LOCALNET_CONFIG,
+  // Program IDs
+  TOKEN_2022_PROGRAM_ID,
+  ATA_PROGRAM_ID,
+  // Version info
+  SDK_VERSION,
+  DEPLOYMENT_INFO,
+  // Types
+  type NetworkConfig,
+  type NetworkType,
+} from "./config";
+
+// ==========================================================================
 // PDA Derivation (centralized module)
 // ==========================================================================
 
