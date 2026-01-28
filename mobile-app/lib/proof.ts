@@ -1,13 +1,7 @@
 /**
  * ZK Proof Generation Service
  *
- * Uses mopro (NoirReactNative) for native Noir proof generation on mobile devices.
- * Achieves ~2-3 second proof times on modern iPhones.
- *
- * SDK Integration:
- * - Uses SDK for Merkle proof formatting
- * - Uses SDK for nullifier hash computation
- * - Native prover is still faster than WASM for mobile
+ * Downloads circuits from circuits.amidoggy.xyz and uses mopro for native proving.
  *
  * @module lib/proof
  */
@@ -15,12 +9,35 @@
 import * as FileSystem from "expo-file-system/legacy";
 import {
   proofToNoirFormat,
-  proofToOnChainFormat,
-  computeNullifier,
-  hashNullifier,
   type MerkleProof as SDKMerkleProof,
   type Note,
 } from '@zvault/sdk';
+
+// Type declarations for noir-react-native
+type NoirModule = {
+  uniffiInitAsync?: () => Promise<void>;
+  generateNoirProof: (
+    circuitPath: string,
+    srsPath: string,
+    inputs: string,
+    onChain: boolean,
+    verificationKey: string,
+    lowMemoryMode: boolean
+  ) => Promise<{ proof: string; publicInputs?: string[] }>;
+  verifyNoirProof: (
+    circuitPath: string,
+    proof: string,
+    onChain: boolean,
+    verificationKey: string,
+    lowMemoryMode: boolean
+  ) => Promise<boolean>;
+  getNoirVerificationKey: (
+    circuitPath: string,
+    srsPath: string,
+    onChain: boolean,
+    lowMemoryMode: boolean
+  ) => Promise<string>;
+};
 
 // ============================================================================
 // Types
@@ -51,6 +68,31 @@ export interface ClaimProofInput {
   merkleProof: MerkleProof;
 }
 
+export interface SplitProofInput {
+  inputNullifier: string;
+  inputSecret: string;
+  inputAmount: string;
+  merkleRoot: string;
+  merkleProof: MerkleProof;
+  output1Nullifier: string;
+  output1Secret: string;
+  output1Amount: string;
+  output2Nullifier: string;
+  output2Secret: string;
+  output2Amount: string;
+}
+
+export interface TransferProofInput {
+  inputNullifier: string;
+  inputSecret: string;
+  inputAmount: string;
+  merkleRoot: string;
+  merkleProof: MerkleProof;
+  outputNullifier: string;
+  outputSecret: string;
+  recipient: string;
+}
+
 export interface PartialWithdrawProofInput {
   inputNullifier: string;
   inputSecret: string;
@@ -64,43 +106,76 @@ export interface PartialWithdrawProofInput {
   recipient: string;
 }
 
+export interface StealthTransferProofInput {
+  inputNullifier: string;
+  inputSecret: string;
+  inputAmount: string;
+  merkleRoot: string;
+  merkleProof: MerkleProof;
+  outputNullifier: string;
+  outputSecret: string;
+  outputAmount: string;
+  stealthPubkey: string;
+  ephemeralPubkey: string;
+}
+
+export interface InitProgress {
+  stage: 'checking' | 'downloading' | 'ready' | 'error';
+  progress?: number;
+  message: string;
+}
+
 // ============================================================================
 // Constants
 // ============================================================================
+
+const CIRCUITS_BASE_URL = "https://circuits.amidoggy.xyz";
 
 export const CIRCUITS = {
   CLAIM: "zvault_claim",
   SPLIT: "zvault_split",
   TRANSFER: "zvault_transfer",
   PARTIAL_WITHDRAW: "zvault_partial_withdraw",
+  STEALTH_TRANSFER: "zvault_stealth_transfer",
 } as const;
 
 export type CircuitName = (typeof CIRCUITS)[keyof typeof CIRCUITS];
+
+const ALL_CIRCUITS: CircuitName[] = [
+  CIRCUITS.CLAIM,
+  CIRCUITS.SPLIT,
+  CIRCUITS.TRANSFER,
+  CIRCUITS.PARTIAL_WITHDRAW,
+  CIRCUITS.STEALTH_TRANSFER,
+];
 
 // ============================================================================
 // File Paths
 // ============================================================================
 
-function getCircuitAssetsDir(): string {
-  if (!FileSystem.documentDirectory) {
+function getCircuitDir(): string {
+  const docDir = FileSystem.documentDirectory;
+  if (!docDir) {
     throw new Error("Document directory not available");
   }
-  return FileSystem.documentDirectory + "circuits/";
+  return docDir + "circuits/";
 }
 
 function getCircuitPath(circuitName: string): string {
-  return getCircuitAssetsDir() + `${circuitName}.json`;
+  return getCircuitDir() + `${circuitName}.json`;
 }
 
 function getSrsPath(): string {
-  return getCircuitAssetsDir() + "srs/bn254_g1.dat";
+  return getCircuitDir() + "bn254_srs.dat";
 }
 
 // ============================================================================
-// Noir Availability Check
+// Noir Module Management
 // ============================================================================
 
-let _noirModule: typeof import("noir-react-native") | null = null;
+let _noirModule: NoirModule | null = null;
+let _isInitialized = false;
+const _verificationKeys = new Map<string, string>();
 
 /**
  * Check if native Noir prover is available
@@ -108,97 +183,184 @@ let _noirModule: typeof import("noir-react-native") | null = null;
 export async function isNoirAvailable(): Promise<boolean> {
   try {
     if (!_noirModule) {
-      _noirModule = await import("noir-react-native");
+      const module = await import("noir-react-native") as unknown as NoirModule;
+      if (module.uniffiInitAsync) {
+        await module.uniffiInitAsync();
+      }
+      _noirModule = module;
     }
     return !!_noirModule.generateNoirProof;
-  } catch {
+  } catch (error) {
+    console.warn("[Proof] Noir not available:", error);
     return false;
   }
 }
 
-/**
- * Get the Noir module (lazy loaded)
- */
-async function getNoirModule(): Promise<typeof import("noir-react-native")> {
+async function getNoirModule(): Promise<NoirModule> {
   if (!_noirModule) {
-    _noirModule = await import("noir-react-native");
+    const module = await import("noir-react-native") as unknown as NoirModule;
+    if (module.uniffiInitAsync) {
+      await module.uniffiInitAsync();
+    }
+    _noirModule = module;
   }
   return _noirModule;
 }
 
 // ============================================================================
-// Circuit Initialization
+// Initialization
 // ============================================================================
 
 /**
- * Check if circuit files are available
+ * Initialize the proof system
+ * Downloads all circuits and SRS from circuits.amidoggy.xyz
  */
-export async function areCircuitsAvailable(): Promise<boolean> {
-  const claimPath = getCircuitPath(CIRCUITS.CLAIM);
+export async function initializeProofSystem(
+  onProgress?: (progress: InitProgress) => void
+): Promise<boolean> {
+  if (_isInitialized) {
+    onProgress?.({ stage: 'ready', message: 'Proof system ready' });
+    return true;
+  }
+
+  try {
+    onProgress?.({ stage: 'checking', message: 'Checking proof system...' });
+
+    // Create circuits directory
+    const circuitDir = getCircuitDir();
+    const dirInfo = await FileSystem.getInfoAsync(circuitDir);
+    if (!dirInfo.exists) {
+      await FileSystem.makeDirectoryAsync(circuitDir, { intermediates: true });
+    }
+
+    // Download SRS first (largest file)
+    const srsPath = getSrsPath();
+    const srsInfo = await FileSystem.getInfoAsync(srsPath);
+    if (!srsInfo.exists) {
+      onProgress?.({ stage: 'downloading', progress: 0, message: 'Downloading SRS...' });
+      await downloadFile(`${CIRCUITS_BASE_URL}/bn254_srs.dat`, srsPath, (p) => {
+        onProgress?.({ stage: 'downloading', progress: p * 0.5, message: 'Downloading SRS...' });
+      });
+    }
+
+    // Download all circuits
+    const circuitProgress = 0.5;
+    const progressPerCircuit = 0.5 / ALL_CIRCUITS.length;
+
+    for (let i = 0; i < ALL_CIRCUITS.length; i++) {
+      const circuitName = ALL_CIRCUITS[i];
+      const circuitPath = getCircuitPath(circuitName);
+      const circuitInfo = await FileSystem.getInfoAsync(circuitPath);
+
+      if (!circuitInfo.exists) {
+        const baseProgress = circuitProgress + i * progressPerCircuit;
+        onProgress?.({
+          stage: 'downloading',
+          progress: baseProgress,
+          message: `Downloading ${circuitName}...`
+        });
+
+        await downloadFile(
+          `${CIRCUITS_BASE_URL}/${circuitName}.json`,
+          circuitPath,
+          (p) => {
+            onProgress?.({
+              stage: 'downloading',
+              progress: baseProgress + p * progressPerCircuit,
+              message: `Downloading ${circuitName}...`
+            });
+          }
+        );
+      }
+    }
+
+    // Verify Noir is available
+    const noirAvailable = await isNoirAvailable();
+    if (!noirAvailable) {
+      throw new Error("Native Noir prover not available");
+    }
+
+    _isInitialized = true;
+    onProgress?.({ stage: 'ready', message: 'Proof system ready' });
+    console.log("[Proof] System initialized successfully");
+    return true;
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'Initialization failed';
+    onProgress?.({ stage: 'error', message });
+    console.error("[Proof] Initialization failed:", error);
+    return false;
+  }
+}
+
+async function downloadFile(
+  url: string,
+  destPath: string,
+  onProgress?: (progress: number) => void
+): Promise<void> {
+  console.log(`[Proof] Downloading: ${url}`);
+
+  const downloadResumable = FileSystem.createDownloadResumable(
+    url,
+    destPath,
+    {},
+    (downloadProgress) => {
+      if (downloadProgress.totalBytesExpectedToWrite > 0) {
+        const progress = downloadProgress.totalBytesWritten / downloadProgress.totalBytesExpectedToWrite;
+        onProgress?.(progress);
+      }
+    }
+  );
+
+  const result = await downloadResumable.downloadAsync();
+  if (!result?.uri) {
+    throw new Error(`Download failed: ${url}`);
+  }
+
+  console.log(`[Proof] Downloaded: ${destPath}`);
+}
+
+/**
+ * Check if proof system is ready
+ */
+export async function isProofSystemReady(): Promise<boolean> {
+  if (_isInitialized) return true;
+
   const srsPath = getSrsPath();
+  const srsInfo = await FileSystem.getInfoAsync(srsPath);
+  if (!srsInfo.exists) return false;
 
-  const [claimInfo, srsInfo] = await Promise.all([
-    FileSystem.getInfoAsync(claimPath),
-    FileSystem.getInfoAsync(srsPath),
-  ]);
-
-  return claimInfo.exists && srsInfo.exists;
-}
-
-/**
- * Initialize circuit assets directory
- */
-export async function initializeCircuits(): Promise<void> {
-  const circuitDir = getCircuitAssetsDir();
-  const srsDir = circuitDir + "srs/";
-
-  // Create directories if they don't exist
-  const dirInfo = await FileSystem.getInfoAsync(circuitDir);
-  if (!dirInfo.exists) {
-    await FileSystem.makeDirectoryAsync(circuitDir, { intermediates: true });
+  for (const circuitName of ALL_CIRCUITS) {
+    const circuitPath = getCircuitPath(circuitName);
+    const circuitInfo = await FileSystem.getInfoAsync(circuitPath);
+    if (!circuitInfo.exists) return false;
   }
 
-  const srsDirInfo = await FileSystem.getInfoAsync(srsDir);
-  if (!srsDirInfo.exists) {
-    await FileSystem.makeDirectoryAsync(srsDir, { intermediates: true });
-  }
-
-  console.log("[Proof] Circuit directories initialized");
+  return true;
 }
 
 // ============================================================================
-// Verification Key Cache
+// Verification Key Management
 // ============================================================================
 
-const verificationKeyCache = new Map<string, string>();
-
-/**
- * Get or generate verification key for a circuit
- */
-async function getVerificationKey(
-  circuitName: string,
-  onChain: boolean = true
-): Promise<string> {
-  const cacheKey = `${circuitName}_${onChain}`;
-
-  if (verificationKeyCache.has(cacheKey)) {
-    return verificationKeyCache.get(cacheKey)!;
+async function getVerificationKey(circuitName: CircuitName): Promise<string> {
+  if (_verificationKeys.has(circuitName)) {
+    return _verificationKeys.get(circuitName)!;
   }
 
   const noir = await getNoirModule();
-  const circuitPath = getCircuitPath(circuitName).replace("file://", "");
-  const srsPath = getSrsPath().replace("file://", "");
+  const circuitPath = getCircuitPath(circuitName);
+  const srsPath = getSrsPath();
 
   console.log(`[Proof] Generating verification key for ${circuitName}...`);
 
   const vk = await noir.getNoirVerificationKey(
     circuitPath,
     srsPath,
-    onChain,
+    true, // onChain
     false // lowMemoryMode
   );
 
-  verificationKeyCache.set(cacheKey, vk);
+  _verificationKeys.set(circuitName, vk);
   return vk;
 }
 
@@ -206,56 +368,33 @@ async function getVerificationKey(
 // Core Proof Generation
 // ============================================================================
 
-/**
- * Generate a Noir ZK proof
- *
- * @param circuitName - Name of the circuit
- * @param inputs - Circuit inputs
- * @param onChain - Whether to use Keccak256 for on-chain compatibility
- * @returns Proof result with proof bytes and public inputs
- */
-export async function generateProof(
-  circuitName: string,
-  inputs: ProofInputs,
-  onChain: boolean = true
+async function generateProof(
+  circuitName: CircuitName,
+  inputs: ProofInputs
 ): Promise<ProofResult> {
   const startTime = Date.now();
 
-  // Check if Noir is available
-  const available = await isNoirAvailable();
-  if (!available) {
-    return {
-      success: false,
-      error: "Native Noir prover not available",
-    };
+  if (!_isInitialized) {
+    const ready = await initializeProofSystem();
+    if (!ready) {
+      return { success: false, error: "Proof system not initialized" };
+    }
   }
 
   const circuitPath = getCircuitPath(circuitName);
   const srsPath = getSrsPath();
 
-  // Check circuit file exists
-  const circuitInfo = await FileSystem.getInfoAsync(circuitPath);
-  if (!circuitInfo.exists) {
-    return {
-      success: false,
-      error: `Circuit file not found: ${circuitName}`,
-    };
-  }
-
   try {
     const noir = await getNoirModule();
+    const verificationKey = await getVerificationKey(circuitName);
 
-    // Get verification key (cached)
-    const verificationKey = await getVerificationKey(circuitName, onChain);
-
-    // Generate proof
     console.log(`[Proof] Generating ${circuitName} proof...`);
 
     const result = await noir.generateNoirProof(
-      circuitPath.replace("file://", ""),
-      srsPath.replace("file://", ""),
+      circuitPath,
+      srsPath,
       JSON.stringify(inputs),
-      onChain,
+      true, // onChain
       verificationKey,
       false // lowMemoryMode
     );
@@ -279,32 +418,19 @@ export async function generateProof(
   }
 }
 
-/**
- * Verify a Noir proof locally
- */
-export async function verifyProof(
-  circuitName: string,
-  proof: string,
-  onChain: boolean = true
-): Promise<boolean> {
-  const available = await isNoirAvailable();
-  if (!available) return false;
+async function verifyProof(circuitName: CircuitName, proof: string): Promise<boolean> {
+  if (!_isInitialized) return false;
 
-  const circuitPath = getCircuitPath(circuitName);
-  const verificationKey = verificationKeyCache.get(`${circuitName}_${onChain}`);
-
-  if (!verificationKey) {
-    console.error("[Proof] Verification key not found - generate proof first");
-    return false;
-  }
+  const vk = _verificationKeys.get(circuitName);
+  if (!vk) return false;
 
   try {
     const noir = await getNoirModule();
     return await noir.verifyNoirProof(
-      circuitPath.replace("file://", ""),
+      getCircuitPath(circuitName),
       proof,
-      onChain,
-      verificationKey,
+      true,
+      vk,
       false
     );
   } catch (error) {
@@ -314,17 +440,13 @@ export async function verifyProof(
 }
 
 // ============================================================================
-// Specific Proof Generators
+// Proof Generators
 // ============================================================================
 
 /**
- * Generate a claim proof
- *
- * Proves knowledge of (nullifier, secret) for a commitment in the Merkle tree.
+ * Generate a claim proof - claim deposited BTC
  */
-export async function generateClaimProof(
-  input: ClaimProofInput
-): Promise<ProofResult> {
+export async function generateClaimProof(input: ClaimProofInput): Promise<ProofResult> {
   return generateProof(CIRCUITS.CLAIM, {
     nullifier: input.nullifier,
     secret: input.secret,
@@ -336,17 +458,46 @@ export async function generateClaimProof(
 }
 
 /**
- * Generate a partial withdraw proof
- *
- * Proves:
- * 1. Input note exists in tree (Merkle proof)
- * 2. Withdraw amount <= input amount
- * 3. Change commitment is correctly computed
- * 4. Amount conservation: input = withdraw + change
+ * Generate a split proof - split one note into two
  */
-export async function generatePartialWithdrawProof(
-  input: PartialWithdrawProofInput
-): Promise<ProofResult> {
+export async function generateSplitProof(input: SplitProofInput): Promise<ProofResult> {
+  return generateProof(CIRCUITS.SPLIT, {
+    input_nullifier: input.inputNullifier,
+    input_secret: input.inputSecret,
+    input_amount: input.inputAmount,
+    merkle_root: input.merkleRoot,
+    merkle_path: input.merkleProof.pathElements,
+    path_indices: input.merkleProof.pathIndices,
+    output1_nullifier: input.output1Nullifier,
+    output1_secret: input.output1Secret,
+    output1_amount: input.output1Amount,
+    output2_nullifier: input.output2Nullifier,
+    output2_secret: input.output2Secret,
+    output2_amount: input.output2Amount,
+  });
+}
+
+/**
+ * Generate a transfer proof - transfer to another address
+ */
+export async function generateTransferProof(input: TransferProofInput): Promise<ProofResult> {
+  return generateProof(CIRCUITS.TRANSFER, {
+    input_nullifier: input.inputNullifier,
+    input_secret: input.inputSecret,
+    input_amount: input.inputAmount,
+    merkle_root: input.merkleRoot,
+    merkle_path: input.merkleProof.pathElements,
+    path_indices: input.merkleProof.pathIndices,
+    output_nullifier: input.outputNullifier,
+    output_secret: input.outputSecret,
+    recipient: input.recipient,
+  });
+}
+
+/**
+ * Generate a partial withdraw proof - withdraw part of a note
+ */
+export async function generatePartialWithdrawProof(input: PartialWithdrawProofInput): Promise<ProofResult> {
   return generateProof(CIRCUITS.PARTIAL_WITHDRAW, {
     input_nullifier: input.inputNullifier,
     input_secret: input.inputSecret,
@@ -362,73 +513,53 @@ export async function generatePartialWithdrawProof(
   });
 }
 
-// ============================================================================
-// Backend Fallback
-// ============================================================================
-
-const DEFAULT_BACKEND_URL = "https://api.zvault.io";
-
 /**
- * Request proof generation from backend (fallback when native unavailable)
+ * Generate a stealth transfer proof - private transfer via stealth address
  */
-export async function requestBackendProof(
-  circuitName: string,
-  inputs: ProofInputs,
-  backendUrl: string = DEFAULT_BACKEND_URL
-): Promise<ProofResult> {
-  const startTime = Date.now();
+export async function generateStealthTransferProof(input: StealthTransferProofInput): Promise<ProofResult> {
+  return generateProof(CIRCUITS.STEALTH_TRANSFER, {
+    input_nullifier: input.inputNullifier,
+    input_secret: input.inputSecret,
+    input_amount: input.inputAmount,
+    merkle_root: input.merkleRoot,
+    merkle_path: input.merkleProof.pathElements,
+    path_indices: input.merkleProof.pathIndices,
+    output_nullifier: input.outputNullifier,
+    output_secret: input.outputSecret,
+    output_amount: input.outputAmount,
+    stealth_pubkey: input.stealthPubkey,
+    ephemeral_pubkey: input.ephemeralPubkey,
+  });
+}
 
-  try {
-    const response = await fetch(`${backendUrl}/api/proof/generate`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ circuit: circuitName, inputs }),
-    });
+// ============================================================================
+// Proof Verifiers
+// ============================================================================
 
-    if (!response.ok) {
-      return {
-        success: false,
-        error: `Backend error: ${response.statusText}`,
-      };
-    }
+export async function verifyClaimProof(proof: string): Promise<boolean> {
+  return verifyProof(CIRCUITS.CLAIM, proof);
+}
 
-    const result = await response.json();
-    return {
-      success: true,
-      proof: result.proof,
-      publicInputs: result.publicInputs,
-      duration: Date.now() - startTime,
-    };
-  } catch (error) {
-    return {
-      success: false,
-      error: error instanceof Error ? error.message : "Backend request failed",
-      duration: Date.now() - startTime,
-    };
-  }
+export async function verifySplitProof(proof: string): Promise<boolean> {
+  return verifyProof(CIRCUITS.SPLIT, proof);
+}
+
+export async function verifyTransferProof(proof: string): Promise<boolean> {
+  return verifyProof(CIRCUITS.TRANSFER, proof);
+}
+
+export async function verifyPartialWithdrawProof(proof: string): Promise<boolean> {
+  return verifyProof(CIRCUITS.PARTIAL_WITHDRAW, proof);
+}
+
+export async function verifyStealthTransferProof(proof: string): Promise<boolean> {
+  return verifyProof(CIRCUITS.STEALTH_TRANSFER, proof);
 }
 
 // ============================================================================
 // Utility Functions
 // ============================================================================
 
-/**
- * Convert bigint to hex string (for circuit inputs)
- */
-export function bigintToHex(value: bigint): string {
-  return "0x" + value.toString(16).padStart(64, "0");
-}
-
-/**
- * Convert number to string (for circuit inputs)
- */
-export function numberToString(value: number | bigint): string {
-  return value.toString();
-}
-
-/**
- * Create empty merkle proof (for initial claims)
- */
 export function createEmptyMerkleProof(depth: number = 10): MerkleProof {
   return {
     pathElements: Array(depth).fill("0"),
@@ -436,24 +567,11 @@ export function createEmptyMerkleProof(depth: number = 10): MerkleProof {
   };
 }
 
-// ============================================================================
-// SDK Integration Helpers
-// ============================================================================
-
-/**
- * Prepare claim inputs from an SDK Note and Merkle proof
- *
- * Uses SDK for nullifier computation, keeps native prover for actual proving.
- */
 export function prepareClaimInputsFromNote(
   note: Note,
   merkleRoot: bigint,
   merkleProof: SDKMerkleProof
 ): ClaimProofInput {
-  // Use SDK to compute nullifier hash
-  const nullifierHash = hashNullifier(note.nullifier);
-
-  // Format merkle proof for Noir circuit
   const noirProof = proofToNoirFormat(merkleProof);
 
   return {
@@ -468,19 +586,11 @@ export function prepareClaimInputsFromNote(
   };
 }
 
-/**
- * Format proof for on-chain verification
- *
- * Converts native proof output to format expected by Solana program.
- */
 export function formatProofForOnChain(
   proof: string,
   publicInputs: string[]
 ): { proof: Uint8Array; publicInputs: bigint[] } {
-  // Proof is hex-encoded, convert to bytes
   const proofBytes = hexToBytes(proof);
-
-  // Public inputs are decimal strings, convert to bigint
   const inputs = publicInputs.map((s) => BigInt(s));
 
   return {
@@ -489,9 +599,6 @@ export function formatProofForOnChain(
   };
 }
 
-/**
- * Convert hex string to Uint8Array
- */
 function hexToBytes(hex: string): Uint8Array {
   const cleanHex = hex.startsWith('0x') ? hex.slice(2) : hex;
   const bytes = new Uint8Array(cleanHex.length / 2);

@@ -39,16 +39,5 @@
         "EXPO_PUBLIC_ENV": "production"
       }
     }
-  },
-  "submit": {
-    "production": {
-      "ios": {
-        "appleId": "",
-        "ascAppId": ""
-      },
-      "android": {
-        "serviceAccountKeyPath": ""
-      }
-    }
   }
 }
