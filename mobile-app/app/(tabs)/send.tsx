@@ -10,7 +10,7 @@ import {
   View,
   Text,
   TextInput,
-  TouchableOpacity,
+  Pressable,
   KeyboardAvoidingView,
   Platform,
   Alert,
@@ -89,7 +89,7 @@ export default function SendScreen() {
           <Text style={[styles.message, { color: mutedColor }]}>
             Derive keys to send zkBTC
           </Text>
-          <TouchableOpacity
+          <Pressable
             style={styles.primaryButton}
             onPress={deriveKeys}
             disabled={isDerivingKeys}
@@ -97,7 +97,7 @@ export default function SendScreen() {
             <Text style={styles.buttonText}>
               {isDerivingKeys ? 'Signing...' : 'Derive Keys'}
             </Text>
-          </TouchableOpacity>
+          </Pressable>
         </View>
       </View>
     );
@@ -124,7 +124,7 @@ export default function SendScreen() {
       style={[styles.container, { backgroundColor: bgColor }]}
       behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
     >
-      <ScrollView contentContainerStyle={styles.content}>
+      <ScrollView contentContainerStyle={styles.content} contentInsetAdjustmentBehavior="automatic">
         {/* Available Balance */}
         <View style={[styles.balanceBox, { backgroundColor: cardBg }]}>
           <Text style={[styles.balanceLabel, { color: mutedColor }]}>Available</Text>
@@ -151,9 +151,9 @@ export default function SendScreen() {
         <View style={styles.inputGroup}>
           <View style={styles.labelRow}>
             <Text style={[styles.label, { color: textColor }]}>Amount (BTC)</Text>
-            <TouchableOpacity onPress={() => setAmount(formatBtc(availableBalance))}>
+            <Pressable onPress={() => setAmount(formatBtc(availableBalance))}>
               <Text style={styles.maxButton}>MAX</Text>
-            </TouchableOpacity>
+            </Pressable>
           </View>
           <TextInput
             style={[styles.input, { backgroundColor: inputBg, color: textColor, borderColor }]}
@@ -170,7 +170,7 @@ export default function SendScreen() {
           <Text style={[styles.label, { color: textColor }]}>From Note</Text>
           <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.notesScroll}>
             {availableNotes.map((note) => (
-              <TouchableOpacity
+              <Pressable
                 key={note.id}
                 style={[
                   styles.noteChip,
@@ -189,13 +189,13 @@ export default function SendScreen() {
                 >
                   {formatBtc(note.amount)} BTC
                 </Text>
-              </TouchableOpacity>
+              </Pressable>
             ))}
           </ScrollView>
         </View>
 
         {/* Send Button */}
-        <TouchableOpacity
+        <Pressable
           style={[styles.sendButton, !isValid && styles.sendButtonDisabled]}
           onPress={handleSend}
           disabled={!isValid || isSending}
@@ -208,7 +208,7 @@ export default function SendScreen() {
               <Text style={styles.sendButtonText}>Send</Text>
             </>
           )}
-        </TouchableOpacity>
+        </Pressable>
 
         {/* Privacy Notice */}
         <View style={[styles.notice, { backgroundColor: '#14F19510' }]}>
@@ -245,6 +245,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 24,
     paddingVertical: 12,
     borderRadius: 10,
+    borderCurve: 'continuous',
     marginTop: 8,
   },
   buttonText: {
@@ -258,6 +259,7 @@ const styles = StyleSheet.create({
   balanceBox: {
     padding: 16,
     borderRadius: 12,
+    borderCurve: 'continuous',
     marginBottom: 24,
     alignItems: 'center',
   },
@@ -292,6 +294,7 @@ const styles = StyleSheet.create({
   input: {
     height: 52,
     borderRadius: 10,
+    borderCurve: 'continuous',
     paddingHorizontal: 16,
     fontSize: 16,
     borderWidth: 1,
@@ -303,6 +306,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16,
     paddingVertical: 10,
     borderRadius: 8,
+    borderCurve: 'continuous',
     marginRight: 8,
     borderWidth: 1,
   },
@@ -317,6 +321,7 @@ const styles = StyleSheet.create({
     backgroundColor: '#9945FF',
     paddingVertical: 16,
     borderRadius: 12,
+    borderCurve: 'continuous',
     gap: 8,
     marginTop: 8,
   },
@@ -334,6 +339,7 @@ const styles = StyleSheet.create({
     gap: 10,
     padding: 14,
     borderRadius: 10,
+    borderCurve: 'continuous',
     marginTop: 24,
   },
   noticeText: {

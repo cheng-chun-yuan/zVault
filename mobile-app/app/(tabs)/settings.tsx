@@ -4,7 +4,7 @@
  * Account settings and wallet info.
  */
 
-import { StyleSheet, View, Text, TouchableOpacity, ScrollView, Alert, Linking } from 'react-native';
+import { StyleSheet, View, Text, Pressable, ScrollView, Alert, Linking } from 'react-native';
 import { FontAwesome } from '@expo/vector-icons';
 import { useColorScheme } from '@/components/useColorScheme';
 import { useWallet } from '@/contexts/WalletContext';
@@ -34,7 +34,7 @@ function SettingItem({
   cardBg,
 }: SettingItemProps) {
   return (
-    <TouchableOpacity
+    <Pressable
       style={[styles.settingItem, { backgroundColor: cardBg }]}
       onPress={onPress}
       disabled={!onPress}
@@ -51,18 +51,18 @@ function SettingItem({
           <Text style={[styles.settingTitle, { color: danger ? '#FF4455' : textColor }]}>
             {title}
           </Text>
-          {subtitle && (
+          {subtitle ? (
             <Text style={[styles.settingSubtitle, { color: mutedColor }]}>{subtitle}</Text>
-          )}
+          ) : null}
         </View>
       </View>
-      {value && (
+      {value ? (
         <Text style={[styles.settingValue, { color: mutedColor }]}>{value}</Text>
-      )}
-      {onPress && !value && (
+      ) : null}
+      {onPress && !value ? (
         <FontAwesome name="chevron-right" size={14} color={mutedColor} />
-      )}
-    </TouchableOpacity>
+      ) : null}
+    </Pressable>
   );
 }
 
@@ -118,7 +118,7 @@ export default function SettingsScreen() {
   };
 
   return (
-    <ScrollView style={[styles.container, { backgroundColor: bgColor }]}>
+    <ScrollView style={[styles.container, { backgroundColor: bgColor }]} contentInsetAdjustmentBehavior="automatic">
       {/* Account Section */}
       <View style={styles.section}>
         <Text style={[styles.sectionHeader, { color: mutedColor }]}>ACCOUNT</Text>
@@ -198,7 +198,7 @@ export default function SettingsScreen() {
       </View>
 
       {/* Danger Zone */}
-      {isConnected && (
+      {isConnected ? (
         <View style={styles.section}>
           <Text style={[styles.sectionHeader, { color: mutedColor }]}>DANGER ZONE</Text>
           <View style={styles.sectionContent}>
@@ -223,7 +223,7 @@ export default function SettingsScreen() {
             />
           </View>
         </View>
-      )}
+      ) : null}
 
       {/* Footer */}
       <View style={styles.footer}>
@@ -257,6 +257,7 @@ const styles = StyleSheet.create({
   },
   sectionContent: {
     borderRadius: 12,
+    borderCurve: 'continuous',
     overflow: 'hidden',
     gap: 1,
   },
@@ -276,6 +277,7 @@ const styles = StyleSheet.create({
     width: 36,
     height: 36,
     borderRadius: 8,
+    borderCurve: 'continuous',
     backgroundColor: '#9945FF15',
     alignItems: 'center',
     justifyContent: 'center',

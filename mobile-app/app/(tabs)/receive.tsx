@@ -4,7 +4,7 @@
  * Shows stealth address and QR code for receiving zkBTC.
  */
 
-import { StyleSheet, View, Text, TouchableOpacity, Share, Alert } from 'react-native';
+import { StyleSheet, View, Text, Pressable, Share, Alert } from 'react-native';
 import { FontAwesome } from '@expo/vector-icons';
 import * as Clipboard from 'expo-clipboard';
 import QRCode from 'react-native-qrcode-svg';
@@ -59,7 +59,7 @@ export default function ReceiveScreen() {
           <Text style={[styles.message, { color: mutedColor }]}>
             Derive keys to get your stealth address
           </Text>
-          <TouchableOpacity
+          <Pressable
             style={styles.primaryButton}
             onPress={deriveKeys}
             disabled={isDerivingKeys}
@@ -67,7 +67,7 @@ export default function ReceiveScreen() {
             <Text style={styles.buttonText}>
               {isDerivingKeys ? 'Signing...' : 'Derive Keys'}
             </Text>
-          </TouchableOpacity>
+          </Pressable>
         </View>
       </View>
     );
@@ -98,21 +98,21 @@ export default function ReceiveScreen() {
 
         {/* Actions */}
         <View style={styles.actions}>
-          <TouchableOpacity
+          <Pressable
             style={[styles.actionButton, { backgroundColor: cardBg }]}
             onPress={handleCopy}
           >
             <FontAwesome name="copy" size={20} color="#9945FF" />
             <Text style={[styles.actionText, { color: textColor }]}>Copy</Text>
-          </TouchableOpacity>
+          </Pressable>
 
-          <TouchableOpacity
+          <Pressable
             style={[styles.actionButton, { backgroundColor: cardBg }]}
             onPress={handleShare}
           >
             <FontAwesome name="share-alt" size={20} color="#9945FF" />
             <Text style={[styles.actionText, { color: textColor }]}>Share</Text>
-          </TouchableOpacity>
+          </Pressable>
         </View>
 
         {/* Privacy Notice */}
@@ -147,6 +147,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 24,
     paddingVertical: 12,
     borderRadius: 10,
+    borderCurve: 'continuous',
     marginTop: 8,
   },
   buttonText: {
@@ -162,12 +163,14 @@ const styles = StyleSheet.create({
   qrContainer: {
     padding: 24,
     borderRadius: 20,
+    borderCurve: 'continuous',
     marginTop: 24,
   },
   addressContainer: {
     width: '100%',
     padding: 16,
     borderRadius: 12,
+    borderCurve: 'continuous',
     marginTop: 24,
   },
   addressLabel: {
@@ -192,6 +195,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 24,
     paddingVertical: 14,
     borderRadius: 12,
+    borderCurve: 'continuous',
   },
   actionText: {
     fontSize: 16,
@@ -203,6 +207,7 @@ const styles = StyleSheet.create({
     gap: 12,
     padding: 16,
     borderRadius: 12,
+    borderCurve: 'continuous',
     marginTop: 24,
     width: '100%',
   },

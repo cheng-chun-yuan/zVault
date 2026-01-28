@@ -41,8 +41,9 @@ function RootLayoutNav() {
 }
 
 export default function RootLayout() {
+  // SpaceMono is now loaded natively via expo-font config plugin
+  // Only need to load FontAwesome icons async
   const [loaded, error] = useFonts({
-    SpaceMono: require('../assets/fonts/SpaceMono-Regular.ttf'),
     ...FontAwesome.font,
   });
 

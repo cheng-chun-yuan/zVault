@@ -5,11 +5,13 @@
  * Clean and simple like a normal wallet.
  */
 
-import { StyleSheet, View, Text, TouchableOpacity, ScrollView, RefreshControl, Alert } from 'react-native';
+import { useCallback, memo } from 'react';
+import { StyleSheet, View, Text, Pressable, RefreshControl } from 'react-native';
+import { FlashList, ListRenderItemInfo } from '@shopify/flash-list';
 import { useRouter } from 'expo-router';
 import { FontAwesome } from '@expo/vector-icons';
 import { useColorScheme } from '@/components/useColorScheme';
-import { useWallet } from '@/contexts/WalletContext';
+import { useWallet, WalletNote } from '@/contexts/WalletContext';
 import { usePhantom } from '@phantom/react-native-wallet-sdk';
 
 function formatBtc(sats: number): string {
@@ -23,20 +25,64 @@ function formatShortBtc(sats: number): string {
   return btc.toFixed(8);
 }
 
+// Memoized note item component for better FlashList performance
+const NoteItem = memo(function NoteItem({
+  id,
+  amount,
+  status,
+  createdAt,
+  cardBg,
+  textColor,
+  mutedColor,
+}: {
+  id: string;
+  amount: number;
+  status: 'available' | 'pending' | 'spent';
+  createdAt: number;
+  cardBg: string;
+  textColor: string;
+  mutedColor: string;
+}) {
+  const isAvailable = status === 'available';
+
+  return (
+    <View style={[styles.noteItem, { backgroundColor: cardBg }]}>
+      <View style={styles.noteLeft}>
+        <View style={[styles.noteIcon, { backgroundColor: isAvailable ? '#14F19520' : '#FF990020' }]}>
+          <FontAwesome
+            name={isAvailable ? 'check' : 'clock-o'}
+            size={14}
+            color={isAvailable ? '#14F195' : '#FF9900'}
+          />
+        </View>
+        <View>
+          <Text style={[styles.noteAmount, { color: textColor }]}>
+            {formatShortBtc(amount)} BTC
+          </Text>
+          <Text style={[styles.noteStatus, { color: mutedColor }]}>
+            {isAvailable ? 'Available' : 'Pending'}
+          </Text>
+        </View>
+      </View>
+      <Text style={[styles.noteDate, { color: mutedColor }]}>
+        {new Date(createdAt).toLocaleDateString()}
+      </Text>
+    </View>
+  );
+});
+
 export default function WalletScreen() {
-  const router = useRouter();
+  const { push } = useRouter();
   const colorScheme = useColorScheme();
   const isDark = colorScheme === 'dark';
   const { showLoginOptions } = usePhantom();
 
   const {
     isConnected,
-    address,
     keysDerived,
     deriveKeys,
     isDerivingKeys,
     totalBalance,
-    availableBalance,
     notes,
     refreshNotes,
     addDemoNote,
@@ -48,6 +94,29 @@ export default function WalletScreen() {
   const textColor = isDark ? '#fff' : '#000';
   const mutedColor = isDark ? '#888' : '#666';
 
+  // Callbacks destructured early for React Compiler
+  const handleReceive = useCallback(() => push('/receive'), [push]);
+  const handleSend = useCallback(() => push('/send'), [push]);
+  const handleDemo = useCallback(() => addDemoNote(100000), [addDemoNote]);
+
+  // Render item for FlashList - pass primitives for memoization
+  const renderItem = useCallback(
+    ({ item }: ListRenderItemInfo<WalletNote>) => (
+      <NoteItem
+        id={item.id}
+        amount={item.amount}
+        status={item.status}
+        createdAt={item.createdAt}
+        cardBg={cardBg}
+        textColor={textColor}
+        mutedColor={mutedColor}
+      />
+    ),
+    [cardBg, textColor, mutedColor]
+  );
+
+  const keyExtractor = useCallback((item: WalletNote) => item.id, []);
+
   // Not connected - show connect button
   if (!isConnected) {
     return (
@@ -58,13 +127,13 @@ export default function WalletScreen() {
           <Text style={[styles.subtitle, { color: mutedColor }]}>
             Private Bitcoin Wallet
           </Text>
-          <TouchableOpacity
+          <Pressable
             style={styles.primaryButton}
-            onPress={() => showLoginOptions()}
+            onPress={showLoginOptions}
           >
             <FontAwesome name="bolt" size={18} color="#fff" />
             <Text style={styles.buttonText}>Connect Wallet</Text>
-          </TouchableOpacity>
+          </Pressable>
         </View>
       </View>
     );
@@ -80,7 +149,7 @@ export default function WalletScreen() {
           <Text style={[styles.subtitle, { color: mutedColor, textAlign: 'center', paddingHorizontal: 32 }]}>
             Sign a message to derive your private viewing and spending keys
           </Text>
-          <TouchableOpacity
+          <Pressable
             style={styles.primaryButton}
             onPress={deriveKeys}
             disabled={isDerivingKeys}
@@ -93,21 +162,15 @@ export default function WalletScreen() {
                 <Text style={styles.buttonText}>Derive Keys</Text>
               </>
             )}
-          </TouchableOpacity>
+          </Pressable>
         </View>
       </View>
     );
   }
 
-  // Full wallet view
-  return (
-    <ScrollView
-      style={[styles.container, { backgroundColor: bgColor }]}
-      contentContainerStyle={styles.scrollContent}
-      refreshControl={
-        <RefreshControl refreshing={isLoading} onRefresh={refreshNotes} />
-      }
-    >
+  // Header component for FlashList
+  const ListHeader = (
+    <>
       {/* Balance Card */}
       <View style={[styles.balanceCard, { backgroundColor: '#9945FF' }]}>
         <Text style={styles.balanceLabel}>Total Balance</Text>
@@ -118,90 +181,75 @@ export default function WalletScreen() {
 
         {/* Quick Actions */}
         <View style={styles.quickActions}>
-          <TouchableOpacity
-            style={styles.quickAction}
-            onPress={() => router.push('/receive')}
-          >
+          <Pressable style={styles.quickAction} onPress={handleReceive}>
             <View style={styles.quickActionIcon}>
               <FontAwesome name="arrow-down" size={16} color="#9945FF" />
             </View>
             <Text style={styles.quickActionText}>Receive</Text>
-          </TouchableOpacity>
+          </Pressable>
 
-          <TouchableOpacity
-            style={styles.quickAction}
-            onPress={() => router.push('/send')}
-          >
+          <Pressable style={styles.quickAction} onPress={handleSend}>
             <View style={styles.quickActionIcon}>
               <FontAwesome name="arrow-up" size={16} color="#9945FF" />
             </View>
             <Text style={styles.quickActionText}>Send</Text>
-          </TouchableOpacity>
+          </Pressable>
 
-          <TouchableOpacity
-            style={styles.quickAction}
-            onPress={() => addDemoNote(100000)} // 0.001 BTC demo
-          >
+          <Pressable style={styles.quickAction} onPress={handleDemo}>
             <View style={styles.quickActionIcon}>
               <FontAwesome name="plus" size={16} color="#9945FF" />
             </View>
             <Text style={styles.quickActionText}>Demo</Text>
-          </TouchableOpacity>
+          </Pressable>
         </View>
       </View>
 
-      {/* Notes Section */}
-      <View style={styles.section}>
-        <Text style={[styles.sectionTitle, { color: textColor }]}>Your Notes</Text>
+      {/* Section Title */}
+      <Text style={[styles.sectionTitle, { color: textColor }]}>Your Notes</Text>
+    </>
+  );
 
-        {notes.length === 0 ? (
-          <View style={[styles.emptyState, { backgroundColor: cardBg }]}>
-            <FontAwesome name="inbox" size={32} color={mutedColor} />
-            <Text style={[styles.emptyText, { color: mutedColor }]}>
-              No zkBTC notes yet
-            </Text>
-            <Text style={[styles.emptySubtext, { color: mutedColor }]}>
-              Tap "Demo" to add a test note
-            </Text>
-          </View>
-        ) : (
-          <View style={styles.notesList}>
-            {notes.map((note) => (
-              <View key={note.id} style={[styles.noteItem, { backgroundColor: cardBg }]}>
-                <View style={styles.noteLeft}>
-                  <View style={[styles.noteIcon, { backgroundColor: note.status === 'available' ? '#14F19520' : '#FF990020' }]}>
-                    <FontAwesome
-                      name={note.status === 'available' ? 'check' : 'clock-o'}
-                      size={14}
-                      color={note.status === 'available' ? '#14F195' : '#FF9900'}
-                    />
-                  </View>
-                  <View>
-                    <Text style={[styles.noteAmount, { color: textColor }]}>
-                      {formatShortBtc(note.amount)} BTC
-                    </Text>
-                    <Text style={[styles.noteStatus, { color: mutedColor }]}>
-                      {note.status === 'available' ? 'Available' : 'Pending'}
-                    </Text>
-                  </View>
-                </View>
-                <Text style={[styles.noteDate, { color: mutedColor }]}>
-                  {new Date(note.createdAt).toLocaleDateString()}
-                </Text>
-              </View>
-            ))}
-          </View>
-        )}
-      </View>
+  // Footer component for FlashList
+  const ListFooter = (
+    <View style={[styles.privacyBadge, { backgroundColor: cardBg }]}>
+      <FontAwesome name="eye-slash" size={14} color="#14F195" />
+      <Text style={[styles.privacyText, { color: mutedColor }]}>
+        Your balance is private - only visible to you
+      </Text>
+    </View>
+  );
 
-      {/* Privacy Badge */}
-      <View style={[styles.privacyBadge, { backgroundColor: cardBg }]}>
-        <FontAwesome name="eye-slash" size={14} color="#14F195" />
-        <Text style={[styles.privacyText, { color: mutedColor }]}>
-          Your balance is private - only visible to you
-        </Text>
-      </View>
-    </ScrollView>
+  // Empty state component
+  const ListEmpty = (
+    <View style={[styles.emptyState, { backgroundColor: cardBg }]}>
+      <FontAwesome name="inbox" size={32} color={mutedColor} />
+      <Text style={[styles.emptyText, { color: mutedColor }]}>
+        No zkBTC notes yet
+      </Text>
+      <Text style={[styles.emptySubtext, { color: mutedColor }]}>
+        Tap "Demo" to add a test note
+      </Text>
+    </View>
+  );
+
+  // Full wallet view with FlashList
+  return (
+    <View style={[styles.container, { backgroundColor: bgColor }]}>
+      <FlashList
+        data={notes}
+        renderItem={renderItem}
+        keyExtractor={keyExtractor}
+        contentContainerStyle={styles.listContent}
+        ListHeaderComponent={ListHeader}
+        ListFooterComponent={ListFooter}
+        ListEmptyComponent={ListEmpty}
+        ItemSeparatorComponent={() => <View style={styles.separator} />}
+        refreshControl={
+          <RefreshControl refreshing={isLoading} onRefresh={refreshNotes} />
+        }
+        contentInsetAdjustmentBehavior="automatic"
+      />
+    </View>
   );
 }
 
@@ -209,7 +257,7 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
   },
-  scrollContent: {
+  listContent: {
     padding: 16,
   },
   centerContent: {
@@ -236,6 +284,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 32,
     paddingVertical: 16,
     borderRadius: 12,
+    borderCurve: 'continuous',
     gap: 8,
     marginTop: 24,
   },
@@ -247,6 +296,7 @@ const styles = StyleSheet.create({
   balanceCard: {
     padding: 24,
     borderRadius: 20,
+    borderCurve: 'continuous',
     marginBottom: 24,
   },
   balanceLabel: {
@@ -290,9 +340,6 @@ const styles = StyleSheet.create({
     fontSize: 12,
     fontWeight: '500',
   },
-  section: {
-    marginBottom: 24,
-  },
   sectionTitle: {
     fontSize: 18,
     fontWeight: '600',
@@ -301,6 +348,7 @@ const styles = StyleSheet.create({
   emptyState: {
     padding: 32,
     borderRadius: 16,
+    borderCurve: 'continuous',
     alignItems: 'center',
     gap: 8,
   },
@@ -311,8 +359,8 @@ const styles = StyleSheet.create({
   emptySubtext: {
     fontSize: 14,
   },
-  notesList: {
-    gap: 8,
+  separator: {
+    height: 8,
   },
   noteItem: {
     flexDirection: 'row',
@@ -320,6 +368,7 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     padding: 16,
     borderRadius: 12,
+    borderCurve: 'continuous',
   },
   noteLeft: {
     flexDirection: 'row',
@@ -351,7 +400,9 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     padding: 12,
     borderRadius: 8,
+    borderCurve: 'continuous',
     gap: 8,
+    marginTop: 16,
   },
   privacyText: {
     fontSize: 12,
