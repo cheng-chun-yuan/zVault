@@ -60,8 +60,8 @@ export interface AddDemoStealthParams {
   ephemeralPub: Uint8Array;
   /** 32-byte commitment */
   commitment: Uint8Array;
-  /** Amount in satoshis */
-  amountSats: bigint;
+  /** 8-byte encrypted amount (XOR with sha256(sharedSecret)[0:8]) */
+  encryptedAmount: Uint8Array;
 }
 
 /**
@@ -147,23 +147,26 @@ export function buildAddDemoNoteData(secret: Uint8Array): Uint8Array {
  * - discriminator (1 byte) = 22
  * - ephemeral_pub (33 bytes) - compressed Grumpkin point
  * - commitment (32 bytes)
- * - amount_sats (8 bytes, little-endian)
+ * - encrypted_amount (8 bytes) - XOR encrypted with shared secret
  *
  * @param ephemeralPub - 33-byte compressed Grumpkin public key
  * @param commitment - 32-byte commitment
- * @param amountSats - Amount in satoshis
+ * @param encryptedAmount - 8-byte encrypted amount
  * @returns Instruction data as Uint8Array
  */
 export function buildAddDemoStealthData(
   ephemeralPub: Uint8Array,
   commitment: Uint8Array,
-  amountSats: bigint
+  encryptedAmount: Uint8Array
 ): Uint8Array {
   if (ephemeralPub.length !== 33) {
     throw new Error("Ephemeral pub must be 33 bytes (compressed Grumpkin)");
   }
   if (commitment.length !== 32) {
     throw new Error("Commitment must be 32 bytes");
+  }
+  if (encryptedAmount.length !== 8) {
+    throw new Error("Encrypted amount must be 8 bytes");
   }
 
   const data = new Uint8Array(74);
@@ -180,9 +183,8 @@ export function buildAddDemoStealthData(
   data.set(commitment, offset);
   offset += 32;
 
-  // Amount (8 bytes, little-endian)
-  const amountView = new DataView(data.buffer, offset, 8);
-  amountView.setBigUint64(0, amountSats, true);
+  // Encrypted amount (8 bytes)
+  data.set(encryptedAmount, offset);
 
   return data;
 }
@@ -201,7 +203,7 @@ export function buildAddDemoStealthDataFromParams(params: AddDemoStealthParams):
   return buildAddDemoStealthData(
     params.ephemeralPub,
     params.commitment,
-    params.amountSats
+    params.encryptedAmount
   );
 }
 

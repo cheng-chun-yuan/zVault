@@ -29,7 +29,7 @@ function getAdminKeypair(): Keypair | null {
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
-    const { type, secret, ephemeralPub, commitment, amountSats } = body;
+    const { type, secret, ephemeralPub, commitment, encryptedAmount } = body;
 
     // Validate type
     if (!type || !["note", "stealth"].includes(type)) {
@@ -63,9 +63,9 @@ export async function POST(request: NextRequest) {
           { status: 400 }
         );
       }
-      if (amountSats === undefined || amountSats <= 0) {
+      if (!encryptedAmount || typeof encryptedAmount !== "string" || encryptedAmount.length !== 16) {
         return NextResponse.json(
-          { success: false, error: "Invalid amountSats. Must be positive" },
+          { success: false, error: "Invalid encryptedAmount. Must be 16 hex characters (8 bytes)" },
           { status: 400 }
         );
       }
@@ -101,11 +101,12 @@ export async function POST(request: NextRequest) {
       // Stealth mode
       const ephemeralPubBytes = hexToBytes(ephemeralPub);
       const commitmentBytes = hexToBytes(commitment);
+      const encryptedAmountBytes = hexToBytes(encryptedAmount);
       tx = await buildAddDemoStealthTransaction(connection, {
         payer: admin.publicKey,
         ephemeralPub: ephemeralPubBytes,
         commitment: commitmentBytes,
-        amountSats: BigInt(amountSats),
+        encryptedAmount: encryptedAmountBytes,
       });
     }
 

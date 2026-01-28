@@ -137,8 +137,8 @@ export interface AddDemoStealthParams {
   ephemeralPub: Uint8Array;
   /** 32-byte commitment */
   commitment: Uint8Array;
-  /** Amount in satoshis */
-  amountSats: bigint;
+  /** 8-byte encrypted amount (XOR with sha256(sharedSecret)[0:8]) */
+  encryptedAmount: Uint8Array;
 }
 
 /**
@@ -152,7 +152,7 @@ export interface AddDemoStealthParams {
 export function buildAddDemoStealthInstruction(
   params: AddDemoStealthParams
 ): TransactionInstruction {
-  const { payer, ephemeralPub, commitment, amountSats } = params;
+  const { payer, ephemeralPub, commitment, encryptedAmount } = params;
 
   const [poolState] = derivePoolStatePDA();
   const [commitmentTree] = deriveCommitmentTreePDA();
@@ -161,7 +161,7 @@ export function buildAddDemoStealthInstruction(
   const poolVault = derivePoolVaultATA();
 
   // Use SDK's data builder
-  const data = buildAddDemoStealthData(ephemeralPub, commitment, amountSats);
+  const data = buildAddDemoStealthData(ephemeralPub, commitment, encryptedAmount);
 
   return new TransactionInstruction({
     keys: [

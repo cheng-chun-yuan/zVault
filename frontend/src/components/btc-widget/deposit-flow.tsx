@@ -88,7 +88,7 @@ export function DepositFlow() {
           type: "stealth",
           ephemeralPub: bytesToHex(stealthDepositData.ephemeralPub),
           commitment: bytesToHex(stealthDepositData.commitment),
-          amountSats: amount.toString(),
+          encryptedAmount: bytesToHex(stealthDepositData.encryptedAmount),
         }),
       });
 
