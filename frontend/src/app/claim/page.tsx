@@ -353,7 +353,7 @@ function ClaimContent() {
       // Unified Model: derive pubKeyX from nullifier (as privKey)
       const privKey = note.nullifier;
       const pubKeyPoint = pointMul(privKey, GRUMPKIN_GENERATOR);
-      const pubKeyX = pubKeyPoint[0]; // x-coordinate
+      const pubKeyX = pubKeyPoint.x; // x-coordinate
 
       // Get nullifier hash (computed from privKey + leafIndex in circuit)
       const nullifierHash = note.nullifierHash ?? 0n;
@@ -427,7 +427,7 @@ function ClaimContent() {
       // Unified Model: use nullifier as privKey, derive pubKeyX from Grumpkin curve
       const privKey = note.nullifier;
       const pubKeyPoint = pointMul(privKey, GRUMPKIN_GENERATOR);
-      const pubKeyX = pubKeyPoint[0]; // x-coordinate
+      const pubKeyX = pubKeyPoint.x; // x-coordinate
 
       // Compute commitment = Poseidon2(pubKeyX, amount)
       // First try to get amount from index, fallback to verified amount or demo amount
@@ -444,7 +444,7 @@ function ClaimContent() {
       // Try to fetch commitment tree state from Solana
       try {
         console.log("[Claim] Fetching commitment tree state...");
-        const [commitmentTreePDA] = await deriveCommitmentTreePDA(ZVAULT_PROGRAM_ID.toBase58());
+        const [commitmentTreePDA] = await deriveCommitmentTreePDA(ZVAULT_PROGRAM_ID);
         const treeState = await fetchCommitmentTree(
           { getAccountInfo: async (pk: unknown) => {
             const info = await connection.getAccountInfo(new PublicKey(pk as string));
@@ -533,9 +533,9 @@ function ClaimContent() {
 
       // Convert hex strings to Uint8Array
       const nullifierHashHex = note.nullifierHash?.toString(16).padStart(64, "0") ?? "0".repeat(64);
-      const commitmentHex = note.commitment?.toString(16).padStart(64, "0") ?? "0".repeat(64);
+      const noteCommitmentHex = note.commitment?.toString(16).padStart(64, "0") ?? "0".repeat(64);
       const nullifierHashBytes = new Uint8Array(Buffer.from(nullifierHashHex, "hex"));
-      const commitmentBytes = new Uint8Array(Buffer.from(commitmentHex, "hex"));
+      const commitmentBytes = new Uint8Array(Buffer.from(noteCommitmentHex, "hex"));
       const merkleRootBytes = new Uint8Array(Buffer.from(merkleRootHex.slice(2), "hex"));
 
       // Get or create user's zBTC token account

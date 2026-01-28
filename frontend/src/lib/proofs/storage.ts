@@ -148,7 +148,7 @@ export class MerkleTree {
       pathIndices.push(0);
     }
 
-    return { pathElements, pathIndices };
+    return { siblings: pathElements, indices: pathIndices };
   }
 
   serialize(): SerializedMerkleTree {

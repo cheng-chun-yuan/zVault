@@ -1,6 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
 import {
-  Connection,
   Keypair,
   sendAndConfirmTransaction,
 } from "@solana/web3.js";
@@ -8,6 +7,7 @@ import {
   buildAddDemoNoteTransaction,
   buildAddDemoStealthTransaction,
 } from "@/lib/solana/demo-instructions";
+import { getHeliusConnection, isHeliusConfigured } from "@/lib/helius-server";
 
 export const runtime = "nodejs";
 
@@ -84,10 +84,9 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // Connect to Solana
-    const rpcUrl = process.env.NEXT_PUBLIC_SOLANA_RPC_URL || "https://api.devnet.solana.com";
-    const connection = new Connection(rpcUrl, "confirmed");
-
+    // Connect to Solana via Helius
+    const connection = getHeliusConnection("devnet");
+    console.log("[Demo API] Using Helius:", isHeliusConfigured());
     console.log("[Demo API] Admin:", admin.publicKey.toBase58());
 
     // Build transaction based on type
