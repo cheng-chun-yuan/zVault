@@ -14,18 +14,18 @@ import * as crypto from "crypto";
 import {
   initProver,
   isProverAvailable,
-  generateSplitProof,
+  generateSpendSplitProof,
   generateClaimProof,
   setCircuitPath,
   cleanup,
-  type SplitInputs,
+  type SpendSplitInputs,
   type ClaimInputs,
 } from "@zvault/sdk/prover";
 
-// Import poseidon for proper commitment computation (now async)
+// Import poseidon for proper commitment computation
 import {
   poseidon2Hash,
-  computeCommitmentV1,
+  computeUnifiedCommitment,
 } from "@zvault/sdk/poseidon2";
 
 const __filename = fileURLToPath(import.meta.url);
@@ -39,11 +39,9 @@ function randomFieldElement(): bigint {
   return BigInt("0x" + bytes.toString("hex")) % BN254_MODULUS;
 }
 
-// Circuit tree depths
-// Note: Source says split should be 20, but compiled artifact uses 10
-// Using 10 for now until circuits are recompiled
-const CLAIM_TREE_DEPTH = 10;
-const SPLIT_TREE_DEPTH = 10;
+// Circuit tree depths (Unified Model uses 20-level tree)
+const CLAIM_TREE_DEPTH = 20;
+const SPLIT_TREE_DEPTH = 20;
 
 /**
  * Create a valid merkle proof with the commitment at root
@@ -94,18 +92,21 @@ async function testProverInit(): Promise<boolean> {
 }
 
 async function testClaimProof(): Promise<boolean> {
-  console.log("\n[TEST] Claim proof generation...");
+  console.log("\n[TEST] Claim proof generation (Unified Model)...");
 
   try {
-    // Generate random note secrets
-    const nullifier = randomFieldElement();
-    const secret = randomFieldElement();
+    // Generate random private key (Grumpkin scalar)
+    const privKey = randomFieldElement();
+    // For testing, derive pubKeyX = hash(privKey) as approximation
+    // In production, this would be Grumpkin scalar multiplication
+    const pubKeyX = poseidon2Hash([privKey]);
     const amount = 100000n; // 0.001 BTC in sats
+    const leafIndex = 0n;
 
-    console.log("  Generating commitment with @aztec/foundation Poseidon2...");
+    console.log("  Computing unified commitment: Poseidon2(pubKeyX, amount)...");
 
-    // Compute commitment: hash(hash(nullifier, secret), amount)
-    const commitment = await computeCommitmentV1(nullifier, secret, amount);
+    // Compute commitment using unified model
+    const commitment = computeUnifiedCommitment(pubKeyX, amount);
     console.log(`  Commitment: 0x${commitment.toString(16).slice(0, 16)}...`);
 
     // Create valid merkle proof (claim uses 10-level tree)
@@ -113,11 +114,12 @@ async function testClaimProof(): Promise<boolean> {
     const merkleProof = await createValidMerkleProof(commitment, CLAIM_TREE_DEPTH);
     console.log(`  Merkle root: 0x${merkleProof.root.toString(16).slice(0, 16)}...`);
 
-    // Prepare claim inputs (merkleProof is nested object)
+    // Prepare claim inputs (Unified Model)
     const claimInputs: ClaimInputs = {
-      nullifier,
-      secret,
+      privKey,
+      pubKeyX,
       amount,
+      leafIndex,
       merkleRoot: merkleProof.root,
       merkleProof: {
         siblings: merkleProof.siblings,
@@ -144,33 +146,34 @@ async function testClaimProof(): Promise<boolean> {
 }
 
 async function testSplitProof(): Promise<boolean> {
-  console.log("\n[TEST] Split proof generation...");
+  console.log("\n[TEST] Spend Split proof generation (Unified Model)...");
 
   try {
-    // Input note secrets
-    const inputNullifier = randomFieldElement();
-    const inputSecret = randomFieldElement();
-    const inputAmount = 100000n; // Total amount
+    // Input note (Unified Model)
+    const privKey = randomFieldElement();
+    const pubKeyX = poseidon2Hash([privKey]); // Approximate pubKey derivation for testing
+    const amount = 100000n; // Total amount
+    const leafIndex = 0n;
 
-    // Output note 1 secrets
-    const output1Nullifier = randomFieldElement();
-    const output1Secret = randomFieldElement();
+    // Output 1 (new owner)
+    const output1PrivKey = randomFieldElement();
+    const output1PubKeyX = poseidon2Hash([output1PrivKey]);
     const output1Amount = 60000n;
 
-    // Output note 2 secrets
-    const output2Nullifier = randomFieldElement();
-    const output2Secret = randomFieldElement();
+    // Output 2 (change back to sender or another recipient)
+    const output2PrivKey = randomFieldElement();
+    const output2PubKeyX = poseidon2Hash([output2PrivKey]);
     const output2Amount = 40000n;
 
-    console.log("  Generating commitments with @aztec/foundation Poseidon2...");
+    console.log("  Computing commitments with Unified Model...");
 
-    // Compute input commitment
-    const inputCommitment = await computeCommitmentV1(inputNullifier, inputSecret, inputAmount);
+    // Compute input commitment: Poseidon2(pubKeyX, amount)
+    const inputCommitment = computeUnifiedCommitment(pubKeyX, amount);
     console.log(`  Input commitment: 0x${inputCommitment.toString(16).slice(0, 16)}...`);
 
     // Compute output commitments
-    const output1Commitment = await computeCommitmentV1(output1Nullifier, output1Secret, output1Amount);
-    const output2Commitment = await computeCommitmentV1(output2Nullifier, output2Secret, output2Amount);
+    const output1Commitment = computeUnifiedCommitment(output1PubKeyX, output1Amount);
+    const output2Commitment = computeUnifiedCommitment(output2PubKeyX, output2Amount);
     console.log(`  Output1 commitment: 0x${output1Commitment.toString(16).slice(0, 16)}...`);
     console.log(`  Output2 commitment: 0x${output2Commitment.toString(16).slice(0, 16)}...`);
 
@@ -178,29 +181,28 @@ async function testSplitProof(): Promise<boolean> {
     console.log(`  Creating merkle proof (${SPLIT_TREE_DEPTH}-level tree)...`);
     const merkleProof = await createValidMerkleProof(inputCommitment, SPLIT_TREE_DEPTH);
 
-    // Prepare split inputs (merkleProof is nested object)
-    const splitInputs: SplitInputs = {
+    // Prepare spend split inputs (Unified Model)
+    const splitInputs: SpendSplitInputs = {
       // Input note
-      inputNullifier,
-      inputSecret,
-      inputAmount,
+      privKey,
+      pubKeyX,
+      amount,
+      leafIndex,
       merkleRoot: merkleProof.root,
       merkleProof: {
         siblings: merkleProof.siblings,
         indices: merkleProof.indices,
       },
-      // Output notes
-      output1Nullifier,
-      output1Secret,
+      // Output notes (only need pubKeyX and amount)
+      output1PubKeyX,
       output1Amount,
-      output2Nullifier,
-      output2Secret,
+      output2PubKeyX,
       output2Amount,
     };
 
-    console.log("  Generating split proof (this may take a moment)...");
+    console.log("  Generating spend_split proof (this may take a moment)...");
     const startTime = Date.now();
-    const proofData = await generateSplitProof(splitInputs);
+    const proofData = await generateSpendSplitProof(splitInputs);
     const duration = ((Date.now() - startTime) / 1000).toFixed(2);
 
     console.log(`  ✓ Split proof generated in ${duration}s`);

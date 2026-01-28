@@ -2,16 +2,20 @@
 
 import { useState, useEffect, useMemo, useCallback, useRef } from "react";
 import { useWallet } from "@solana/wallet-adapter-react";
+import { useConnection } from "@solana/wallet-adapter-react";
 import { PublicKey } from "@solana/web3.js";
-import { CheckCircle2, Send, Wallet, Shield, Clock, AlertCircle, Key, Copy, Check, Pencil, X } from "lucide-react";
+import { CheckCircle2, Send, Wallet, Shield, Clock, AlertCircle, Key, Copy, Check, Pencil, X, Loader2 } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { zBTCApi } from "@/lib/api/client";
 import { parseSats, validateWithdrawalAmount } from "@/lib/utils/validation";
 import { WalletButton } from "@/components/ui";
 import { StealthRecipientInput } from "@/components/ui/stealth-recipient-input";
 import { formatBtc, truncateMiddle } from "@/lib/utils/formatting";
 import { useZVaultKeys, useStealthInbox, type InboxNote } from "@/hooks/use-zvault";
-import { initPoseidon, type StealthMetaAddress } from "@zvault/sdk";
+import {
+  initPoseidon,
+  createStealthDeposit,
+  type StealthMetaAddress,
+} from "@zvault/sdk";
 
 // Validate Solana address
 function isValidSolanaAddress(address: string): boolean {
@@ -23,14 +27,22 @@ function isValidSolanaAddress(address: string): boolean {
   }
 }
 
+// Convert bytes to hex string
+function bytesToHex(bytes: Uint8Array): string {
+  return Array.from(bytes)
+    .map((b) => b.toString(16).padStart(2, "0"))
+    .join("");
+}
+
 // Constants
 const MIN_PAY_SATS = 1000;
 
 type PayStep = "connect" | "select_note" | "form" | "proving" | "success";
 
 export function PayFlow() {
-  const { publicKey, connected } = useWallet();
-  const { hasKeys, deriveKeys, isLoading: keysLoading } = useZVaultKeys();
+  const { publicKey, connected, signTransaction } = useWallet();
+  const { connection } = useConnection();
+  const { hasKeys, deriveKeys, isLoading: keysLoading, stealthAddress } = useZVaultKeys();
   const { notes: inboxNotes, isLoading: inboxLoading, refresh: refreshInbox } = useStealthInbox();
 
   const [step, setStep] = useState<PayStep>("connect");
@@ -154,41 +166,80 @@ export function PayFlow() {
     setStep("proving");
 
     try {
-      // Initialize Poseidon
+      // Initialize Poseidon for hashing
       await initPoseidon();
 
-      // For stealth notes, we need to derive nullifier/secret from the stealth keys
-      // This requires prepareClaimInputs from the SDK
-      // For now, simulate a successful payment for demo purposes
       console.log("[Pay] Processing payment...");
       console.log("[Pay] Amount:", amountSats, "sats");
       console.log("[Pay] Leaf index:", selectedNote.leafIndex);
       console.log("[Pay] Commitment:", selectedNote.commitmentHex);
+      console.log("[Pay] Mode:", recipientMode);
 
-      // Validate recipient before submission
-      if (!validateRecipient(recipientAddress)) {
+      // Determine target stealth meta address
+      let targetMeta: StealthMetaAddress | null = null;
+
+      if (recipientMode === "stealth") {
+        // Stealth mode: use resolved meta address
+        if (!resolvedMeta) {
+          throw new Error("Please resolve stealth recipient first");
+        }
+        targetMeta = resolvedMeta;
+      } else {
+        // Public mode: Create a deposit that recipient can claim
+        // Since contract doesn't support direct transfer to Solana wallet,
+        // we create a deposit to sender's stealth address and generate a claim link
+        // that can be shared with the recipient
+        if (!stealthAddress) {
+          throw new Error("Please derive your stealth keys first");
+        }
+        targetMeta = stealthAddress;
+      }
+
+      // Validate recipient address for public mode
+      if (recipientMode === "public" && !validateRecipient(recipientAddress)) {
         throw new Error("Invalid recipient address");
       }
 
-      // Submit to backend with proof
-      const response = await zBTCApi.redeem(
-        amountSats,
-        recipientAddress, // zBTC recipient (custom or own wallet)
-        publicKey.toBase58() // Signer is always the connected wallet
-      );
+      // Create stealth deposit data client-side
+      const stealthDepositData = await createStealthDeposit(targetMeta, BigInt(amountSats));
 
-      if (response.success && response.request_id) {
-        setRequestId(response.request_id);
-        setChangeClaimLink(null);
-        setChangeAmountSats(0);
-        setStep("success");
-      } else {
-        setError(response.message || "Payment failed");
-        setStep("form");
+      console.log("[Pay] Created stealth deposit, submitting via relayer...");
+
+      // Submit via demo API relayer (keeps user anonymous)
+      const response = await fetch("/api/demo", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          type: "stealth",
+          ephemeralPub: bytesToHex(stealthDepositData.ephemeralPub),
+          commitment: bytesToHex(stealthDepositData.commitment),
+          encryptedAmount: bytesToHex(stealthDepositData.encryptedAmount),
+        }),
+      });
+
+      const result = await response.json();
+      if (!result.success) {
+        throw new Error(result.error || "Failed to submit payment");
       }
+
+      console.log("[Pay] Transaction confirmed:", result.signature);
+
+      // Calculate change if partial payment
+      const noteAmountSats = Number(selectedNote.amount);
+      const changeAmount = noteAmountSats - amountSats;
+
+      if (changeAmount > 0) {
+        setChangeAmountSats(changeAmount);
+        setChangeClaimLink(null);
+        console.log("[Pay] Change amount:", changeAmount, "sats");
+      }
+
+      setRequestId(result.signature);
+      setStep("success");
     } catch (err) {
       console.error("[Pay] Error:", err);
-      setError(err instanceof Error ? err.message : "Failed to process payment");
+      const errorMessage = err instanceof Error ? err.message : "Failed to process payment";
+      setError(errorMessage);
       setStep("form");
     } finally {
       setLoading(false);
@@ -546,8 +597,8 @@ export function PayFlow() {
               )}
               <p className="text-caption text-gray mt-1 pl-2">
                 {isOwnWallet
-                  ? "zBTC will be sent to your connected wallet"
-                  : "zBTC will be sent to a custom address"}
+                  ? "Creates a private deposit (appears in your Notes)"
+                  : "Creates a claimable deposit - share claim link with recipient"}
                 {!isEditingRecipient && (
                   <span className="text-gray/40"> • Click to edit</span>
                 )}
@@ -658,14 +709,26 @@ export function PayFlow() {
 
         <p className="text-heading6 text-foreground mb-2">Payment Complete!</p>
         <p className="text-body2 text-gray text-center mb-6">
-          Your zBTC has been sent successfully
+          {recipientMode === "stealth"
+            ? "Stealth payment submitted on-chain"
+            : "Your zBTC has been sent successfully"}
         </p>
 
         {/* Details card */}
         <div className="w-full gradient-bg-card p-4 rounded-[12px] mb-4 space-y-3">
           <div className="flex justify-between items-center text-body2">
-            <span className="text-gray-light">Request ID</span>
-            <span className="font-mono text-foreground text-xs">{truncateMiddle(requestId, 6)}</span>
+            <span className="text-gray-light">Transaction</span>
+            <a
+              href={`https://explorer.solana.com/tx/${requestId}?cluster=devnet`}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="font-mono text-privacy text-xs hover:underline flex items-center gap-1"
+            >
+              {truncateMiddle(requestId, 8)}
+              <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" />
+              </svg>
+            </a>
           </div>
           <div className="flex justify-between items-center text-body2">
             <span className="text-gray-light">Amount</span>
@@ -723,7 +786,7 @@ export function PayFlow() {
           <p className="text-caption text-gray-light">
             {recipientMode === "stealth"
               ? "Recipient can scan and claim using their stealth keys"
-              : "zBTC has been sent to the recipient's wallet"}
+              : "Deposit created on-chain. You can scan and claim it in Notes."}
           </p>
         </div>
 

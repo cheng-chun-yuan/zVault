@@ -8,20 +8,22 @@ ZK circuit artifacts are hosted on Cloudflare R2 for better performance and to r
 - **Bucket:** `zvault-circuits`
 - **Account:** Cloudflare (fb5def0d0fb624cb76bddca682c8bfaa)
 
-## Circuit Files
+## Circuit Files (Unified Model)
 
 | File | Description |
 |------|-------------|
-| `zvault_claim.json` | Claim circuit artifact |
-| `zvault_claim_v2.json` | Claim circuit v2 (with Poseidon syscall) |
-| `zvault_transfer.json` | Transfer circuit artifact |
-| `zvault_stealth_transfer.json` | Stealth transfer circuit artifact |
-| `zvault_split.json` | Split circuit artifact |
-| `zvault_partial_withdraw.json` | Partial withdraw circuit artifact |
-| `zvault_helpers.json` | Helper functions circuit |
-| `zvault_pool_deposit.json` | Yield pool deposit circuit |
-| `zvault_pool_withdraw.json` | Yield pool withdraw circuit |
-| `zvault_pool_claim_yield.json` | Yield pool claim circuit |
+| `zvault_claim.json` | Claim commitment to public wallet |
+| `zvault_spend_split.json` | Split commitment into two commitments |
+| `zvault_spend_partial_public.json` | Partial public claim with change |
+| `zvault_pool_deposit.json` | Deposit commitment into yield pool |
+| `zvault_pool_withdraw.json` | Withdraw from pool with yield |
+| `zvault_pool_claim_yield.json` | Claim yield keeping principal staked |
+
+### Unified Model
+All circuits use the unified commitment format:
+- **Commitment** = `Poseidon2(pub_key_x, amount)`
+- **Nullifier** = `Poseidon2(priv_key, leaf_index)`
+- **Pool Position** = `Poseidon2(pub_key_x, principal, deposit_epoch)`
 
 ## Updating Circuits
 

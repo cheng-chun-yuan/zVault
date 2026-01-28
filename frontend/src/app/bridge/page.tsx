@@ -14,6 +14,7 @@ import {
   Tag,
   Loader2,
   TrendingUp,
+  LogOut,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { FeatureCard, type FeatureCardColor } from "@/components/ui";
@@ -80,7 +81,8 @@ export default function BridgePage() {
     stealthAddressEncoded,
     isLoading,
     error,
-    deriveKeys
+    deriveKeys,
+    clearKeys,
   } = useZVaultKeys();
   const { copied, copy } = useCopyToClipboard();
   const {
@@ -172,15 +174,27 @@ export default function BridgePage() {
 
         {/* Stealth Address Section */}
         <div className="mb-6 p-4 bg-muted border border-privacy/20 rounded-[16px]">
-          <div className="flex items-center gap-2 mb-3">
-            <Key className="w-5 h-5 text-privacy" />
-            <h2 className="text-body1 text-foreground">
-              Your{" "}
-              <TooltipText
-                text="Stealth Address"
-                tooltip="A one-time address that hides your identity. Only you can scan and claim funds sent to it."
-              />
-            </h2>
+          <div className="flex items-center justify-between mb-3">
+            <div className="flex items-center gap-2">
+              <Key className="w-5 h-5 text-privacy" />
+              <h2 className="text-body1 text-foreground">
+                Your{" "}
+                <TooltipText
+                  text="Stealth Address"
+                  tooltip="A one-time address that hides your identity. Only you can scan and claim funds sent to it."
+                />
+              </h2>
+            </div>
+            {keys && (
+              <button
+                onClick={clearKeys}
+                className="flex items-center gap-1.5 px-2 py-1 rounded-[6px] text-caption text-gray hover:text-red-400 hover:bg-red-500/10 transition-colors"
+                title="Clear keys and log out"
+              >
+                <LogOut className="w-3.5 h-3.5" />
+                Log out
+              </button>
+            )}
           </div>
 
           {!wallet.connected ? (

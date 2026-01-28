@@ -68,7 +68,6 @@ import { deriveKeysFromWallet, parseStealthMetaAddress, constantTimeCompare } fr
 import { lookupZkeyName, type ZkeyStealthAddress } from "./name-registry";
 import {
   poseidon2Hash,
-  computeCommitment as poseidon2ComputeCommitment,
   computeNullifier as poseidon2ComputeNullifier,
 } from "./poseidon2";
 

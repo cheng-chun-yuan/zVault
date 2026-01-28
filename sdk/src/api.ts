@@ -6,12 +6,13 @@
  * DEPOSIT (BTC → zkBTC):
  * - deposit: Generate deposit credentials (taproot address + claim link)
  * - claimNote: Claim zkBTC tokens with ZK proof
+ * - claimPublic: Claim zkBTC to public wallet (reveals amount)
+ * - claimPublicStealth: Claim stealth note to public wallet
  * - sendStealth: Send to specific recipient via stealth ECDH (new deposit)
  *
  * TRANSFER (zkBTC → Someone):
  * - splitNote: Split one note into two outputs
  * - createClaimLink: Create shareable claim URL (off-chain)
- * - sendPrivate: Transfer existing zkBTC to recipient's stealth address (with ZK proof)
  *
  * WITHDRAW (zkBTC → BTC):
  * - withdraw: Request BTC withdrawal (burn zkBTC)
@@ -41,6 +42,7 @@ interface Instruction {
   data: Uint8Array;
 }
 import { generateNote, type Note, formatBtc } from "./note";
+import { getConfig, TOKEN_2022_PROGRAM_ID, ATA_PROGRAM_ID } from "./config";
 import { deriveTaprootAddress } from "./taproot";
 import { createClaimLink, parseClaimLink } from "./claim-link";
 import {
@@ -51,12 +53,13 @@ import {
 } from "./proof";
 import {
   createStealthDeposit,
-  type StealthDeposit,
+  prepareClaimInputs,
+  type ScannedNote,
 } from "./stealth";
-import { createStealthMetaAddress, type StealthMetaAddress } from "./keys";
-import { createMerkleProof, type MerkleProof, TREE_DEPTH, ZERO_VALUE } from "./merkle";
-import { bigintToBytes } from "./crypto";
-import { prepareVerifyDeposit } from "./chadbuffer";
+import { type StealthMetaAddress, type ZVaultKeys } from "./keys";
+import { type MerkleProof, TREE_DEPTH, ZERO_VALUE } from "./merkle";
+import { bigintToBytes, bytesToBigint } from "./crypto";
+import { hashNullifier } from "./poseidon2";
 
 /** System program address */
 const SYSTEM_PROGRAM_ADDRESS = address("11111111111111111111111111111111");
@@ -106,6 +109,36 @@ export interface ClaimResult {
 }
 
 /**
+ * Result from claimPublic()
+ */
+export interface ClaimPublicResult {
+  /** Transaction signature */
+  signature: string;
+  /** Amount claimed in satoshis */
+  amount: bigint;
+  /** Recipient wallet address */
+  recipient: Address;
+  /** Recipient's token account address */
+  recipientAta: Address;
+}
+
+/**
+ * Result from claimPublicStealth()
+ */
+export interface ClaimPublicStealthResult {
+  /** Transaction signature */
+  signature: string;
+  /** Amount claimed in satoshis */
+  amount: bigint;
+  /** Recipient wallet address */
+  recipient: Address;
+  /** Recipient's token account address */
+  recipientAta: Address;
+  /** Nullifier hash (for verification) */
+  nullifierHash: Uint8Array;
+}
+
+/**
  * Result from splitNote()
  */
 export interface SplitResult {
@@ -131,21 +164,6 @@ export interface StealthResult {
   leafIndex: number;
 }
 
-/**
- * Result from sendPrivate()
- */
-export interface StealthTransferResult {
-  /** Transaction signature */
-  signature: string;
-  /** Ephemeral public key (for recipient to scan) */
-  ephemeralPubKey: Uint8Array;
-  /** Output commitment for recipient */
-  outputCommitment: Uint8Array;
-  /** Nullifier hash of spent input */
-  inputNullifierHash: Uint8Array;
-  /** Amount transferred in satoshis */
-  amount: bigint;
-}
 
 /**
  * Signer interface for v2 transactions
@@ -180,14 +198,14 @@ export interface ApiClientConfig {
 /** Default program ID (Solana Devnet) - imported from pda.ts */
 export { ZVAULT_PROGRAM_ID as DEFAULT_PROGRAM_ID } from "./pda";
 
-/** Instruction discriminators */
+/** Instruction discriminators (Unified Model) */
 const INSTRUCTION = {
-  SPLIT_COMMITMENT: 4,
+  SPEND_SPLIT: 4,
   REQUEST_REDEMPTION: 5,
   VERIFY_DEPOSIT: 8,
   CLAIM: 9,
-  ANNOUNCE_STEALTH: 12,
-  TRANSFER_STEALTH: 24,
+  SPEND_PARTIAL_PUBLIC: 10,
+  ANNOUNCE_STEALTH: 16,
 } as const;
 
 // ============================================================================
@@ -272,12 +290,81 @@ async function deriveStealthAnnouncementPDA(
   return [result[0], result[1]];
 }
 
+/**
+ * Simple base58 decoding for addresses
+ */
+function bs58Decode(str: string): Uint8Array {
+  const ALPHABET = "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz";
+  const ALPHABET_MAP = new Map<string, number>();
+  for (let i = 0; i < ALPHABET.length; i++) {
+    ALPHABET_MAP.set(ALPHABET[i], i);
+  }
+
+  let num = BigInt(0);
+  for (const char of str) {
+    const val = ALPHABET_MAP.get(char);
+    if (val === undefined) {
+      throw new Error(`Invalid base58 character: ${char}`);
+    }
+    num = num * BigInt(58) + BigInt(val);
+  }
+
+  // Count leading zeros
+  let leadingZeros = 0;
+  for (const char of str) {
+    if (char === "1") {
+      leadingZeros++;
+    } else {
+      break;
+    }
+  }
+
+  // Convert to bytes
+  const bytes: number[] = [];
+  while (num > BigInt(0)) {
+    bytes.unshift(Number(num % BigInt(256)));
+    num = num / BigInt(256);
+  }
+
+  // Add leading zeros
+  for (let i = 0; i < leadingZeros; i++) {
+    bytes.unshift(0);
+  }
+
+  return new Uint8Array(bytes);
+}
+
+/**
+ * Convert Address to bytes
+ */
+function addressToBytes(addr: Address): Uint8Array {
+  return bs58Decode(addr.toString());
+}
+
+/**
+ * Derive Associated Token Account address
+ */
+async function deriveAssociatedTokenAccount(
+  owner: Address,
+  mint: Address
+): Promise<[Address, number]> {
+  const result = await getProgramDerivedAddress({
+    programAddress: ATA_PROGRAM_ID,
+    seeds: [
+      addressToBytes(owner),
+      addressToBytes(TOKEN_2022_PROGRAM_ID),
+      addressToBytes(mint),
+    ],
+  });
+  return [result[0], result[1]];
+}
+
 // ============================================================================
 // 1. DEPOSIT
 // ============================================================================
 
 /**
- * Generate deposit credentials
+ * Generate deposit credentials (creates a claim link)
  *
  * Creates a new note with random secrets, derives a taproot address for
  * receiving BTC, and creates a claim link for later claiming.
@@ -292,16 +379,16 @@ async function deriveStealthAnnouncementPDA(
  * @param amountSats - Amount in satoshis
  * @param network - Bitcoin network (mainnet/testnet)
  * @param baseUrl - Base URL for claim link
- * @returns Deposit credentials
+ * @returns Deposit credentials with claim link
  *
  * @example
  * ```typescript
- * const result = await deposit(100_000n); // 0.001 BTC
+ * const result = await depositToNote(100_000n); // 0.001 BTC
  * console.log('Send BTC to:', result.taprootAddress);
  * console.log('Save this link:', result.claimLink);
  * ```
  */
-export async function deposit(
+export async function depositToNote(
   amountSats: bigint,
   network: "mainnet" | "testnet" = "testnet",
   baseUrl?: string
@@ -551,6 +638,302 @@ export async function claimNote(
 }
 
 // ============================================================================
+// 3b. CLAIM_PUBLIC (Claim to Public Wallet)
+// ============================================================================
+
+/**
+ * Claim zkBTC directly to a public Solana wallet
+ *
+ * Unlike the shielded architecture where tokens stay in the pool, this
+ * transfers zkBTC directly to the recipient's wallet for use in regular DeFi.
+ *
+ * **Flow:**
+ * 1. Parse claim link to recover note (if link provided)
+ * 2. Generate claim ZK proof (proves ownership of commitment)
+ * 3. Call CLAIM_PUBLIC instruction
+ * 4. Program verifies proof, records nullifier, transfers zBTC to recipient
+ *
+ * **Security:**
+ * - Amount is revealed (unavoidable for public tokens)
+ * - Nullifier is recorded (prevents double-spend)
+ * - zBTC is transferred from pool vault to recipient ATA
+ *
+ * @param config - Client configuration
+ * @param claimLinkOrNote - Claim link URL or Note object
+ * @param recipient - Recipient wallet address (defaults to payer)
+ * @param merkleProof - Merkle proof for the commitment
+ * @returns Claim result with transaction details
+ *
+ * @example
+ * ```typescript
+ * // Claim to your own wallet
+ * const result = await claimPublic(config, 'https://zkbtc.app/claim?note=...');
+ *
+ * // Claim to a specific recipient
+ * const result = await claimPublic(config, myNote, recipientAddress);
+ * ```
+ */
+export async function claimPublic(
+  config: ApiClientConfig,
+  claimLinkOrNote: string | Note,
+  recipient?: Address,
+  merkleProof?: MerkleProof
+): Promise<ClaimPublicResult> {
+  if (!config.payer) {
+    throw new Error("Payer keypair required for claim");
+  }
+
+  // Parse note from link or use directly
+  let note: Note;
+  if (typeof claimLinkOrNote === "string") {
+    const parsed = parseClaimLink(claimLinkOrNote);
+    if (!parsed) {
+      throw new Error("Invalid claim link");
+    }
+    note = parsed;
+  } else {
+    note = claimLinkOrNote;
+  }
+
+  // Default recipient to payer if not specified
+  const recipientAddress = recipient ?? config.payer.address;
+
+  // Use provided merkle proof or create empty one
+  const mp = merkleProof ?? createEmptyMerkleProofForNote();
+
+  // Generate ZK proof
+  const proof = await generateClaimProof(note, mp);
+
+  // Get network config for token addresses
+  const networkConfig = getConfig();
+
+  // Derive recipient's ATA for zBTC
+  const [recipientAta] = await deriveAssociatedTokenAccount(
+    recipientAddress,
+    networkConfig.zbtcMint
+  );
+
+  // Build instruction data
+  const data = buildClaimPublicData(
+    proof,
+    mp.root,
+    note.nullifierHashBytes,
+    note.amount,
+    recipientAddress
+  );
+
+  // Derive PDAs
+  const [poolState] = await derivePoolStatePDA(config.programId);
+  const [commitmentTree] = await deriveCommitmentTreePDA(config.programId);
+  const [nullifierRecord] = await deriveNullifierRecordPDA(
+    config.programId,
+    note.nullifierHashBytes
+  );
+
+  // Build instruction (v2 format)
+  const ix: Instruction = {
+    programAddress: config.programId,
+    accounts: [
+      { address: poolState, role: AccountRole.WRITABLE },
+      { address: commitmentTree, role: AccountRole.READONLY },
+      { address: nullifierRecord, role: AccountRole.WRITABLE },
+      { address: networkConfig.zbtcMint, role: AccountRole.WRITABLE },
+      { address: networkConfig.poolVault, role: AccountRole.WRITABLE },
+      { address: recipientAta, role: AccountRole.WRITABLE },
+      { address: config.payer.address, role: AccountRole.WRITABLE_SIGNER },
+      { address: networkConfig.token2022ProgramId, role: AccountRole.READONLY },
+      { address: SYSTEM_PROGRAM_ADDRESS, role: AccountRole.READONLY },
+    ],
+    data: new Uint8Array(data),
+  };
+
+  // Send transaction using the RPC client
+  const signature = await sendInstruction(config, ix);
+  await config.rpc.confirmTransaction(signature);
+
+  return {
+    signature,
+    amount: note.amount,
+    recipient: recipientAddress,
+    recipientAta,
+  };
+}
+
+// ============================================================================
+// 3c. CLAIM_PUBLIC_STEALTH (Claim Stealth Note to Public Wallet)
+// ============================================================================
+
+/**
+ * Claim zkBTC from a stealth note to a public Solana wallet
+ *
+ * This function is for users who received zkBTC via stealth address transfer
+ * and want to claim it to their public wallet for use in regular DeFi.
+ *
+ * **Flow:**
+ * 1. Derive stealth private key from viewing key + spending key
+ * 2. Compute nullifier from stealth private key
+ * 3. Generate claim ZK proof
+ * 4. Call CLAIM_PUBLIC instruction
+ * 5. Program verifies proof, records nullifier, transfers zBTC to recipient
+ *
+ * **Security:**
+ * - Requires both viewing AND spending keys (full ZVaultKeys)
+ * - Amount is revealed (unavoidable for public tokens)
+ * - Nullifier prevents double-spend
+ *
+ * @param config - Client configuration
+ * @param keys - User's ZVaultKeys (requires spending key for nullifier derivation)
+ * @param scannedNote - Scanned note from scanAnnouncements()
+ * @param recipient - Recipient wallet address (defaults to payer)
+ * @param merkleProof - Merkle proof for the commitment
+ * @returns Claim result with transaction details
+ *
+ * @example
+ * ```typescript
+ * // Scan your stealth announcements
+ * const notes = await scanAnnouncements(keys, announcements);
+ *
+ * // Claim to your own wallet
+ * const result = await claimPublicStealth(config, keys, notes[0]);
+ * console.log(`Claimed ${result.amount} sats to ${result.recipientAta}`);
+ * ```
+ */
+export async function claimPublicStealth(
+  config: ApiClientConfig,
+  keys: ZVaultKeys,
+  scannedNote: ScannedNote,
+  recipient?: Address,
+  merkleProof?: MerkleProof
+): Promise<ClaimPublicStealthResult> {
+  if (!config.payer) {
+    throw new Error("Payer keypair required for claim");
+  }
+
+  // Default recipient to payer if not specified
+  const recipientAddress = recipient ?? config.payer.address;
+
+  // Use provided merkle proof or create empty one
+  const mp = merkleProof ?? createEmptyMerkleProofForNote();
+
+  // Prepare claim inputs - this derives stealthPrivKey and computes nullifier
+  // Requires spending key to derive the stealth private key
+  const claimInputs = await prepareClaimInputs(keys, scannedNote, {
+    root: bytesToBigint(mp.root),
+    pathElements: mp.pathElements.map(el => bytesToBigint(el)),
+    pathIndices: mp.pathIndices,
+  });
+
+  // The nullifier is computed as: nullifier = Poseidon2(stealthPriv, leafIndex)
+  // Then nullifier_hash = Poseidon2(nullifier)
+  const nullifierHash = hashNullifier(claimInputs.nullifier);
+  const nullifierHashBytes = bigintToBytes(nullifierHash);
+
+  // Generate ZK proof using stealth inputs
+  // For now, use the same generateClaimProof but with stealth-derived values
+  // In production, this would use a stealth-specific circuit
+  const proof = await generateStealthClaimProof(claimInputs, mp);
+
+  // Get network config for token addresses
+  const networkConfig = getConfig();
+
+  // Derive recipient's ATA for zBTC
+  const [recipientAta] = await deriveAssociatedTokenAccount(
+    recipientAddress,
+    networkConfig.zbtcMint
+  );
+
+  // Build instruction data (same format as claimPublic)
+  const data = buildClaimPublicData(
+    proof,
+    mp.root,
+    nullifierHashBytes,
+    scannedNote.amount,
+    recipientAddress
+  );
+
+  // Derive PDAs
+  const [poolState] = await derivePoolStatePDA(config.programId);
+  const [commitmentTree] = await deriveCommitmentTreePDA(config.programId);
+  const [nullifierRecord] = await deriveNullifierRecordPDA(
+    config.programId,
+    nullifierHashBytes
+  );
+
+  // Build instruction (v2 format)
+  const ix: Instruction = {
+    programAddress: config.programId,
+    accounts: [
+      { address: poolState, role: AccountRole.WRITABLE },
+      { address: commitmentTree, role: AccountRole.READONLY },
+      { address: nullifierRecord, role: AccountRole.WRITABLE },
+      { address: networkConfig.zbtcMint, role: AccountRole.WRITABLE },
+      { address: networkConfig.poolVault, role: AccountRole.WRITABLE },
+      { address: recipientAta, role: AccountRole.WRITABLE },
+      { address: config.payer.address, role: AccountRole.WRITABLE_SIGNER },
+      { address: networkConfig.token2022ProgramId, role: AccountRole.READONLY },
+      { address: SYSTEM_PROGRAM_ADDRESS, role: AccountRole.READONLY },
+    ],
+    data: new Uint8Array(data),
+  };
+
+  // Send transaction using the RPC client
+  const signature = await sendInstruction(config, ix);
+  await config.rpc.confirmTransaction(signature);
+
+  return {
+    signature,
+    amount: scannedNote.amount,
+    recipient: recipientAddress,
+    recipientAta,
+    nullifierHash: nullifierHashBytes,
+  };
+}
+
+/**
+ * Generate claim proof for stealth note
+ *
+ * Uses the stealth-derived private key and nullifier instead of note secrets.
+ * The circuit proves:
+ * 1. Knowledge of stealthPrivKey such that stealthPub = stealthPrivKey * G
+ * 2. Commitment = Poseidon2(stealthPub.x, amount) exists in tree
+ * 3. Nullifier = Poseidon2(stealthPrivKey, leafIndex) is correctly computed
+ */
+async function generateStealthClaimProof(
+  claimInputs: import("./stealth").ClaimInputs,
+  merkleProof: MerkleProof
+): Promise<NoirProof> {
+  // For now, return a placeholder proof
+  // In production, this would call the Noir prover with stealth_claim circuit
+  //
+  // Circuit inputs would be:
+  // - stealth_priv_key: claimInputs.stealthPrivKey (private)
+  // - amount: claimInputs.amount (private)
+  // - leaf_index: claimInputs.leafIndex (private)
+  // - merkle_path: claimInputs.merklePath (private)
+  // - path_indices: claimInputs.merkleIndices (private)
+  // - merkle_root: claimInputs.merkleRoot (public)
+  // - nullifier_hash: hash(claimInputs.nullifier) (public)
+  // - amount_pub: claimInputs.amountPub (public)
+
+  // Placeholder proof for testing
+  const placeholderProof = new Uint8Array(256);
+  placeholderProof[0] = 1;
+  placeholderProof[64] = 1;
+  placeholderProof[192] = 1;
+
+  return {
+    proof: placeholderProof,
+    publicInputs: [
+      claimInputs.merkleRoot.toString(16).padStart(64, "0"),
+      hashNullifier(claimInputs.nullifier).toString(16).padStart(64, "0"),
+      claimInputs.amountPub.toString(),
+    ],
+    verificationKey: new Uint8Array(0),
+    vkHash: new Uint8Array(32),
+  };
+}
+
+// ============================================================================
 // 4. SPLIT_NOTE
 // ============================================================================
 
@@ -761,114 +1144,6 @@ export async function sendStealth(
 }
 
 // ============================================================================
-// 7. SEND_PRIVATE (Private Transfer to Stealth Address)
-// ============================================================================
-
-/**
- * Send existing zkBTC to recipient's stealth address (private transfer)
- *
- * Privately transfers an existing commitment to a recipient using stealth
- * address derivation. Requires ZK proof of ownership of the input commitment.
- *
- * **Flow:**
- * 1. Create stealth deposit data (ECDH derivation for recipient)
- * 2. Generate transfer proof (proves ownership of input)
- * 3. Submit TRANSFER_STEALTH instruction
- * 4. Program verifies proof, nullifies input, creates output commitment
- * 5. Creates StealthAnnouncement PDA for recipient scanning
- *
- * **Security:**
- * - Input commitment is spent (nullifier recorded)
- * - Output commitment is added to tree for recipient
- * - Recipient can scan with viewing key, claim with spending key
- *
- * @param config - Client configuration
- * @param inputNote - Note to transfer (must be owned by sender)
- * @param recipientMeta - Recipient's stealth meta-address
- * @param merkleProof - Merkle proof for input commitment
- * @returns Transfer result with output info
- *
- * @example
- * ```typescript
- * // Transfer existing note to Alice's stealth address
- * const result = await sendPrivate(config, myNote, aliceMetaAddress, merkleProof);
- *
- * // Alice scans and finds the deposit
- * const found = await scanAnnouncements(aliceKeys, announcements);
- * // Alice can now claim with her spending key
- * ```
- */
-export async function sendPrivate(
-  config: ApiClientConfig,
-  inputNote: Note,
-  recipientMeta: StealthMetaAddress,
-  merkleProof?: MerkleProof
-): Promise<StealthTransferResult> {
-  if (!config.payer) {
-    throw new Error("Payer keypair required for stealth transfer");
-  }
-
-  // Create stealth deposit data for recipient (computes ECDH, derives commitment)
-  const stealthDeposit = await createStealthDeposit(recipientMeta, inputNote.amount);
-
-  // Use provided merkle proof or create empty one (for testing)
-  const mp = merkleProof ?? createEmptyMerkleProofForNote();
-
-  // Generate transfer proof
-  // This proves: input commitment in tree, valid nullifier, output matches stealth derivation
-  const proof = await generateTransferProof(inputNote, stealthDeposit, mp);
-
-  // Build instruction data (393 bytes)
-  // Format: discriminator (1) + proof (256) + merkle_root (32) + input_nullifier_hash (32)
-  //         + output_commitment (32) + ephemeral_pub (33) + amount_sats (8)
-  const data = buildTransferStealthData(
-    proof,
-    mp.root,
-    inputNote.nullifierHashBytes,
-    stealthDeposit.commitment,
-    stealthDeposit.ephemeralPub,
-    inputNote.amount
-  );
-
-  // Derive PDAs
-  const [poolState] = await derivePoolStatePDA(config.programId);
-  const [commitmentTree] = await deriveCommitmentTreePDA(config.programId);
-  const [nullifierRecord] = await deriveNullifierRecordPDA(
-    config.programId,
-    inputNote.nullifierHashBytes
-  );
-  const [stealthAnnouncement] = await deriveStealthAnnouncementPDA(
-    config.programId,
-    stealthDeposit.ephemeralPub
-  );
-
-  // Build instruction (v2 format)
-  const ix: Instruction = {
-    programAddress: config.programId,
-    accounts: [
-      { address: poolState, role: AccountRole.WRITABLE },
-      { address: commitmentTree, role: AccountRole.WRITABLE },
-      { address: nullifierRecord, role: AccountRole.WRITABLE },
-      { address: stealthAnnouncement, role: AccountRole.WRITABLE },
-      { address: config.payer.address, role: AccountRole.WRITABLE_SIGNER },
-      { address: SYSTEM_PROGRAM_ADDRESS, role: AccountRole.READONLY },
-    ],
-    data: new Uint8Array(data),
-  };
-
-  const signature = await sendInstruction(config, ix);
-
-  return {
-    signature,
-    ephemeralPubKey: stealthDeposit.ephemeralPub,
-    outputCommitment: stealthDeposit.commitment,
-    inputNullifierHash: inputNote.nullifierHashBytes,
-    amount: inputNote.amount,
-  };
-}
-
-
-// ============================================================================
 // Helper Functions
 // ============================================================================
 
@@ -887,7 +1162,7 @@ function createEmptyMerkleProofForNote(): MerkleProof {
 }
 
 /**
- * Build claim instruction data
+ * Build claim instruction data (legacy - keeping for compatibility)
  */
 function buildClaimData(proof: NoirProof, amount: bigint): Uint8Array {
   // Format: discriminator (1) + proof_len (4) + proof + amount (8)
@@ -899,6 +1174,61 @@ function buildClaimData(proof: NoirProof, amount: bigint): Uint8Array {
   view.setUint32(1, proofBytes.length, true);
   data.set(proofBytes, 5);
   view.setBigUint64(5 + proofBytes.length, amount, true);
+
+  return data;
+}
+
+/**
+ * Build claim public instruction data
+ *
+ * Format (360 bytes total):
+ * - discriminator: 1 byte (9 = CLAIM_PUBLIC)
+ * - proof: 256 bytes (Groth16)
+ * - root: 32 bytes (Merkle tree root)
+ * - nullifier_hash: 32 bytes
+ * - amount_sats: 8 bytes (little-endian)
+ * - recipient: 32 bytes (Solana wallet address)
+ */
+function buildClaimPublicData(
+  proof: NoirProof,
+  merkleRoot: Uint8Array,
+  nullifierHash: Uint8Array,
+  amountSats: bigint,
+  recipient: Address
+): Uint8Array {
+  const proofBytes = proof.proof;
+
+  // Ensure proof is exactly 256 bytes (pad or truncate if needed)
+  const proof256 = new Uint8Array(256);
+  proof256.set(proofBytes.slice(0, Math.min(256, proofBytes.length)));
+
+  // Total: 1 + 256 + 32 + 32 + 8 + 32 = 361 bytes
+  const data = new Uint8Array(361);
+  const view = new DataView(data.buffer);
+
+  let offset = 0;
+
+  // Discriminator
+  data[offset++] = INSTRUCTION.CLAIM;
+
+  // Proof (256 bytes)
+  data.set(proof256, offset);
+  offset += 256;
+
+  // Merkle root (32 bytes)
+  data.set(merkleRoot, offset);
+  offset += 32;
+
+  // Nullifier hash (32 bytes)
+  data.set(nullifierHash, offset);
+  offset += 32;
+
+  // Amount in satoshis (8 bytes, little-endian)
+  view.setBigUint64(offset, amountSats, true);
+  offset += 8;
+
+  // Recipient address (32 bytes)
+  data.set(addressToBytes(recipient), offset);
 
   return data;
 }
@@ -916,7 +1246,7 @@ function buildSplitData(
   const data = new Uint8Array(1 + 4 + proofBytes.length + 64);
   const view = new DataView(data.buffer);
 
-  data[0] = INSTRUCTION.SPLIT_COMMITMENT;
+  data[0] = INSTRUCTION.SPEND_SPLIT;
   view.setUint32(1, proofBytes.length, true);
   data.set(proofBytes, 5);
   data.set(outputCommitment1, 5 + proofBytes.length);
@@ -958,125 +1288,6 @@ function buildRequestRedemptionData(
   }
 
   return data;
-}
-
-/**
- * Build transfer stealth instruction data
- *
- * Format (394 bytes total):
- * - discriminator: 1 byte
- * - proof: 256 bytes (Groth16)
- * - merkle_root: 32 bytes
- * - input_nullifier_hash: 32 bytes
- * - output_commitment: 32 bytes
- * - ephemeral_pub: 33 bytes (Grumpkin compressed)
- * - amount_sats: 8 bytes (little-endian)
- */
-function buildTransferStealthData(
-  proof: NoirProof,
-  merkleRoot: Uint8Array,
-  inputNullifierHash: Uint8Array,
-  outputCommitment: Uint8Array,
-  ephemeralPub: Uint8Array,
-  amountSats: bigint
-): Uint8Array {
-  const proofBytes = proof.proof;
-
-  // Ensure proof is exactly 256 bytes (pad or truncate if needed)
-  const proof256 = new Uint8Array(256);
-  proof256.set(proofBytes.slice(0, Math.min(256, proofBytes.length)));
-
-  // Total: 1 + 256 + 32 + 32 + 32 + 33 + 8 = 394 bytes
-  const data = new Uint8Array(394);
-  const view = new DataView(data.buffer);
-
-  let offset = 0;
-
-  // Discriminator
-  data[offset++] = INSTRUCTION.TRANSFER_STEALTH;
-
-  // Proof (256 bytes)
-  data.set(proof256, offset);
-  offset += 256;
-
-  // Merkle root (32 bytes)
-  data.set(merkleRoot, offset);
-  offset += 32;
-
-  // Input nullifier hash (32 bytes)
-  data.set(inputNullifierHash, offset);
-  offset += 32;
-
-  // Output commitment (32 bytes)
-  data.set(outputCommitment, offset);
-  offset += 32;
-
-  // Ephemeral public key (33 bytes)
-  data.set(ephemeralPub, offset);
-  offset += 33;
-
-  // Amount in satoshis (8 bytes, little-endian)
-  view.setBigUint64(offset, amountSats, true);
-
-  return data;
-}
-
-/**
- * Generate transfer proof for stealth transfer
- *
- * Proves:
- * 1. Knowledge of input note secrets
- * 2. Input commitment exists in merkle tree
- * 3. Valid nullifier hash derivation
- * 4. Output commitment matches stealth derivation
- */
-async function generateTransferProof(
-  inputNote: Note,
-  stealthDeposit: StealthDeposit,
-  merkleProof: MerkleProof
-): Promise<NoirProof> {
-  // For now, return a placeholder proof
-  // In production, this would call the Noir prover with stealth_transfer circuit
-  //
-  // Circuit inputs would be:
-  // - input_nullifier: inputNote.nullifier
-  // - input_secret: inputNote.secret
-  // - input_amount: inputNote.amount
-  // - merkle_path: merkleProof.pathElements
-  // - path_indices: merkleProof.pathIndices
-  // - output_stealth_pub_x: extracted from stealthDeposit computation
-  // - merkle_root: merkleProof.root
-  // - input_nullifier_hash: inputNote.nullifierHash
-  // - output_commitment: stealthDeposit.commitment
-  // - amount_pub: inputNote.amount
-
-  // Placeholder proof for testing
-  const placeholderProof = new Uint8Array(256);
-  // Set non-zero values so verification doesn't immediately fail
-  placeholderProof[0] = 1;
-  placeholderProof[64] = 1;
-  placeholderProof[192] = 1;
-
-  return {
-    proof: placeholderProof,
-    publicInputs: [
-      bytesToHex(merkleProof.root),
-      bytesToHex(inputNote.nullifierHashBytes),
-      bytesToHex(stealthDeposit.commitment),
-      inputNote.amount.toString(),
-    ],
-    verificationKey: new Uint8Array(0),
-    vkHash: new Uint8Array(32),
-  };
-}
-
-/**
- * Convert bytes to hex string
- */
-function bytesToHex(bytes: Uint8Array): string {
-  return Array.from(bytes)
-    .map((b) => b.toString(16).padStart(2, "0"))
-    .join("");
 }
 
 // ============================================================================

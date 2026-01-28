@@ -11,19 +11,20 @@
  * ### DEPOSIT (BTC → zkBTC)
  * - **deposit**: Generate deposit credentials (taproot address + claim link)
  * - **claimNote**: Claim zkBTC tokens with ZK proof
+ * - **claimPublic**: Claim zkBTC to public wallet (reveals amount)
+ * - **claimPublicStealth**: Claim stealth note to public wallet
  * - **sendStealth**: Send to specific recipient via stealth ECDH (for new deposits)
  *
  * ### TRANSFER (zkBTC → Someone)
  * - **splitNote**: Split one note into two outputs
  * - **createClaimLinkFromNote**: Create shareable claim URL (off-chain)
- * - **sendPrivate**: Transfer existing zkBTC to recipient's stealth address (with ZK proof)
  *
  * ### WITHDRAW (zkBTC → BTC)
  * - **withdraw**: Request BTC withdrawal (burn zkBTC)
  *
  * ## Quick Start
  * ```typescript
- * import { deposit, claimNote, splitNote, createClaimLinkFromNote, sendPrivate } from '@zvault/sdk';
+ * import { deposit, claimNote, claimPublic, splitNote, createClaimLinkFromNote } from '@zvault/sdk';
  *
  * // 1. DEPOSIT: Generate credentials
  * const result = await deposit(100_000n); // 0.001 BTC
@@ -32,13 +33,14 @@
  *
  * // 2. CLAIM: After BTC is confirmed
  * const claimed = await claimNote(config, result.claimLink);
+ * // OR claim to public wallet:
+ * const publicClaim = await claimPublic(config, result.claimLink);
  *
  * // 3. SPLIT: Divide into two outputs
  * const { output1, output2 } = await splitNote(config, result.note, 50_000n);
  *
- * // 4. SEND: Via link or stealth
+ * // 4. SEND: Via claim link
  * const link = createClaimLinkFromNote(output1);
- * await sendPrivate(config, output2, recipientMeta);
  * ```
  */
 
@@ -115,15 +117,13 @@ export {
   type WalletSignerAdapter,
 } from "./keys";
 
-// Poseidon2 hash utilities (matches Noir circuits)
+// Poseidon2 hash utilities (matches Noir circuits - Unified Model)
 export {
   poseidon2Hash,
-  deriveNotePubKey,
-  computeCommitment,
+  computeUnifiedCommitment,
   computeNullifier,
   hashNullifier,
-  computeNote,
-  computeNoteCommitment,
+  computePoolCommitment,
   BN254_SCALAR_FIELD,
 } from "./poseidon2";
 
@@ -220,7 +220,7 @@ export {
 // ZK proof generation (Noir UltraHonk) - CLI/Node.js only
 // ==========================================================================
 
-export type { NoirProof, CircuitType } from "./proof";
+export type { NoirProof } from "./proof";
 
 // ==========================================================================
 // WASM Prover (Browser + Node.js)
@@ -229,26 +229,29 @@ export type { NoirProof, CircuitType } from "./proof";
 export {
   initProver,
   isProverAvailable,
-  generateClaimProof as generateClaimProofWasm,
-  generateSplitProof as generateSplitProofWasm,
-  generateTransferProof as generateTransferProofWasm,
-  generateWithdrawProof as generateWithdrawProofWasm,
+  // Unified Model proof generation
+  generateClaimProof,
+  generateSpendSplitProof,
+  generateSpendPartialPublicProof,
   // Pool proof generation
   generatePoolDepositProof,
   generatePoolWithdrawProof,
   generatePoolClaimYieldProof,
+  // Verification and utilities
   verifyProof as verifyProofWasm,
   setCircuitPath,
   getCircuitPath,
   circuitExists,
   proofToBytes,
   cleanup as cleanupProver,
+  // Types
   type ProofData,
   type MerkleProofInput,
-  type ClaimInputs as ProverClaimInputs,
-  type SplitInputs,
-  type TransferInputs,
-  type WithdrawInputs,
+  type CircuitType,
+  // Unified Model input types
+  type ClaimInputs,
+  type SpendSplitInputs,
+  type SpendPartialPublicInputs,
   // Pool proof input types
   type PoolDepositInputs,
   type PoolWithdrawInputs,
@@ -352,7 +355,7 @@ export {
   STEALTH_ANNOUNCEMENT_DISCRIMINATOR,
   type StealthDeposit,
   type ScannedNote,
-  type ClaimInputs,
+  type ClaimInputs as StealthClaimInputs,
   type OnChainStealthAnnouncement,
   type ConnectionAdapter,
   type ViewOnlyKeys,
@@ -382,10 +385,10 @@ export {
 // ==========================================================================
 //
 // DEPOSIT (BTC → zkBTC):
-//   deposit, claimNote, sendStealth
+//   deposit, claimNote, claimPublic, claimPublicStealth, sendStealth
 //
 // TRANSFER (zkBTC → Someone):
-//   splitNote, createClaimLinkFromNote, sendPrivate
+//   splitNote, createClaimLinkFromNote
 //
 // WITHDRAW (zkBTC → BTC):
 //   withdraw
@@ -394,13 +397,14 @@ export {
 
 export {
   // Deposit functions
-  deposit,
+  depositToNote,
   claimNote,
+  claimPublic,
+  claimPublicStealth,
   sendStealth,
   // Transfer functions
   splitNote,
   createClaimLinkFromNote,
-  sendPrivate,
   // Withdraw function
   withdraw,
 } from "./api";
@@ -409,9 +413,10 @@ export type {
   DepositResult,
   WithdrawResult,
   ClaimResult as ClaimNoteResult,
+  ClaimPublicResult,
+  ClaimPublicStealthResult,
   SplitResult as SplitNoteResult,
   StealthResult,
-  StealthTransferResult as SendPrivateResult,
   ApiClientConfig,
 } from "./api";
 

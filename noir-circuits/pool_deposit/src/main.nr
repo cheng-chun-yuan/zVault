@@ -1,123 +1,100 @@
-// Pool Deposit Circuit (Stealth Mode)
+// Pool Deposit Circuit (Unified Model)
 //
-// Proves valid deposit of zkBTC into yield pool using stealth addresses.
-// Spends an existing zkBTC note and creates a pool position commitment.
+// Proves valid deposit of zkBTC into yield pool using unified commitment format.
+// Spends an existing unified commitment and creates a pool position commitment.
 //
-// Stealth Pool Position Commitment Structure:
-//   pool_commitment = Poseidon2(stealth_pub_x, principal, deposit_epoch)
+// Input:  Unified Commitment = Poseidon2(pub_key_x, amount)
+// Output: Pool Position = Poseidon2(pub_key_x, principal, deposit_epoch)
 //
-// Where stealth_pub is derived off-chain via ECDH:
-//   sharedSecret = ECDH(ephemeral.priv, recipientViewingPub)
-//   stealthPub = spendingPub + hash(sharedSecret) * G
+// Unified Model:
+//   Commitment = Poseidon2(pub_key_x, amount)
+//   Nullifier  = Poseidon2(priv_key, leaf_index)
+//   Pool Position = Poseidon2(pub_key_x, principal, deposit_epoch)
 
 use dep::zvault_utils;
-use dep::poseidon::poseidon2::Poseidon2;
-
-// Merkle tree depth (20 levels, ~1M leaves)
-global TREE_DEPTH: u32 = 20;
 
 fn main(
-    // Private inputs - zkBTC note being deposited
-    input_nullifier: Field,
-    input_secret: Field,
-    input_amount: u64,
+    // Private inputs - unified commitment being deposited
+    priv_key: Field,               // Spending private key
+    pub_key_x: Field,              // Corresponding public key x-coordinate
+    amount: u64,                   // Amount in the commitment
+    leaf_index: Field,             // Position in Merkle tree
     input_merkle_path: [Field; 20],
     input_path_indices: [u1; 20],
 
+    // Private inputs - pool position output (can be different key for privacy)
+    pool_pub_key_x: Field,         // Public key for pool position
+
     // Public inputs
     input_merkle_root: pub Field,      // Main zkBTC tree root
-    input_nullifier_hash: pub Field,   // Hash of input nullifier (for on-chain recording)
-    stealth_pub_x: pub Field,          // Stealth public key x-coordinate (from ECDH)
+    input_nullifier_hash: pub Field,   // Hash of input nullifier
     pool_commitment: pub Field,        // New pool position commitment
     deposit_epoch: pub Field,          // Current epoch at deposit time
 ) {
-    // 1. Verify input zkBTC commitment exists in main merkle tree
-    let input_commitment = zvault_utils::compute_commitment_from_secrets(
-        input_nullifier,
-        input_secret,
-        input_amount as Field
-    );
+    // 1. Verify input unified commitment exists in main merkle tree
+    let input_commitment = zvault_utils::compute_commitment(pub_key_x, amount as Field);
     assert(
-        verify_merkle_proof_20(input_commitment, input_merkle_root, input_merkle_path, input_path_indices),
+        zvault_utils::verify_merkle_proof_20(input_commitment, input_merkle_root, input_merkle_path, input_path_indices),
         "Input commitment not in Merkle tree"
     );
 
-    // 2. Verify input nullifier hash matches
+    // 2. Compute and verify nullifier hash
+    let nullifier = zvault_utils::compute_nullifier(priv_key, leaf_index);
     assert(
-        input_nullifier_hash == zvault_utils::compute_nullifier_hash(input_nullifier),
+        input_nullifier_hash == zvault_utils::compute_nullifier_hash(nullifier),
         "Invalid input nullifier hash"
     );
 
     // 3. Verify principal equals input amount (full deposit, no partial)
-    let principal = input_amount as Field;
+    let principal = amount as Field;
 
     // 4. Compute and verify pool position commitment
-    // Pool commitment = Poseidon2(stealth_pub_x, principal, deposit_epoch)
-    // stealth_pub_x is derived off-chain via ECDH and provided as public input
-    let expected_pool_commitment = Poseidon2::hash([stealth_pub_x, principal, deposit_epoch], 3);
+    // Pool commitment = Poseidon2(pool_pub_key_x, principal, deposit_epoch)
+    let expected_pool_commitment = zvault_utils::compute_pool_commitment(
+        pool_pub_key_x,
+        principal,
+        deposit_epoch
+    );
     assert(
         pool_commitment == expected_pool_commitment,
         "Pool commitment mismatch"
     );
 
-    // 5. Ensure stealth_pub_x is valid (non-zero)
-    assert(stealth_pub_x != 0, "Stealth public key cannot be zero");
-
-    // 6. Ensure principal > 0
-    assert(input_amount > 0, "Principal must be greater than zero");
+    // 5. Security checks
+    assert(priv_key != 0, "Private key cannot be zero");
+    assert(pool_pub_key_x != 0, "Pool public key cannot be zero");
+    assert(amount > 0, "Amount must be greater than zero");
 }
 
-/**
- * Verify Merkle proof (20-level tree)
- */
-fn verify_merkle_proof_20(
-    leaf: Field,
-    root: Field,
-    path_elements: [Field; 20],
-    path_indices: [u1; 20],
-) -> bool {
-    let mut current = leaf;
-
-    for i in 0..20 {
-        let sibling = path_elements[i];
-        let is_right = (path_indices[i] == 1) as bool;
-
-        let (left, right) = if is_right {
-            (sibling, current)
-        } else {
-            (current, sibling)
-        };
-
-        current = Poseidon2::hash([left, right], 2);
-    }
-
-    current == root
-}
+// ============================================================================
+// Tests
+// ============================================================================
 
 #[test]
-fn test_pool_deposit_stealth_circuit() {
-    // Input zkBTC note
-    let input_nullifier = 12345;
-    let input_secret = 67890;
-    let input_amount: u64 = 100000000; // 1 BTC in sats
+fn test_pool_deposit_unified_circuit() {
+    // Input unified commitment
+    let priv_key = 12345;
+    let pub_key_x = 67890; // In practice: pub_key = priv_key * G
+    let amount: u64 = 100000000; // 1 BTC in sats
+    let leaf_index = 0;
 
-    // Stealth public key x-coordinate (derived off-chain via ECDH)
-    // In production, this is: stealthPub = spendingPub + hash(ECDH(ephemeral, viewingPub)) * G
-    let stealth_pub_x = 0xfedcba9876543210;
+    // Pool position uses different key for privacy
+    let pool_pub_key_x = 0xfedcba9876543210;
 
     // Deposit epoch
     let deposit_epoch = 10;
 
-    // Compute input commitment
-    let input_commitment = zvault_utils::compute_commitment_from_secrets(
-        input_nullifier,
-        input_secret,
-        input_amount as Field
-    );
-    let input_nullifier_hash = zvault_utils::compute_nullifier_hash(input_nullifier);
+    // Compute input commitment using unified format
+    let input_commitment = zvault_utils::compute_commitment(pub_key_x, amount as Field);
+    let nullifier = zvault_utils::compute_nullifier(priv_key, leaf_index);
+    let input_nullifier_hash = zvault_utils::compute_nullifier_hash(nullifier);
 
-    // Compute pool commitment: Poseidon2(stealth_pub_x, principal, deposit_epoch)
-    let pool_commitment = Poseidon2::hash([stealth_pub_x, input_amount as Field, deposit_epoch], 3);
+    // Compute pool commitment
+    let pool_commitment = zvault_utils::compute_pool_commitment(
+        pool_pub_key_x,
+        amount as Field,
+        deposit_epoch
+    );
 
     // Build simple merkle tree (leaf at index 0)
     let zero: Field = 0;
@@ -127,44 +104,46 @@ fn test_pool_deposit_stealth_circuit() {
     // Compute root
     let mut current = input_commitment;
     for _i in 0..20 {
-        current = Poseidon2::hash([current, zero], 2);
+        current = dep::poseidon::poseidon2::Poseidon2::hash([current, zero], 2);
     }
     let input_merkle_root = current;
 
     // Run circuit
     main(
-        input_nullifier,
-        input_secret,
-        input_amount,
+        priv_key,
+        pub_key_x,
+        amount,
+        leaf_index,
         input_merkle_path,
         input_path_indices,
+        pool_pub_key_x,
         input_merkle_root,
         input_nullifier_hash,
-        stealth_pub_x,
         pool_commitment,
         deposit_epoch
     );
 }
 
-#[test(should_fail_with = "Stealth public key cannot be zero")]
-fn test_pool_deposit_zero_stealth_key() {
-    let input_nullifier = 12345;
-    let input_secret = 67890;
-    let input_amount: u64 = 100000000;
+#[test(should_fail_with = "Pool public key cannot be zero")]
+fn test_pool_deposit_zero_pool_key() {
+    let priv_key = 12345;
+    let pub_key_x = 67890;
+    let amount: u64 = 100000000;
+    let leaf_index = 0;
 
-    // INVALID: zero stealth key
-    let stealth_pub_x = 0;
-
+    // INVALID: zero pool key
+    let pool_pub_key_x = 0;
     let deposit_epoch = 10;
 
-    let input_commitment = zvault_utils::compute_commitment_from_secrets(
-        input_nullifier,
-        input_secret,
-        input_amount as Field
-    );
-    let input_nullifier_hash = zvault_utils::compute_nullifier_hash(input_nullifier);
+    let input_commitment = zvault_utils::compute_commitment(pub_key_x, amount as Field);
+    let nullifier = zvault_utils::compute_nullifier(priv_key, leaf_index);
+    let input_nullifier_hash = zvault_utils::compute_nullifier_hash(nullifier);
 
-    let pool_commitment = Poseidon2::hash([stealth_pub_x, input_amount as Field, deposit_epoch], 3);
+    let pool_commitment = zvault_utils::compute_pool_commitment(
+        pool_pub_key_x,
+        amount as Field,
+        deposit_epoch
+    );
 
     let zero: Field = 0;
     let input_merkle_path: [Field; 20] = [zero; 20];
@@ -172,41 +151,44 @@ fn test_pool_deposit_zero_stealth_key() {
 
     let mut current = input_commitment;
     for _i in 0..20 {
-        current = Poseidon2::hash([current, zero], 2);
+        current = dep::poseidon::poseidon2::Poseidon2::hash([current, zero], 2);
     }
     let input_merkle_root = current;
 
     main(
-        input_nullifier,
-        input_secret,
-        input_amount,
+        priv_key,
+        pub_key_x,
+        amount,
+        leaf_index,
         input_merkle_path,
         input_path_indices,
+        pool_pub_key_x,
         input_merkle_root,
         input_nullifier_hash,
-        stealth_pub_x,
         pool_commitment,
         deposit_epoch
     );
 }
 
-#[test(should_fail_with = "Principal must be greater than zero")]
-fn test_pool_deposit_zero_principal() {
-    let input_nullifier = 12345;
-    let input_secret = 67890;
-    let input_amount: u64 = 0; // INVALID: zero amount
+#[test(should_fail_with = "Amount must be greater than zero")]
+fn test_pool_deposit_zero_amount() {
+    let priv_key = 12345;
+    let pub_key_x = 67890;
+    let amount: u64 = 0; // INVALID: zero amount
+    let leaf_index = 0;
 
-    let stealth_pub_x = 0xfedcba9876543210;
+    let pool_pub_key_x = 0xfedcba9876543210;
     let deposit_epoch = 10;
 
-    let input_commitment = zvault_utils::compute_commitment_from_secrets(
-        input_nullifier,
-        input_secret,
-        input_amount as Field
-    );
-    let input_nullifier_hash = zvault_utils::compute_nullifier_hash(input_nullifier);
+    let input_commitment = zvault_utils::compute_commitment(pub_key_x, amount as Field);
+    let nullifier = zvault_utils::compute_nullifier(priv_key, leaf_index);
+    let input_nullifier_hash = zvault_utils::compute_nullifier_hash(nullifier);
 
-    let pool_commitment = Poseidon2::hash([stealth_pub_x, input_amount as Field, deposit_epoch], 3);
+    let pool_commitment = zvault_utils::compute_pool_commitment(
+        pool_pub_key_x,
+        amount as Field,
+        deposit_epoch
+    );
 
     let zero: Field = 0;
     let input_merkle_path: [Field; 20] = [zero; 20];
@@ -214,19 +196,65 @@ fn test_pool_deposit_zero_principal() {
 
     let mut current = input_commitment;
     for _i in 0..20 {
-        current = Poseidon2::hash([current, zero], 2);
+        current = dep::poseidon::poseidon2::Poseidon2::hash([current, zero], 2);
     }
     let input_merkle_root = current;
 
     main(
-        input_nullifier,
-        input_secret,
-        input_amount,
+        priv_key,
+        pub_key_x,
+        amount,
+        leaf_index,
         input_merkle_path,
         input_path_indices,
+        pool_pub_key_x,
         input_merkle_root,
         input_nullifier_hash,
-        stealth_pub_x,
+        pool_commitment,
+        deposit_epoch
+    );
+}
+
+#[test(should_fail_with = "Private key cannot be zero")]
+fn test_pool_deposit_zero_priv_key() {
+    let priv_key = 0; // INVALID: zero private key
+    let pub_key_x = 67890;
+    let amount: u64 = 100000000;
+    let leaf_index = 0;
+
+    let pool_pub_key_x = 0xfedcba9876543210;
+    let deposit_epoch = 10;
+
+    let input_commitment = zvault_utils::compute_commitment(pub_key_x, amount as Field);
+    let nullifier = zvault_utils::compute_nullifier(priv_key, leaf_index);
+    let input_nullifier_hash = zvault_utils::compute_nullifier_hash(nullifier);
+
+    let pool_commitment = zvault_utils::compute_pool_commitment(
+        pool_pub_key_x,
+        amount as Field,
+        deposit_epoch
+    );
+
+    let zero: Field = 0;
+    let input_merkle_path: [Field; 20] = [zero; 20];
+    let input_path_indices: [u1; 20] = [0; 20];
+
+    let mut current = input_commitment;
+    for _i in 0..20 {
+        current = dep::poseidon::poseidon2::Poseidon2::hash([current, zero], 2);
+    }
+    let input_merkle_root = current;
+
+    main(
+        priv_key,
+        pub_key_x,
+        amount,
+        leaf_index,
+        input_merkle_path,
+        input_path_indices,
+        pool_pub_key_x,
+        input_merkle_root,
+        input_nullifier_hash,
         pool_commitment,
         deposit_epoch
     );

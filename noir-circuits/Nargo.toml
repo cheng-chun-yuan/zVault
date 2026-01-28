@@ -1,14 +1,11 @@
 [workspace]
 members = [
     "claim",
-    "proof_of_innocence",
-    "transfer",
-    "split",
-    "partial_withdraw",
-    "stealth_transfer",
-    "helpers",
-    "utils",
+    "spend_split",
+    "spend_partial_public",
     "pool_deposit",
     "pool_withdraw",
-    "pool_claim_yield"
+    "pool_claim_yield",
+    "utils",
+    "helpers"
 ]

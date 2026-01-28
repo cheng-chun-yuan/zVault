@@ -1,14 +1,15 @@
 "use client";
 
-import { Inbox, Shield } from "lucide-react";
+import { Inbox, Shield, RefreshCw } from "lucide-react";
 
 interface EmptyInboxProps {
   hasKeys: boolean;
   onDeriveKeys?: () => void;
+  onRefresh?: () => void;
   isLoading?: boolean;
 }
 
-export function EmptyInbox({ hasKeys, onDeriveKeys, isLoading }: EmptyInboxProps) {
+export function EmptyInbox({ hasKeys, onDeriveKeys, onRefresh, isLoading }: EmptyInboxProps) {
   if (!hasKeys) {
     return (
       <div className="flex flex-col items-center justify-center py-8 text-center">
@@ -36,9 +37,19 @@ export function EmptyInbox({ hasKeys, onDeriveKeys, isLoading }: EmptyInboxProps
         <Inbox className="h-10 w-10 text-gray" />
       </div>
       <p className="text-heading6 text-foreground mb-2">No Incoming Deposits</p>
-      <p className="text-body2 text-gray">
+      <p className="text-body2 text-gray mb-4">
         When someone sends you zBTC via stealth address, it will appear here
       </p>
+      {onRefresh && (
+        <button
+          onClick={onRefresh}
+          disabled={isLoading}
+          className="flex items-center gap-2 text-body2 text-gray hover:text-gray-light transition-colors disabled:opacity-50"
+        >
+          <RefreshCw className={`w-4 h-4 ${isLoading ? "animate-spin" : ""}`} />
+          Refresh
+        </button>
+      )}
     </div>
   );
 }

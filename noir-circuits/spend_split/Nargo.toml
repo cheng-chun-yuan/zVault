@@ -1,5 +1,5 @@
 [package]
-name = "zvault_partial_withdraw"
+name = "zvault_spend_split"
 type = "bin"
 authors = ["zVault Team"]
 

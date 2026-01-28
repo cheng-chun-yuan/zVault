@@ -50,6 +50,16 @@ export function DepositStatus({
       <div className={`text-center text-zinc-500 py-4 ${className}`}>
         <AlertCircle className="w-8 h-8 mx-auto mb-2 opacity-50" />
         <p>Deposit not found</p>
+        <button
+          onClick={refresh}
+          disabled={isLoading}
+          className="mt-3 flex items-center gap-1 mx-auto text-xs hover:text-zinc-300 transition-colors disabled:opacity-50"
+        >
+          <RefreshCw
+            className={`w-3 h-3 ${isLoading ? "animate-spin" : ""}`}
+          />
+          Refresh
+        </button>
       </div>
     );
   }

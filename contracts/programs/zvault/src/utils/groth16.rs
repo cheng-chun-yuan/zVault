@@ -326,6 +326,29 @@ pub fn verify_split_proof(
     verify_groth16_proof(vk, proof, &public_inputs)
 }
 
+/// Verify spend partial public proof (Unified Model)
+/// Commitment -> Public Amount + Change Commitment
+/// Public inputs: [root, nullifier_hash, public_amount, change_commitment, recipient]
+pub fn verify_spend_partial_public_proof(
+    vk: &VerificationKey,
+    proof: &Groth16Proof,
+    root: &[u8; 32],
+    nullifier_hash: &[u8; 32],
+    public_amount: u64,
+    change_commitment: &[u8; 32],
+    recipient: &[u8; 32],
+) -> bool {
+    let public_inputs = [
+        *root,
+        *nullifier_hash,
+        encode_amount_as_field(public_amount),
+        *change_commitment,
+        *recipient,
+    ];
+
+    verify_groth16_proof(vk, proof, &public_inputs)
+}
+
 // ============================================================================
 // Yield Pool Proof Verification Functions
 // ============================================================================

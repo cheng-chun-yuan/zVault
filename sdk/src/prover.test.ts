@@ -1,8 +1,12 @@
 /**
- * Integration Tests for Noir Proof Generation
+ * Integration Tests for Noir Proof Generation (Unified Model)
  *
  * Tests real proof generation and verification using compiled Noir circuits.
  * These tests require circuit artifacts in ./circuits directory.
+ *
+ * UNIFIED MODEL:
+ * - Commitment = Poseidon2(pub_key_x, amount)
+ * - Nullifier = Poseidon2(priv_key, leaf_index)
  */
 
 import { expect, test, describe, beforeAll } from "bun:test";
@@ -11,17 +15,17 @@ import {
   setCircuitPath,
   isProverAvailable,
   generateClaimProof,
-  generateSplitProof,
-  generateTransferProof,
+  generateSpendSplitProof,
+  generateSpendPartialPublicProof,
   verifyProof,
   cleanup,
   circuitExists,
 } from "./prover";
-import { hashNullifier, computeNoteCommitment, poseidon2Hash } from "./poseidon2";
+import { computeUnifiedCommitment, poseidon2Hash } from "./poseidon2";
 
 /**
  * Compute merkle root from commitment using all-zero siblings.
- * This mirrors what the Noir circuit does in test_claim_circuit.
+ * This mirrors what the Noir circuit does in tests.
  */
 function computeMerkleRootFromCommitment(commitment: bigint, depth: number): bigint {
   let current = commitment;
@@ -54,26 +58,26 @@ describe("PROVER INITIALIZATION", () => {
 
   test("circuitExists() finds compiled circuits", async () => {
     expect(await circuitExists("claim")).toBe(true);
-    expect(await circuitExists("split")).toBe(true);
-    expect(await circuitExists("transfer")).toBe(true);
+    expect(await circuitExists("spend_split")).toBe(true);
+    expect(await circuitExists("spend_partial_public")).toBe(true);
   });
 });
 
 // ============================================================================
-// 2. CLAIM PROOF GENERATION
+// 2. CLAIM PROOF GENERATION (Unified Model)
 // ============================================================================
 
-describe("CLAIM PROOF", () => {
+describe("CLAIM PROOF (Unified Model)", () => {
   test("generates and verifies claim proof", async () => {
-    const nullifier = 12345n;
-    const secret = 67890n;
-    const amount = 100000n;
+    // Unified model: priv_key, pub_key_x, amount
+    const privKey = 12345n;
+    const pubKeyX = 67890n; // In practice: derived from privKey via curve multiplication
+    const amount = 100000000n; // 1 BTC in satoshis
 
-    // Compute commitment = poseidon2([poseidon2([nullifier, secret]), amount])
-    const commitment = computeNoteCommitment(nullifier, secret, amount);
+    // Compute commitment = Poseidon2(pub_key_x, amount)
+    const commitment = computeUnifiedCommitment(pubKeyX, amount);
 
     // Compute merkle root using depth-20 tree with all-zero siblings
-    // This mirrors the test in claim/src/main.nr
     const merkleRoot = computeMerkleRootFromCommitment(commitment, 20);
 
     // Create a 20-level merkle proof (all zeros, index 0 = left child at each level)
@@ -83,9 +87,10 @@ describe("CLAIM PROOF", () => {
     };
 
     const proof = await generateClaimProof({
-      nullifier,
-      secret,
+      privKey,
+      pubKeyX,
       amount,
+      leafIndex: 0n,
       merkleRoot,
       merkleProof,
     });
@@ -101,28 +106,27 @@ describe("CLAIM PROOF", () => {
 });
 
 // ============================================================================
-// 3. SPLIT PROOF GENERATION
+// 3. SPEND SPLIT PROOF GENERATION (Unified Model)
 // ============================================================================
 
-describe("SPLIT PROOF", () => {
-  test("generates and verifies split proof (1→2)", async () => {
-    // Input commitment (matching circuit test values)
-    const inputNullifier = 12345n;
-    const inputSecret = 67890n;
-    const inputAmount = 100000000n;
+describe("SPEND SPLIT PROOF (Unified Model)", () => {
+  test("generates and verifies spend split proof (1→2)", async () => {
+    // Input commitment (unified model)
+    const privKey = 12345n;
+    const pubKeyX = 67890n;
+    const amount = 100000000n;
+    const leafIndex = 0n;
 
-    // Output 1
-    const output1Nullifier = 11111n;
-    const output1Secret = 22222n;
+    // Output 1: Recipient 1 gets 60%
+    const output1PubKeyX = 11111n;
     const output1Amount = 60000000n;
 
-    // Output 2
-    const output2Nullifier = 33333n;
-    const output2Secret = 44444n;
-    const output2Amount = 40000000n; // 60000000 + 40000000 = 100000000
+    // Output 2: Recipient 2 gets 40%
+    const output2PubKeyX = 22222n;
+    const output2Amount = 40000000n; // 60M + 40M = 100M
 
     // Compute input commitment and merkle root (depth 20)
-    const inputCommitment = computeNoteCommitment(inputNullifier, inputSecret, inputAmount);
+    const inputCommitment = computeUnifiedCommitment(pubKeyX, amount);
     const merkleRoot = computeMerkleRootFromCommitment(inputCommitment, 20);
 
     // 20-level merkle proof (matching circuit)
@@ -131,17 +135,16 @@ describe("SPLIT PROOF", () => {
       indices: Array(20).fill(0),
     };
 
-    const proof = await generateSplitProof({
-      inputNullifier,
-      inputSecret,
-      inputAmount,
+    const proof = await generateSpendSplitProof({
+      privKey,
+      pubKeyX,
+      amount,
+      leafIndex,
       merkleRoot,
       merkleProof,
-      output1Nullifier,
-      output1Secret,
+      output1PubKeyX,
       output1Amount,
-      output2Nullifier,
-      output2Secret,
+      output2PubKeyX,
       output2Amount,
     });
 
@@ -149,73 +152,104 @@ describe("SPLIT PROOF", () => {
     expect(proof.proof.length).toBeGreaterThan(0);
 
     // Verify
-    const isValid = await verifyProof("split", proof);
+    const isValid = await verifyProof("spend_split", proof);
     expect(isValid).toBe(true);
   }, 120000);
 
-  test("split proof fails if amounts don't conserve", async () => {
+  test("spend split proof fails if amounts don't conserve", async () => {
     const merkleProof = {
       siblings: Array(20).fill(0n),
       indices: Array(20).fill(0),
     };
 
     await expect(
-      generateSplitProof({
-        inputNullifier: 1n,
-        inputSecret: 2n,
-        inputAmount: 100000n,
+      generateSpendSplitProof({
+        privKey: 12345n,
+        pubKeyX: 67890n,
+        amount: 100000000n,
+        leafIndex: 0n,
         merkleRoot: 0n,
         merkleProof,
-        output1Nullifier: 3n,
-        output1Secret: 4n,
-        output1Amount: 60000n,
-        output2Nullifier: 5n,
-        output2Secret: 6n,
-        output2Amount: 50000n, // 60000 + 50000 = 110000 ≠ 100000
+        output1PubKeyX: 11111n,
+        output1Amount: 60000000n,
+        output2PubKeyX: 22222n,
+        output2Amount: 50000000n, // 60M + 50M = 110M ≠ 100M
       })
-    ).rejects.toThrow("Split must conserve amount");
+    ).rejects.toThrow("Spend split must conserve amount");
   });
 });
 
 // ============================================================================
-// 4. TRANSFER PROOF GENERATION
+// 4. SPEND PARTIAL PUBLIC PROOF GENERATION (Unified Model)
 // ============================================================================
 
-describe("TRANSFER PROOF", () => {
-  test("generates and verifies transfer proof (1→1)", async () => {
-    // Match circuit test values
-    const inputNullifier = 12345n;
-    const inputSecret = 67890n;
-    const amount = 1000000n;
+describe("SPEND PARTIAL PUBLIC PROOF (Unified Model)", () => {
+  test("generates and verifies spend partial public proof", async () => {
+    // Input commitment
+    const privKey = 12345n;
+    const pubKeyX = 67890n;
+    const amount = 100000000n;
+    const leafIndex = 0n;
 
-    const outputNullifier = 11111n;
-    const outputSecret = 22222n;
+    // Public claim: 60M to public wallet
+    const publicAmount = 60000000n;
+    const recipient = 999999n; // Mock Solana wallet
 
-    const inputCommitment = computeNoteCommitment(inputNullifier, inputSecret, amount);
+    // Change: 40M back to self
+    const changePubKeyX = 11111n;
+    const changeAmount = 40000000n;
+
+    // Compute input commitment and merkle root
+    const inputCommitment = computeUnifiedCommitment(pubKeyX, amount);
     const merkleRoot = computeMerkleRootFromCommitment(inputCommitment, 20);
 
-    // 20-level merkle proof
     const merkleProof = {
       siblings: Array(20).fill(0n),
       indices: Array(20).fill(0),
     };
 
-    const proof = await generateTransferProof({
-      inputNullifier,
-      inputSecret,
+    const proof = await generateSpendPartialPublicProof({
+      privKey,
+      pubKeyX,
       amount,
+      leafIndex,
       merkleRoot,
       merkleProof,
-      outputNullifier,
-      outputSecret,
+      publicAmount,
+      changePubKeyX,
+      changeAmount,
+      recipient,
     });
 
     expect(proof.proof).toBeInstanceOf(Uint8Array);
     expect(proof.proof.length).toBeGreaterThan(0);
 
-    const isValid = await verifyProof("transfer", proof);
+    // Verify
+    const isValid = await verifyProof("spend_partial_public", proof);
     expect(isValid).toBe(true);
   }, 120000);
+
+  test("spend partial public proof fails if amounts don't conserve", async () => {
+    const merkleProof = {
+      siblings: Array(20).fill(0n),
+      indices: Array(20).fill(0),
+    };
+
+    await expect(
+      generateSpendPartialPublicProof({
+        privKey: 12345n,
+        pubKeyX: 67890n,
+        amount: 100000000n,
+        leafIndex: 0n,
+        merkleRoot: 0n,
+        merkleProof,
+        publicAmount: 70000000n,
+        changePubKeyX: 11111n,
+        changeAmount: 40000000n, // 70M + 40M = 110M ≠ 100M
+        recipient: 999999n,
+      })
+    ).rejects.toThrow("Spend partial public must conserve amount");
+  });
 });
 
 // ============================================================================
@@ -224,11 +258,11 @@ describe("TRANSFER PROOF", () => {
 
 describe("PROOF SERIALIZATION", () => {
   test("proof bytes are consistent", async () => {
-    const nullifier = 12345n;
-    const secret = 67890n;
-    const amount = 100000n;
+    const privKey = 12345n;
+    const pubKeyX = 67890n;
+    const amount = 100000000n;
 
-    const commitment = computeNoteCommitment(nullifier, secret, amount);
+    const commitment = computeUnifiedCommitment(pubKeyX, amount);
     const merkleRoot = computeMerkleRootFromCommitment(commitment, 20);
 
     const merkleProof = {
@@ -237,9 +271,10 @@ describe("PROOF SERIALIZATION", () => {
     };
 
     const proof = await generateClaimProof({
-      nullifier,
-      secret,
+      privKey,
+      pubKeyX,
       amount,
+      leafIndex: 0n,
       merkleRoot,
       merkleProof,
     });

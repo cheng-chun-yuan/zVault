@@ -3,9 +3,19 @@
  *
  * Universal prover that works in both Browser and Node.js environments.
  * Uses UltraHonk proofs via @aztec/bb.js with lazy loading.
+ *
+ * UNIFIED MODEL:
+ * - Commitment = Poseidon2(pub_key_x, amount)
+ * - Nullifier = Poseidon2(priv_key, leaf_index)
+ * - Nullifier Hash = Poseidon2(nullifier)
  */
 
-import { hashNullifier, computeNoteCommitment } from "./poseidon2";
+import {
+  hashNullifier,
+  computeUnifiedCommitment,
+  computeNullifier,
+  computePoolCommitment,
+} from "./poseidon2";
 
 export interface MerkleProofInput {
   siblings: bigint[];
@@ -20,10 +30,8 @@ export interface ProofData {
 
 export type CircuitType =
   | "claim"
-  | "transfer"
-  | "split"
-  | "partial_withdraw"
-  | "stealth_transfer"
+  | "spend_split"
+  | "spend_partial_public"
   | "pool_deposit"
   | "pool_withdraw"
   | "pool_claim_yield";
@@ -54,10 +62,8 @@ export function getCircuitPath(): string {
 
 const CIRCUIT_NAMES: Record<CircuitType, string> = {
   claim: "zvault_claim.json",
-  transfer: "zvault_transfer.json",
-  split: "zvault_split.json",
-  partial_withdraw: "zvault_partial_withdraw.json",
-  stealth_transfer: "zvault_stealth_transfer.json",
+  spend_split: "zvault_spend_split.json",
+  spend_partial_public: "zvault_spend_partial_public.json",
   pool_deposit: "zvault_pool_deposit.json",
   pool_withdraw: "zvault_pool_withdraw.json",
   pool_claim_yield: "zvault_pool_claim_yield.json",
@@ -300,33 +306,48 @@ export async function isProverAvailable(): Promise<boolean> {
   }
 }
 
+// ==========================================================================
+// Unified Model Proof Generation
+// ==========================================================================
+
 /**
- * Claim proof inputs
+ * Claim proof inputs (Unified Model)
+ *
+ * Claims commitment to a public Solana wallet.
  */
 export interface ClaimInputs {
-  nullifier: bigint;
-  secret: bigint;
+  /** Spending private key */
+  privKey: bigint;
+  /** Public key x-coordinate (derives from privKey) */
+  pubKeyX: bigint;
+  /** Amount in satoshis */
   amount: bigint;
+  /** Position in Merkle tree */
+  leafIndex: bigint;
+  /** Merkle tree root */
   merkleRoot: bigint;
+  /** Merkle proof (20 levels) */
   merkleProof: MerkleProofInput;
 }
 
 /**
- * Generate a claim proof
+ * Generate a claim proof (Unified Model)
  *
- * Proves knowledge of (nullifier, secret) for commitment in Merkle tree.
+ * Proves ownership of commitment (pub_key_x, amount) and reveals amount for public claim.
  */
 export async function generateClaimProof(inputs: ClaimInputs): Promise<ProofData> {
   const pathElements = inputs.merkleProof.siblings.map((s) => s.toString());
   const pathIndices = inputs.merkleProof.indices;
 
-  // Compute nullifier_hash = poseidon2([nullifier])
-  const nullifierHash = hashNullifier(inputs.nullifier);
+  // Compute nullifier and nullifier hash
+  const nullifier = computeNullifier(inputs.privKey, inputs.leafIndex);
+  const nullifierHash = hashNullifier(nullifier);
 
   const circuitInputs: InputMap = {
-    nullifier: inputs.nullifier.toString(),
-    secret: inputs.secret.toString(),
+    priv_key: inputs.privKey.toString(),
+    pub_key_x: inputs.pubKeyX.toString(),
     amount: inputs.amount.toString(),
+    leaf_index: inputs.leafIndex.toString(),
     merkle_path: pathElements,
     path_indices: pathIndices,
     merkle_root: inputs.merkleRoot.toString(),
@@ -338,216 +359,210 @@ export async function generateClaimProof(inputs: ClaimInputs): Promise<ProofData
 }
 
 /**
- * Split proof inputs
+ * Spend split proof inputs (Unified Model)
+ *
+ * Splits one commitment into two commitments.
  */
-export interface SplitInputs {
-  inputNullifier: bigint;
-  inputSecret: bigint;
-  inputAmount: bigint;
+export interface SpendSplitInputs {
+  /** Input: Spending private key */
+  privKey: bigint;
+  /** Input: Public key x-coordinate */
+  pubKeyX: bigint;
+  /** Input: Amount in satoshis */
+  amount: bigint;
+  /** Input: Position in Merkle tree */
+  leafIndex: bigint;
+  /** Merkle tree root */
   merkleRoot: bigint;
+  /** Merkle proof (20 levels) */
   merkleProof: MerkleProofInput;
-  output1Nullifier: bigint;
-  output1Secret: bigint;
+  /** Output 1: Recipient's public key x-coordinate */
+  output1PubKeyX: bigint;
+  /** Output 1: Amount in satoshis */
   output1Amount: bigint;
-  output2Nullifier: bigint;
-  output2Secret: bigint;
+  /** Output 2: Recipient's public key x-coordinate */
+  output2PubKeyX: bigint;
+  /** Output 2: Amount in satoshis */
   output2Amount: bigint;
 }
 
 /**
- * Generate a split proof
+ * Generate a spend split proof (Unified Model)
  *
- * 1-in-2-out: Spends input commitment, creates two output commitments.
- * Note: Split circuit uses 20-level tree (merkleProof.siblings must have 20 elements)
+ * Commitment -> Commitment + Commitment
+ * Amount conservation: input_amount == output1_amount + output2_amount
  */
-export async function generateSplitProof(inputs: SplitInputs): Promise<ProofData> {
-  if (inputs.inputAmount !== inputs.output1Amount + inputs.output2Amount) {
-    throw new Error("Split must conserve amount (input == output1 + output2)");
+export async function generateSpendSplitProof(inputs: SpendSplitInputs): Promise<ProofData> {
+  if (inputs.amount !== inputs.output1Amount + inputs.output2Amount) {
+    throw new Error("Spend split must conserve amount (input == output1 + output2)");
   }
 
-  // Note: Split circuit source uses 20-level but compiled artifact may use 10
-  // Accept either until circuits are recompiled
-  if (inputs.merkleProof.siblings.length !== 10 && inputs.merkleProof.siblings.length !== 20) {
-    throw new Error(`Split circuit requires 10 or 20-level merkle tree, got ${inputs.merkleProof.siblings.length} siblings`);
+  if (inputs.merkleProof.siblings.length !== 20) {
+    throw new Error(`Spend split circuit requires 20-level merkle tree, got ${inputs.merkleProof.siblings.length} siblings`);
   }
 
   const pathElements = inputs.merkleProof.siblings.map((s) => s.toString());
   const pathIndices = inputs.merkleProof.indices;
 
-  // Compute required hashes
-  const inputNullifierHash = hashNullifier(inputs.inputNullifier);
-  const outputCommitment1 = computeNoteCommitment(
-    inputs.output1Nullifier,
-    inputs.output1Secret,
-    inputs.output1Amount
-  );
-  const outputCommitment2 = computeNoteCommitment(
-    inputs.output2Nullifier,
-    inputs.output2Secret,
-    inputs.output2Amount
-  );
+  // Compute nullifier hash
+  const nullifier = computeNullifier(inputs.privKey, inputs.leafIndex);
+  const nullifierHash = hashNullifier(nullifier);
+
+  // Compute output commitments
+  const outputCommitment1 = computeUnifiedCommitment(inputs.output1PubKeyX, inputs.output1Amount);
+  const outputCommitment2 = computeUnifiedCommitment(inputs.output2PubKeyX, inputs.output2Amount);
 
   const circuitInputs: InputMap = {
-    input_nullifier: inputs.inputNullifier.toString(),
-    input_secret: inputs.inputSecret.toString(),
-    input_amount: inputs.inputAmount.toString(),
+    priv_key: inputs.privKey.toString(),
+    pub_key_x: inputs.pubKeyX.toString(),
+    amount: inputs.amount.toString(),
+    leaf_index: inputs.leafIndex.toString(),
     merkle_path: pathElements,
     path_indices: pathIndices,
-    output1_nullifier: inputs.output1Nullifier.toString(),
-    output1_secret: inputs.output1Secret.toString(),
+    output1_pub_key_x: inputs.output1PubKeyX.toString(),
     output1_amount: inputs.output1Amount.toString(),
-    output2_nullifier: inputs.output2Nullifier.toString(),
-    output2_secret: inputs.output2Secret.toString(),
+    output2_pub_key_x: inputs.output2PubKeyX.toString(),
     output2_amount: inputs.output2Amount.toString(),
     merkle_root: inputs.merkleRoot.toString(),
-    input_nullifier_hash: inputNullifierHash.toString(),
+    nullifier_hash: nullifierHash.toString(),
     output_commitment1: outputCommitment1.toString(),
     output_commitment2: outputCommitment2.toString(),
   };
 
-  return generateProof("split", circuitInputs);
+  return generateProof("spend_split", circuitInputs);
 }
 
 /**
- * Transfer proof inputs
- */
-export interface TransferInputs {
-  inputNullifier: bigint;
-  inputSecret: bigint;
-  amount: bigint;
-  merkleRoot: bigint;
-  merkleProof: MerkleProofInput;
-  outputNullifier: bigint;
-  outputSecret: bigint;
-}
-
-/**
- * Generate a transfer proof
+ * Spend partial public proof inputs (Unified Model)
  *
- * 1-in-1-out: Spends input commitment, creates new output commitment with same amount.
+ * Performs partial public claim: Commitment -> Public Amount + Change Commitment
  */
-export async function generateTransferProof(inputs: TransferInputs): Promise<ProofData> {
-  const pathElements = inputs.merkleProof.siblings.map((s) => s.toString());
-  const pathIndices = inputs.merkleProof.indices;
-
-  // Compute nullifier hash and output commitment
-  const nullifierHash = hashNullifier(inputs.inputNullifier);
-  const outputCommitment = computeNoteCommitment(
-    inputs.outputNullifier,
-    inputs.outputSecret,
-    inputs.amount
-  );
-
-  const circuitInputs: InputMap = {
-    nullifier: inputs.inputNullifier.toString(),
-    secret: inputs.inputSecret.toString(),
-    amount: inputs.amount.toString(),
-    merkle_path: pathElements,
-    path_indices: pathIndices,
-    output_nullifier: inputs.outputNullifier.toString(),
-    output_secret: inputs.outputSecret.toString(),
-    merkle_root: inputs.merkleRoot.toString(),
-    nullifier_hash: nullifierHash.toString(),
-    output_commitment: outputCommitment.toString(),
-  };
-
-  return generateProof("transfer", circuitInputs);
-}
-
-/**
- * Withdraw proof inputs
- */
-export interface WithdrawInputs {
-  nullifier: bigint;
-  secret: bigint;
+export interface SpendPartialPublicInputs {
+  /** Input: Spending private key */
+  privKey: bigint;
+  /** Input: Public key x-coordinate */
+  pubKeyX: bigint;
+  /** Input: Amount in satoshis */
   amount: bigint;
+  /** Input: Position in Merkle tree */
+  leafIndex: bigint;
+  /** Merkle tree root */
   merkleRoot: bigint;
+  /** Merkle proof (20 levels) */
   merkleProof: MerkleProofInput;
-  withdrawAmount: bigint;
-  changeNullifier: bigint;
-  changeSecret: bigint;
+  /** Public amount to claim (revealed) */
+  publicAmount: bigint;
+  /** Change: Public key x-coordinate */
+  changePubKeyX: bigint;
+  /** Change: Amount in satoshis */
   changeAmount: bigint;
+  /** Recipient Solana wallet (as bigint from 32 bytes) */
   recipient: bigint;
 }
 
 /**
- * Generate a partial withdraw proof
+ * Generate a spend partial public proof (Unified Model)
  *
- * Withdraw any amount with change returned as a new commitment.
+ * Commitment -> Public Amount + Change Commitment
+ * Amount conservation: input_amount == public_amount + change_amount
  */
-export async function generateWithdrawProof(inputs: WithdrawInputs): Promise<ProofData> {
-  if (inputs.amount !== inputs.withdrawAmount + inputs.changeAmount) {
-    throw new Error("Withdraw must conserve: amount == withdrawAmount + changeAmount");
+export async function generateSpendPartialPublicProof(inputs: SpendPartialPublicInputs): Promise<ProofData> {
+  if (inputs.amount !== inputs.publicAmount + inputs.changeAmount) {
+    throw new Error("Spend partial public must conserve amount (input == public + change)");
+  }
+
+  if (inputs.merkleProof.siblings.length !== 20) {
+    throw new Error(`Spend partial public circuit requires 20-level merkle tree, got ${inputs.merkleProof.siblings.length} siblings`);
   }
 
   const pathElements = inputs.merkleProof.siblings.map((s) => s.toString());
   const pathIndices = inputs.merkleProof.indices;
 
+  // Compute nullifier hash
+  const nullifier = computeNullifier(inputs.privKey, inputs.leafIndex);
+  const nullifierHash = hashNullifier(nullifier);
+
+  // Compute change commitment
+  const changeCommitment = computeUnifiedCommitment(inputs.changePubKeyX, inputs.changeAmount);
+
   const circuitInputs: InputMap = {
-    nullifier: inputs.nullifier.toString(),
-    secret: inputs.secret.toString(),
+    priv_key: inputs.privKey.toString(),
+    pub_key_x: inputs.pubKeyX.toString(),
     amount: inputs.amount.toString(),
+    leaf_index: inputs.leafIndex.toString(),
     merkle_path: pathElements,
     path_indices: pathIndices,
-    change_nullifier: inputs.changeNullifier.toString(),
-    change_secret: inputs.changeSecret.toString(),
+    change_pub_key_x: inputs.changePubKeyX.toString(),
     change_amount: inputs.changeAmount.toString(),
     merkle_root: inputs.merkleRoot.toString(),
-    nullifier_hash: "0",
-    withdraw_amount: inputs.withdrawAmount.toString(),
-    change_commitment: "0",
+    nullifier_hash: nullifierHash.toString(),
+    public_amount: inputs.publicAmount.toString(),
+    change_commitment: changeCommitment.toString(),
     recipient: inputs.recipient.toString(),
   };
 
-  return generateProof("partial_withdraw", circuitInputs);
+  return generateProof("spend_partial_public", circuitInputs);
 }
 
 // ==========================================================================
-// Pool Circuit Proof Generation
+// Pool Circuit Proof Generation (Unified Model)
 // ==========================================================================
 
 /**
- * Pool deposit proof inputs
+ * Pool deposit proof inputs (Unified Model)
  *
- * Proves ownership of zkBTC note and creates pool position commitment.
+ * Input:  Unified Commitment = Poseidon2(pub_key_x, amount)
+ * Output: Pool Position = Poseidon2(pool_pub_key_x, principal, deposit_epoch)
  */
 export interface PoolDepositInputs {
-  // Private inputs - zkBTC note being deposited
-  inputNullifier: bigint;
-  inputSecret: bigint;
-  inputAmount: bigint;
-  merkleProof: MerkleProofInput;
-
-  // Public inputs
+  /** Input commitment: Spending private key */
+  privKey: bigint;
+  /** Input commitment: Public key x-coordinate */
+  pubKeyX: bigint;
+  /** Input commitment: Amount (becomes principal) */
+  amount: bigint;
+  /** Input commitment: Position in Merkle tree */
+  leafIndex: bigint;
+  /** Input Merkle tree root */
   merkleRoot: bigint;
-  inputNullifierHash: bigint;
-  stealthPubX: bigint;
-  poolCommitment: bigint;
+  /** Input Merkle proof (20 levels) */
+  merkleProof: MerkleProofInput;
+  /** Pool position: Public key x-coordinate (for pool position commitment) */
+  poolPubKeyX: bigint;
+  /** Current epoch when depositing */
   depositEpoch: bigint;
 }
 
 /**
- * Generate a pool deposit proof
+ * Generate a pool deposit proof (Unified Model)
  *
- * Spends zkBTC note and creates stealth pool position commitment.
+ * Spends unified commitment and creates pool position.
  */
 export async function generatePoolDepositProof(inputs: PoolDepositInputs): Promise<ProofData> {
   const pathElements = inputs.merkleProof.siblings.map((s) => s.toString());
   const pathIndices = inputs.merkleProof.indices;
 
+  // Compute nullifier hash for input
+  const nullifier = computeNullifier(inputs.privKey, inputs.leafIndex);
+  const nullifierHash = hashNullifier(nullifier);
+
+  // Compute pool commitment = Poseidon2(pool_pub_key_x, principal, deposit_epoch)
+  const poolCommitment = computePoolCommitment(inputs.poolPubKeyX, inputs.amount, inputs.depositEpoch);
+
   const circuitInputs: InputMap = {
     // Private inputs
-    input_nullifier: inputs.inputNullifier.toString(),
-    input_secret: inputs.inputSecret.toString(),
-    input_amount: inputs.inputAmount.toString(),
+    priv_key: inputs.privKey.toString(),
+    pub_key_x: inputs.pubKeyX.toString(),
+    amount: inputs.amount.toString(),
+    leaf_index: inputs.leafIndex.toString(),
     input_merkle_path: pathElements,
     input_path_indices: pathIndices,
+    pool_pub_key_x: inputs.poolPubKeyX.toString(),
 
     // Public inputs
     input_merkle_root: inputs.merkleRoot.toString(),
-    input_nullifier_hash: inputs.inputNullifierHash.toString(),
-    stealth_pub_x: inputs.stealthPubX.toString(),
-    pool_commitment: inputs.poolCommitment.toString(),
+    input_nullifier_hash: nullifierHash.toString(),
+    pool_commitment: poolCommitment.toString(),
     deposit_epoch: inputs.depositEpoch.toString(),
   };
 
@@ -555,55 +570,72 @@ export async function generatePoolDepositProof(inputs: PoolDepositInputs): Promi
 }
 
 /**
- * Pool withdraw proof inputs
+ * Pool withdraw proof inputs (Unified Model)
  *
- * Proves ownership of pool position and calculates yield for withdrawal.
+ * Input:  Pool Position = Poseidon2(pub_key_x, principal, deposit_epoch)
+ * Output: Unified Commitment = Poseidon2(output_pub_key_x, principal + yield)
  */
 export interface PoolWithdrawInputs {
-  // Private inputs
-  stealthPriv: bigint;
+  /** Pool position: Private key */
+  privKey: bigint;
+  /** Pool position: Public key x-coordinate */
+  pubKeyX: bigint;
+  /** Principal amount */
   principal: bigint;
+  /** Epoch when deposited */
   depositEpoch: bigint;
+  /** Position in pool Merkle tree */
   leafIndex: bigint;
-  poolMerkleProof: MerkleProofInput;
-  outputNullifier: bigint;
-  outputSecret: bigint;
-
-  // Public inputs
+  /** Pool Merkle tree root */
   poolMerkleRoot: bigint;
-  poolNullifierHash: bigint;
-  stealthPubX: bigint;
-  outputCommitment: bigint;
+  /** Pool Merkle proof (20 levels) */
+  poolMerkleProof: MerkleProofInput;
+  /** Output: Public key x-coordinate for output commitment */
+  outputPubKeyX: bigint;
+  /** Current epoch */
   currentEpoch: bigint;
+  /** Yield rate in basis points */
   yieldRateBps: bigint;
+  /** Pool ID */
   poolId: bigint;
 }
 
 /**
- * Generate a pool withdraw proof
+ * Generate a pool withdraw proof (Unified Model)
  *
- * Exits pool position, calculates yield, and creates output zkBTC note.
+ * Exits pool position, calculates yield, and creates output unified commitment.
  */
 export async function generatePoolWithdrawProof(inputs: PoolWithdrawInputs): Promise<ProofData> {
   const pathElements = inputs.poolMerkleProof.siblings.map((s) => s.toString());
   const pathIndices = inputs.poolMerkleProof.indices;
 
+  // Compute nullifier hash for pool position
+  const nullifier = computeNullifier(inputs.privKey, inputs.leafIndex);
+  const nullifierHash = hashNullifier(nullifier);
+
+  // Calculate yield: principal * rate * epochs / 10000
+  const epochsStaked = inputs.currentEpoch - inputs.depositEpoch;
+  const yieldAmount = (inputs.principal * inputs.yieldRateBps * epochsStaked) / 10000n;
+  const totalAmount = inputs.principal + yieldAmount;
+
+  // Compute output unified commitment
+  const outputCommitment = computeUnifiedCommitment(inputs.outputPubKeyX, totalAmount);
+
   const circuitInputs: InputMap = {
     // Private inputs
-    stealth_priv: inputs.stealthPriv.toString(),
+    priv_key: inputs.privKey.toString(),
+    pub_key_x: inputs.pubKeyX.toString(),
     principal: inputs.principal.toString(),
     deposit_epoch: inputs.depositEpoch.toString(),
     leaf_index: inputs.leafIndex.toString(),
     pool_merkle_path: pathElements,
     pool_path_indices: pathIndices,
-    output_nullifier: inputs.outputNullifier.toString(),
-    output_secret: inputs.outputSecret.toString(),
+    output_pub_key_x: inputs.outputPubKeyX.toString(),
 
     // Public inputs
     pool_merkle_root: inputs.poolMerkleRoot.toString(),
-    pool_nullifier_hash: inputs.poolNullifierHash.toString(),
-    stealth_pub_x: inputs.stealthPubX.toString(),
-    output_commitment: inputs.outputCommitment.toString(),
+    pool_nullifier_hash: nullifierHash.toString(),
+    output_commitment: outputCommitment.toString(),
     current_epoch: inputs.currentEpoch.toString(),
     yield_rate_bps: inputs.yieldRateBps.toString(),
     pool_id: inputs.poolId.toString(),
@@ -613,59 +645,79 @@ export async function generatePoolWithdrawProof(inputs: PoolWithdrawInputs): Pro
 }
 
 /**
- * Pool claim yield proof inputs
+ * Pool claim yield proof inputs (Unified Model)
  *
- * Claims earned yield while keeping principal staked with new stealth key.
+ * Input:  Pool Position = Poseidon2(old_pub_key_x, principal, deposit_epoch)
+ * Output: 1. New Pool Position = Poseidon2(new_pub_key_x, principal, current_epoch)
+ *         2. Yield as Unified Commitment = Poseidon2(yield_pub_key_x, yield_amount)
  */
 export interface PoolClaimYieldInputs {
-  // Private inputs - old position
-  oldStealthPriv: bigint;
+  /** Old position: Private key */
+  oldPrivKey: bigint;
+  /** Old position: Public key x-coordinate */
+  oldPubKeyX: bigint;
+  /** Principal amount */
   principal: bigint;
+  /** Epoch when deposited */
   depositEpoch: bigint;
+  /** Position in pool Merkle tree */
   leafIndex: bigint;
-  poolMerkleProof: MerkleProofInput;
-  yieldNullifier: bigint;
-  yieldSecret: bigint;
-
-  // Public inputs
+  /** Pool Merkle tree root */
   poolMerkleRoot: bigint;
-  oldNullifierHash: bigint;
-  oldStealthPubX: bigint;
-  newStealthPubX: bigint;
-  newPoolCommitment: bigint;
-  yieldCommitment: bigint;
+  /** Pool Merkle proof (20 levels) */
+  poolMerkleProof: MerkleProofInput;
+  /** New position: Public key x-coordinate */
+  newPubKeyX: bigint;
+  /** Yield output: Public key x-coordinate */
+  yieldPubKeyX: bigint;
+  /** Current epoch */
   currentEpoch: bigint;
+  /** Yield rate in basis points */
   yieldRateBps: bigint;
+  /** Pool ID */
   poolId: bigint;
 }
 
 /**
- * Generate a pool claim yield proof
+ * Generate a pool claim yield proof (Unified Model)
  *
- * Claims yield as zkBTC note and creates new pool position with new stealth key.
+ * Claims yield as unified commitment and creates new pool position.
  */
 export async function generatePoolClaimYieldProof(inputs: PoolClaimYieldInputs): Promise<ProofData> {
   const pathElements = inputs.poolMerkleProof.siblings.map((s) => s.toString());
   const pathIndices = inputs.poolMerkleProof.indices;
 
+  // Compute old nullifier hash
+  const oldNullifier = computeNullifier(inputs.oldPrivKey, inputs.leafIndex);
+  const oldNullifierHash = hashNullifier(oldNullifier);
+
+  // Calculate yield: principal * rate * epochs / 10000
+  const epochsStaked = inputs.currentEpoch - inputs.depositEpoch;
+  const yieldAmount = (inputs.principal * inputs.yieldRateBps * epochsStaked) / 10000n;
+
+  // Compute new pool commitment (principal stays, epoch resets to current)
+  const newPoolCommitment = computePoolCommitment(inputs.newPubKeyX, inputs.principal, inputs.currentEpoch);
+
+  // Compute yield commitment
+  const yieldCommitment = computeUnifiedCommitment(inputs.yieldPubKeyX, yieldAmount);
+
   const circuitInputs: InputMap = {
     // Private inputs
-    old_stealth_priv: inputs.oldStealthPriv.toString(),
+    old_priv_key: inputs.oldPrivKey.toString(),
+    old_pub_key_x: inputs.oldPubKeyX.toString(),
     principal: inputs.principal.toString(),
     deposit_epoch: inputs.depositEpoch.toString(),
     leaf_index: inputs.leafIndex.toString(),
     pool_merkle_path: pathElements,
     pool_path_indices: pathIndices,
-    yield_nullifier: inputs.yieldNullifier.toString(),
-    yield_secret: inputs.yieldSecret.toString(),
+    new_pub_key_x: inputs.newPubKeyX.toString(),
+    yield_pub_key_x: inputs.yieldPubKeyX.toString(),
 
     // Public inputs
     pool_merkle_root: inputs.poolMerkleRoot.toString(),
-    old_nullifier_hash: inputs.oldNullifierHash.toString(),
-    old_stealth_pub_x: inputs.oldStealthPubX.toString(),
-    new_stealth_pub_x: inputs.newStealthPubX.toString(),
-    new_pool_commitment: inputs.newPoolCommitment.toString(),
-    yield_commitment: inputs.yieldCommitment.toString(),
+    old_nullifier_hash: oldNullifierHash.toString(),
+    new_pool_commitment: newPoolCommitment.toString(),
+    yield_commitment: yieldCommitment.toString(),
     current_epoch: inputs.currentEpoch.toString(),
     yield_rate_bps: inputs.yieldRateBps.toString(),
     pool_id: inputs.poolId.toString(),
@@ -673,6 +725,10 @@ export async function generatePoolClaimYieldProof(inputs: PoolClaimYieldInputs):
 
   return generateProof("pool_claim_yield", circuitInputs);
 }
+
+// ==========================================================================
+// Verification and Utilities
+// ==========================================================================
 
 /**
  * Verify a proof locally using the backend

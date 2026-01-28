@@ -1,4 +1,8 @@
-//! Split commitment instruction - split one commitment into two (1-in-2-out)
+//! Spend Split instruction (Unified Model)
+//!
+//! Splits one unified commitment into two new commitments.
+//! Input:  Commitment = Poseidon2(pub_key_x, amount)
+//! Output: Commitment1 + Commitment2 (amount conservation enforced by ZK proof)
 
 use pinocchio::{
     account_info::AccountInfo,
@@ -20,7 +24,7 @@ use crate::utils::{
 };
 
 /// Split commitment instruction data
-pub struct SplitCommitmentData {
+pub struct SpendSplitData {
     pub proof: [u8; PROOF_SIZE],
     pub root: [u8; 32],
     pub nullifier_hash: [u8; 32],
@@ -28,7 +32,7 @@ pub struct SplitCommitmentData {
     pub output_commitment_2: [u8; 32],
 }
 
-impl SplitCommitmentData {
+impl SpendSplitData {
     pub fn from_bytes(data: &[u8]) -> Result<Self, ProgramError> {
         // proof (256) + root (32) + nullifier_hash (32) + output_1 (32) + output_2 (32) = 384 bytes
         if data.len() < 384 {
@@ -61,7 +65,7 @@ impl SplitCommitmentData {
 }
 
 /// Split commitment accounts
-pub struct SplitCommitmentAccounts<'a> {
+pub struct SpendSplitAccounts<'a> {
     pub pool_state: &'a AccountInfo,
     pub commitment_tree: &'a AccountInfo,
     pub nullifier_record: &'a AccountInfo,
@@ -69,7 +73,7 @@ pub struct SplitCommitmentAccounts<'a> {
     pub system_program: &'a AccountInfo,
 }
 
-impl<'a> SplitCommitmentAccounts<'a> {
+impl<'a> SpendSplitAccounts<'a> {
     pub fn from_accounts(accounts: &'a [AccountInfo]) -> Result<Self, ProgramError> {
         if accounts.len() < 5 {
             return Err(ProgramError::NotEnoughAccountKeys);
@@ -97,13 +101,13 @@ impl<'a> SplitCommitmentAccounts<'a> {
 }
 
 /// Process split commitment (1-in-2-out)
-pub fn process_split_commitment(
+pub fn process_spend_split(
     program_id: &Pubkey,
     accounts: &[AccountInfo],
     data: &[u8],
 ) -> ProgramResult {
-    let accounts = SplitCommitmentAccounts::from_accounts(accounts)?;
-    let ix_data = SplitCommitmentData::from_bytes(data)?;
+    let accounts = SpendSplitAccounts::from_accounts(accounts)?;
+    let ix_data = SpendSplitData::from_bytes(data)?;
 
     // SECURITY: Validate account owners BEFORE deserializing any data
     validate_program_owner(accounts.pool_state, program_id)?;

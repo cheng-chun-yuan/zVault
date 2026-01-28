@@ -1144,20 +1144,32 @@ export function preparePoolClaimYieldInputs(
 // ==========================================================================
 
 /**
- * Generate proof for pool deposit operation
+ * Unified commitment input for pool deposit (replaces Note)
+ */
+export interface UnifiedCommitmentInput {
+  privKey: bigint;
+  pubKeyX: bigint;
+  amount: bigint;
+  leafIndex: bigint;
+}
+
+/**
+ * Generate proof for pool deposit operation (Unified Model)
  *
- * Generates the ZK proof for depositing a zkBTC note into the yield pool.
+ * Generates the ZK proof for depositing a unified commitment into the yield pool.
  *
- * @param inputNote - The zkBTC note being deposited
- * @param inputMerkleProof - Merkle proof for the input note
- * @param stealthDeposit - Stealth deposit data (from createSelfStealthPoolDeposit)
+ * @param input - The unified commitment being deposited (privKey, pubKeyX, amount)
+ * @param inputMerkleProof - Merkle proof for the input commitment
+ * @param poolPubKeyX - Public key x-coordinate for the pool position
+ * @param depositEpoch - Current epoch at deposit time
  * @param onProgress - Progress callback
  * @returns Generated proof data
  */
 export async function generateDepositProof(
-  inputNote: Note,
+  input: UnifiedCommitmentInput,
   inputMerkleProof: MerkleProof,
-  stealthDeposit: Omit<StealthPoolPosition, "leafIndex">,
+  poolPubKeyX: bigint,
+  depositEpoch: bigint,
   onProgress?: PoolOperationProgressCallback
 ): Promise<{ proof: Uint8Array; publicInputs: string[] }> {
   onProgress?.({ step: "preparing", message: "Preparing deposit inputs...", progress: 10 });
@@ -1171,15 +1183,14 @@ export async function generateDepositProof(
   };
 
   const proofInputs: PoolDepositInputs = {
-    inputNullifier: inputNote.nullifier,
-    inputSecret: inputNote.secret,
-    inputAmount: inputNote.amount,
-    merkleProof: merkleProofInput,
+    privKey: input.privKey,
+    pubKeyX: input.pubKeyX,
+    amount: input.amount,
+    leafIndex: input.leafIndex,
     merkleRoot: bytesToBigint(new Uint8Array(inputMerkleProof.root)),
-    inputNullifierHash: inputNote.nullifierHash,
-    stealthPubX: stealthDeposit.stealthPub.x,
-    poolCommitment: stealthDeposit.commitment,
-    depositEpoch: stealthDeposit.depositEpoch,
+    merkleProof: merkleProofInput,
+    poolPubKeyX,
+    depositEpoch,
   };
 
   onProgress?.({ step: "generating_proof", message: "Generating ZK proof...", progress: 30 });
@@ -1192,14 +1203,14 @@ export async function generateDepositProof(
 }
 
 /**
- * Generate proof for pool withdraw operation
+ * Generate proof for pool withdraw operation (Unified Model)
  *
  * Generates the ZK proof for withdrawing from the yield pool (with yield).
  *
  * @param keys - User's ZVault keys
  * @param position - Scanned pool position
  * @param poolMerkleProof - Merkle proof for the pool position
- * @param outputNote - New zkBTC note for principal + yield
+ * @param outputPubKeyX - Public key x-coordinate for output unified commitment
  * @param poolConfig - Pool configuration (yield rate, current epoch)
  * @param onProgress - Progress callback
  * @returns Generated proof data
@@ -1208,7 +1219,7 @@ export async function generateWithdrawProof(
   keys: ZVaultKeys,
   position: ScannedPoolPosition,
   poolMerkleProof: MerkleProof,
-  outputNote: Note,
+  outputPubKeyX: bigint,
   poolConfig: { currentEpoch: bigint; yieldRateBps: number; poolId: bigint },
   onProgress?: PoolOperationProgressCallback
 ): Promise<{ proof: Uint8Array; publicInputs: string[] }> {
@@ -1224,17 +1235,14 @@ export async function generateWithdrawProof(
   };
 
   const proofInputs: PoolWithdrawInputs = {
-    stealthPriv: claimInputs.stealthPrivKey,
+    privKey: claimInputs.stealthPrivKey,
+    pubKeyX: position.stealthPub.x,
     principal: claimInputs.principal,
     depositEpoch: claimInputs.depositEpoch,
     leafIndex: BigInt(claimInputs.leafIndex),
-    poolMerkleProof: poolMerkleProofInput,
-    outputNullifier: outputNote.nullifier,
-    outputSecret: outputNote.secret,
     poolMerkleRoot: claimInputs.merkleRoot,
-    poolNullifierHash: claimInputs.nullifierHash,
-    stealthPubX: position.stealthPub.x,
-    outputCommitment: outputNote.commitment,
+    poolMerkleProof: poolMerkleProofInput,
+    outputPubKeyX,
     currentEpoch: poolConfig.currentEpoch,
     yieldRateBps: BigInt(poolConfig.yieldRateBps),
     poolId: poolConfig.poolId,
@@ -1250,15 +1258,15 @@ export async function generateWithdrawProof(
 }
 
 /**
- * Generate proof for pool claim yield operation
+ * Generate proof for pool claim yield operation (Unified Model)
  *
  * Generates the ZK proof for claiming yield while keeping principal staked.
  *
  * @param keys - User's ZVault keys
  * @param position - Scanned pool position
  * @param poolMerkleProof - Merkle proof for the pool position
- * @param newStealthDeposit - New stealth deposit for updated position
- * @param yieldNote - New zkBTC note for yield amount
+ * @param newPubKeyX - Public key x-coordinate for new pool position
+ * @param yieldPubKeyX - Public key x-coordinate for yield commitment
  * @param poolConfig - Pool configuration (yield rate, current epoch)
  * @param onProgress - Progress callback
  * @returns Generated proof data
@@ -1267,8 +1275,8 @@ export async function generateClaimYieldProof(
   keys: ZVaultKeys,
   position: ScannedPoolPosition,
   poolMerkleProof: MerkleProof,
-  newStealthDeposit: Omit<StealthPoolPosition, "leafIndex">,
-  yieldNote: Note,
+  newPubKeyX: bigint,
+  yieldPubKeyX: bigint,
   poolConfig: { currentEpoch: bigint; yieldRateBps: number; poolId: bigint },
   onProgress?: PoolOperationProgressCallback
 ): Promise<{ proof: Uint8Array; publicInputs: string[] }> {
@@ -1284,19 +1292,15 @@ export async function generateClaimYieldProof(
   };
 
   const proofInputs: PoolClaimYieldInputs = {
-    oldStealthPriv: claimInputs.stealthPrivKey,
+    oldPrivKey: claimInputs.stealthPrivKey,
+    oldPubKeyX: position.stealthPub.x,
     principal: claimInputs.principal,
     depositEpoch: claimInputs.depositEpoch,
     leafIndex: BigInt(claimInputs.leafIndex),
-    poolMerkleProof: poolMerkleProofInput,
-    yieldNullifier: yieldNote.nullifier,
-    yieldSecret: yieldNote.secret,
     poolMerkleRoot: claimInputs.merkleRoot,
-    oldNullifierHash: claimInputs.nullifierHash,
-    oldStealthPubX: position.stealthPub.x,
-    newStealthPubX: newStealthDeposit.stealthPub.x,
-    newPoolCommitment: newStealthDeposit.commitment,
-    yieldCommitment: yieldNote.commitment,
+    poolMerkleProof: poolMerkleProofInput,
+    newPubKeyX,
+    yieldPubKeyX,
     currentEpoch: poolConfig.currentEpoch,
     yieldRateBps: BigInt(poolConfig.yieldRateBps),
     poolId: poolConfig.poolId,

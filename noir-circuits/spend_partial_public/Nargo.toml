@@ -1,5 +1,5 @@
 [package]
-name = "zvault_transfer"
+name = "zvault_spend_partial_public"
 type = "bin"
 authors = ["zVault Team"]
 

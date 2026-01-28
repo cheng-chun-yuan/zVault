@@ -112,7 +112,7 @@ function ClaimableTab() {
 
       {/* Empty or no keys */}
       {!isLoading && (notes.length === 0 || !hasKeys) && (
-        <EmptyInbox hasKeys={hasKeys} onDeriveKeys={deriveKeys} isLoading={keysLoading} />
+        <EmptyInbox hasKeys={hasKeys} onDeriveKeys={deriveKeys} onRefresh={refresh} isLoading={keysLoading} />
       )}
 
       {/* Inbox list */}

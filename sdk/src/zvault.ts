@@ -6,12 +6,12 @@
  * ## DEPOSIT (BTC → zkBTC)
  * - deposit() - Generate deposit credentials (taproot address + claim link)
  * - claimNote() - Claim zkBTC tokens with ZK proof
+ * - claimPublic() - Claim zkBTC to public wallet (reveals amount)
  * - sendStealth() - Send to specific recipient via stealth ECDH
  *
  * ## TRANSFER (zkBTC → Someone)
  * - splitNote() - Split one note into two outputs
  * - createClaimLink() - Create shareable claim URL (off-chain)
- * - sendPrivate() - Transfer existing zkBTC to recipient's stealth address
  *
  * ## WITHDRAW (zkBTC → BTC)
  * - withdraw() - Request BTC withdrawal (burn zkBTC)
@@ -51,19 +51,17 @@ import { deriveTaprootAddress, isValidBitcoinAddress } from "./taproot";
 import { createClaimLink, parseClaimLink } from "./claim-link";
 import { bigintToBytes } from "./crypto";
 import {
-  deposit as apiDeposit,
+  depositToNote as apiDeposit,
   withdraw as apiWithdraw,
   claimNote as apiClaimNote,
   splitNote as apiSplitNote,
   createClaimLinkFromNote as apiCreateClaimLink,
   sendStealth as apiSendStealth,
-  sendPrivate as apiSendPrivate,
   type DepositResult,
   type WithdrawResult,
   type ClaimResult as ApiClaimResultType,
   type SplitResult as ApiSplitResultType,
   type StealthResult,
-  type StealthTransferResult,
   type ApiClientConfig,
   type StealthMetaAddress,
 } from "./api";
@@ -140,9 +138,8 @@ function toHexKey(bytes: Uint8Array): string {
  * // 3. Split into two notes
  * const { output1, output2 } = await client.splitNote(deposit.note, 60_000n);
  *
- * // 4. Send via link or stealth
+ * // 4. Create shareable claim link
  * const link = client.createClaimLink(output1);
- * await client.sendPrivate(output2, recipientMeta);
  * ```
  */
 export class ZVaultClient {
@@ -250,17 +247,6 @@ export class ZVaultClient {
    */
   createClaimLink(note: Note, baseUrl?: string): string {
     return apiCreateClaimLink(note, baseUrl);
-  }
-
-  /**
-   * Send existing zkBTC to recipient's stealth address (private transfer)
-   */
-  async sendPrivate(
-    inputNote: Note,
-    recipientMeta: StealthMetaAddress
-  ): Promise<StealthTransferResult> {
-    const merkleProof = this.generateMerkleProofForNote(inputNote);
-    return apiSendPrivate(this.getApiConfig(), inputNote, recipientMeta, merkleProof);
   }
 
   // ==========================================================================

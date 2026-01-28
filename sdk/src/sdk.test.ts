@@ -2,8 +2,8 @@
  * zVault SDK Tests (Consolidated)
  *
  * Core tests for all SDK functionality:
- * - DEPOSIT: deposit, claimNote, sendStealth
- * - TRANSFER: splitNote, createClaimLinkFromNote, sendPrivate
+ * - DEPOSIT: deposit, claimNote, claimPublic, sendStealth
+ * - TRANSFER: splitNote, createClaimLinkFromNote
  * - WITHDRAW: withdraw
  * - KEYS: deriveKeysFromSeed, createStealthMetaAddress
  * - YIELD POOL: createStealthPoolDeposit, scanPoolAnnouncements
@@ -14,7 +14,7 @@ import { expect, test, describe } from "bun:test";
 import { address, createSolanaRpc, getProgramDerivedAddress, type Address } from "@solana/kit";
 
 // Core SDK imports
-import { deposit, claimNote, splitNote, sendStealth, sendPrivate, createClaimLinkFromNote } from "./api";
+import { depositToNote, claimNote, splitNote, sendStealth, createClaimLinkFromNote } from "./api";
 import { generateNote, formatBtc, parseBtc } from "./note";
 import { createClaimLink, parseClaimLink } from "./claim-link";
 import { deriveKeysFromSeed, createStealthMetaAddress, encodeStealthMetaAddress, decodeStealthMetaAddress } from "./keys";
@@ -36,7 +36,7 @@ const POOL_ID = new Uint8Array(8).fill(0x01);
 
 describe("DEPOSIT", () => {
   test("deposit() generates valid credentials", async () => {
-    const result = await deposit(100_000n, "testnet");
+    const result = await depositToNote(100_000n, "testnet");
 
     expect(result.note.amount).toBe(100_000n);
     expect(result.taprootAddress).toMatch(/^tb1p/);
@@ -45,8 +45,8 @@ describe("DEPOSIT", () => {
   });
 
   test("different deposits have unique addresses", async () => {
-    const d1 = await deposit(100_000n, "testnet");
-    const d2 = await deposit(100_000n, "testnet");
+    const d1 = await depositToNote(100_000n, "testnet");
+    const d2 = await depositToNote(100_000n, "testnet");
     expect(d1.taprootAddress).not.toBe(d2.taprootAddress);
   });
 
@@ -79,9 +79,8 @@ describe("TRANSFER", () => {
     expect(parsed?.secret).toBe(note.secret);
   });
 
-  test("splitNote/sendPrivate functions exist", () => {
+  test("splitNote function exists", () => {
     expect(typeof splitNote).toBe("function");
-    expect(typeof sendPrivate).toBe("function");
   });
 });
 
@@ -312,7 +311,6 @@ describe("ZVaultClient", () => {
     // Transfer
     expect(typeof client.splitNote).toBe("function");
     expect(typeof client.createClaimLink).toBe("function");
-    expect(typeof client.sendPrivate).toBe("function");
 
     // Withdraw
     expect(typeof client.withdraw).toBe("function");

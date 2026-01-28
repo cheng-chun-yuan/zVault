@@ -224,13 +224,24 @@ export function useZkeyName(): UseZkeyNameReturn {
         // Build and send transaction
         const transaction = new Transaction().add(instruction);
         transaction.feePayer = wallet.publicKey;
-        transaction.recentBlockhash = (await connection.getLatestBlockhash()).blockhash;
+        const { blockhash, lastValidBlockHeight } = await connection.getLatestBlockhash();
+        transaction.recentBlockhash = blockhash;
 
         const signed = await wallet.signTransaction(transaction);
-        const txid = await connection.sendRawTransaction(signed.serialize());
+        const txid = await connection.sendRawTransaction(signed.serialize(), {
+          skipPreflight: false,
+          preflightCommitment: "confirmed",
+        });
 
-        // Wait for confirmation
-        await connection.confirmTransaction(txid, "confirmed");
+        // Wait for confirmation with proper parameters
+        const confirmation = await connection.confirmTransaction(
+          { signature: txid, blockhash, lastValidBlockHeight },
+          "confirmed"
+        );
+
+        if (confirmation.value.err) {
+          throw new Error(`Transaction failed: ${JSON.stringify(confirmation.value.err)}`);
+        }
 
         // Store in localStorage for quick lookup
         localStorage.setItem(
@@ -243,9 +254,35 @@ export function useZkeyName(): UseZkeyNameReturn {
         return true;
       } catch (err) {
         console.error("Failed to register name:", err);
-        setError(
-          err instanceof Error ? err.message : "Failed to register name"
-        );
+
+        const errorMessage = err instanceof Error ? err.message : String(err);
+
+        // Check for "already processed" error - might mean name was registered
+        if (errorMessage.includes("already been processed")) {
+          // Transaction was already processed - check if name is now registered
+          try {
+            const entry = await lookupName(normalized);
+            if (entry) {
+              const entrySpendingHex = Buffer.from(entry.spendingPubKey).toString("hex");
+              const ourSpendingHex = Buffer.from(stealthAddress.spendingPubKey).toString("hex");
+              if (entrySpendingHex === ourSpendingHex) {
+                // Name was successfully registered by us
+                localStorage.setItem(
+                  `zkey-name-${wallet.publicKey.toBase58()}`,
+                  normalized
+                );
+                setRegisteredName(normalized);
+                return true;
+              }
+            }
+          } catch {
+            // Ignore lookup errors
+          }
+          setError("Transaction already processed. Please try again.");
+          return false;
+        }
+
+        setError(errorMessage || "Failed to register name");
         return false;
       } finally {
         setIsRegistering(false);

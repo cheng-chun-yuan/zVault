@@ -40,7 +40,7 @@ describe("validateDepositAmount", () => {
 
 describe("validateWithdrawalAmount", () => {
   it("returns valid for amounts above minimum", () => {
-    expect(validateWithdrawalAmount(10_000)).toEqual({ valid: true });
+    expect(validateWithdrawalAmount(1_000)).toEqual({ valid: true });
     expect(validateWithdrawalAmount(1_000_000)).toEqual({ valid: true });
   });
 
@@ -50,14 +50,14 @@ describe("validateWithdrawalAmount", () => {
   });
 
   it("returns invalid for amounts below minimum", () => {
-    const result = validateWithdrawalAmount(5_000);
+    const result = validateWithdrawalAmount(500);
     expect(result.valid).toBe(false);
     expect(result.error).toContain("Minimum withdrawal");
   });
 
   it("handles edge case at minimum boundary", () => {
-    expect(validateWithdrawalAmount(9_999).valid).toBe(false);
-    expect(validateWithdrawalAmount(10_000).valid).toBe(true);
+    expect(validateWithdrawalAmount(999).valid).toBe(false);
+    expect(validateWithdrawalAmount(1_000).valid).toBe(true);
   });
 });
 

@@ -48,15 +48,16 @@ pub const ID: Pubkey = [
 
 /// Instruction discriminators
 pub mod instruction {
-    // Core operations
+    // Core operations (Unified Model)
     pub const INITIALIZE: u8 = 0;
-    pub const SPLIT_COMMITMENT: u8 = 4;
+    pub const SPEND_SPLIT: u8 = 4;           // spend_split circuit (1→2)
     pub const REQUEST_REDEMPTION: u8 = 5;
     pub const COMPLETE_REDEMPTION: u8 = 6;
     pub const SET_PAUSED: u8 = 7;
     pub const VERIFY_DEPOSIT: u8 = 8;
+    pub const CLAIM: u8 = 9;                 // claim circuit (full public)
+    pub const SPEND_PARTIAL_PUBLIC: u8 = 10; // spend_partial_public circuit
     pub const ANNOUNCE_STEALTH: u8 = 16;
-    pub const TRANSFER_STEALTH: u8 = 24;
 
     // Name registry
     pub const REGISTER_NAME: u8 = 17;
@@ -109,8 +110,14 @@ pub fn process_instruction(
         instruction::VERIFY_DEPOSIT => {
             instructions::process_verify_deposit(program_id, accounts, data)
         }
-        instruction::SPLIT_COMMITMENT => {
-            instructions::process_split_commitment(program_id, accounts, data)
+        instruction::CLAIM => {
+            instructions::process_claim(program_id, accounts, data)
+        }
+        instruction::SPEND_PARTIAL_PUBLIC => {
+            instructions::process_spend_partial_public(program_id, accounts, data)
+        }
+        instruction::SPEND_SPLIT => {
+            instructions::process_spend_split(program_id, accounts, data)
         }
         instruction::REQUEST_REDEMPTION => {
             instructions::process_request_redemption(program_id, accounts, data)
@@ -123,9 +130,6 @@ pub fn process_instruction(
         }
         instruction::ANNOUNCE_STEALTH => {
             instructions::process_announce_stealth(program_id, accounts, data)
-        }
-        instruction::TRANSFER_STEALTH => {
-            instructions::process_transfer_stealth(program_id, accounts, data)
         }
         // Name registry
         instruction::REGISTER_NAME => {
@@ -242,13 +246,14 @@ mod tests {
     fn test_discriminators_unique() {
         let discriminators: &[u8] = &[
             instruction::INITIALIZE,
-            instruction::SPLIT_COMMITMENT,
+            instruction::SPEND_SPLIT,
+            instruction::SPEND_PARTIAL_PUBLIC,
             instruction::REQUEST_REDEMPTION,
             instruction::COMPLETE_REDEMPTION,
             instruction::SET_PAUSED,
             instruction::VERIFY_DEPOSIT,
+            instruction::CLAIM,
             instruction::ANNOUNCE_STEALTH,
-            instruction::TRANSFER_STEALTH,
             instruction::REGISTER_NAME,
             instruction::UPDATE_NAME,
             instruction::TRANSFER_NAME,

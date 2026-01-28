@@ -14,7 +14,7 @@ export const SATS_PER_BTC = 100_000_000;
 // Validation limits
 export const MIN_DEPOSIT_SATS = 1_000;
 export const MAX_DEPOSIT_SATS = 10_000_000_000; // 100 BTC
-export const MIN_WITHDRAWAL_SATS = 10_000;
+export const MIN_WITHDRAWAL_SATS = 1_000;
 
 // Bitcoin address regex (bech32 and legacy)
 export const BTC_ADDRESS_REGEX = /^(bc1|[13]|tb1)[a-zA-HJ-NP-Z0-9]{25,62}$/;
