@@ -35,7 +35,7 @@ function TabBar({
   claimableCount: number;
 }) {
   return (
-    <div className="flex gap-1 p-1 bg-muted border border-gray/15 rounded-[12px] cyber-corners">
+    <div className="flex gap-1 p-1 bg-muted border border-gray/15 rounded-[12px]">
       {tabs.map((tab) => (
         <button
           key={tab.id}
@@ -43,14 +43,14 @@ function TabBar({
           className={cn(
             "flex-1 flex items-center justify-center gap-2 px-3 py-2 rounded-[10px] text-sm transition-colors",
             activeTab === tab.id
-              ? "bg-privacy/10 text-privacy border border-privacy/20 neon-border-pulse"
+              ? "bg-privacy/10 text-privacy border border-privacy/20"
               : "text-gray hover:text-gray-light hover:bg-gray/10"
           )}
         >
           {tab.icon}
-          <span className={activeTab === tab.id ? "neon-privacy" : ""}>{tab.label}</span>
+          <span>{tab.label}</span>
           {tab.id === "claimable" && claimableCount > 0 && (
-            <span className="min-w-[22px] h-[22px] px-2 flex items-center justify-center text-sm rounded-full bg-privacy text-background font-bold shadow-[0_0_12px_rgba(20,241,149,0.7),0_0_24px_rgba(20,241,149,0.4)] neon-privacy animate-pulse">
+            <span className="min-w-[22px] h-[22px] px-2 flex items-center justify-center text-sm rounded-full bg-privacy text-background font-bold">
               {claimableCount}
             </span>
           )}
@@ -169,9 +169,9 @@ function ActivityContent() {
 
 export default function ActivityPage() {
   return (
-    <main className="min-h-screen bg-background hacker-bg noise-overlay flex flex-col items-center justify-center p-4">
+    <main className="min-h-screen bg-background flex flex-col items-center justify-center p-4">
       {/* Header */}
-      <div className="w-full max-w-[480px] mb-4 flex items-center justify-between relative z-10">
+      <div className="w-full max-w-[480px] mb-4 flex items-center justify-between">
         <Link
           href="/bridge"
           className="inline-flex items-center gap-2 text-body2 text-gray hover:text-gray-light transition-colors"
@@ -191,8 +191,7 @@ export default function ActivityPage() {
       <div
         className={cn(
           "bg-card border border-solid border-gray/30 p-4",
-          "w-[480px] max-w-[calc(100vw-32px)] rounded-[16px]",
-          "glow-border cyber-corners relative z-10"
+          "w-[480px] max-w-[calc(100vw-32px)] rounded-[16px]"
         )}
       >
         {/* Title */}

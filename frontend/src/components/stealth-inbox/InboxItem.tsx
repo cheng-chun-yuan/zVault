@@ -30,8 +30,6 @@ export function InboxItem({ note }: InboxItemProps) {
   const router = useRouter();
 
   const handleClaim = () => {
-    // Navigate to claim page with the note data
-    // The claim page will need to handle stealth notes
     const params = new URLSearchParams({
       stealth: "true",
       commitment: note.commitmentHex,
@@ -45,14 +43,14 @@ export function InboxItem({ note }: InboxItemProps) {
     <div
       className={cn(
         "p-4 rounded-[12px] border border-gray/15 bg-muted",
-        "hover:border-privacy/40 transition-all duration-300 cyber-corners hover-glow"
+        "hover:border-privacy/40 transition-colors"
       )}
     >
       {/* Header */}
       <div className="flex items-center justify-between mb-3">
         <div className="flex items-center gap-2">
-          <div className="p-1.5 rounded-[6px] bg-privacy/10 pulse-glow">
-            <Shield className="w-4 h-4 text-privacy privacy-glow" />
+          <div className="p-1.5 rounded-[6px] bg-privacy/10">
+            <Shield className="w-4 h-4 text-privacy" />
           </div>
           <span className="text-body2-semibold text-foreground">
             Stealth Deposit
@@ -60,29 +58,29 @@ export function InboxItem({ note }: InboxItemProps) {
         </div>
         <div className="flex items-center gap-1 text-caption text-gray">
           <Clock className="w-3 h-3" />
-          <span className="terminal-text">{formatRelativeTime(note.createdAt)}</span>
+          <span>{formatRelativeTime(note.createdAt)}</span>
         </div>
       </div>
 
       {/* Amount */}
       <div className="flex items-center justify-between mb-4">
         <div>
-          <p className="text-heading5 text-privacy neon-privacy">
+          <p className="text-heading5 text-privacy">
             {formatBtc(Number(note.amount))} zBTC
           </p>
-          <p className="text-caption text-gray terminal-text">
+          <p className="text-caption text-gray">
             {Number(note.amount).toLocaleString()} sats
           </p>
         </div>
-        <div className="px-2 py-1 rounded-full bg-privacy/10 border border-privacy/20 neon-border-pulse">
-          <span className="text-caption text-privacy neon-privacy">Ready to Claim</span>
+        <div className="px-2 py-1 rounded-full bg-privacy/10 border border-privacy/20">
+          <span className="text-caption text-privacy">Ready to Claim</span>
         </div>
       </div>
 
       {/* Commitment (truncated) */}
       <div className="p-2 bg-background rounded-[8px] mb-4">
-        <p className="text-caption text-gray mb-1 terminal-text">Commitment</p>
-        <code className="text-caption font-mono text-gray-light truncate block terminal-text">
+        <p className="text-caption text-gray mb-1">Commitment</p>
+        <code className="text-caption font-mono text-gray-light truncate block">
           {note.commitmentHex.slice(0, 16)}...{note.commitmentHex.slice(-16)}
         </code>
       </div>
@@ -90,7 +88,7 @@ export function InboxItem({ note }: InboxItemProps) {
       {/* Claim button */}
       <button
         onClick={handleClaim}
-        className="btn-primary w-full justify-center hover-glow"
+        className="w-full flex items-center justify-center gap-2 px-4 py-3 rounded-[10px] bg-privacy/10 hover:bg-privacy/20 text-privacy transition-colors"
       >
         Claim zBTC
         <ArrowRight className="w-4 h-4" />

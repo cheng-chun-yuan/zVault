@@ -14,6 +14,8 @@ import {
   Send,
   Tag,
   Loader2,
+  TrendingUp,
+  Link2,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { FeatureCard, type FeatureCardColor } from "@/components/ui";
@@ -47,11 +49,27 @@ const features: FeatureConfig[] = [
     color: "btc",
   },
   {
+    icon: <Link2 className="w-full h-full" />,
+    title: "Claim",
+    description: "Claim with link",
+    subtext: "Redeem zkBTC",
+    href: "/claim",
+    color: "privacy",
+  },
+  {
     icon: <Send className="w-full h-full" />,
     title: "Pay",
     description: "Private payment",
     subtext: "Stealth or Link",
     href: "/bridge/stealth-send",
+    color: "privacy",
+  },
+  {
+    icon: <TrendingUp className="w-full h-full" />,
+    title: "Earn",
+    description: "zkEarn yield",
+    subtext: "Private APY",
+    href: "/bridge/earn",
     color: "privacy",
   },
   {
@@ -131,24 +149,24 @@ export default function BridgePage() {
     : "";
 
   return (
-    <main className="min-h-screen bg-background hacker-bg noise-overlay hacker-grid scan-line flex flex-col items-center justify-center p-4">
+    <main className="min-h-screen bg-background flex flex-col items-center justify-center p-4">
       {/* Header */}
-      <div className="w-full max-w-[680px] mb-6 flex items-center justify-between relative z-10">
+      <div className="w-full max-w-[680px] mb-6 flex items-center justify-between">
         <Link
           href="/"
-          className="inline-flex items-center gap-2 text-body2 text-gray hover:text-gray-light transition-colors hover-glow"
+          className="inline-flex items-center gap-2 text-body2 text-gray hover:text-gray-light transition-colors"
         >
           <ArrowLeft className="w-4 h-4" />
           Home
         </Link>
         <div className="flex items-center gap-2">
-          <div className="flex items-center gap-1.5 px-2 py-1 rounded-full bg-btc/10 border border-btc/20 btc-neon-border-pulse">
-            <BitcoinIcon className="w-3 h-3 btc-glow" />
-            <span className="text-caption text-btc neon-btc">BTC</span>
+          <div className="flex items-center gap-1.5 px-2 py-1 rounded-full bg-btc/10 border border-btc/20">
+            <BitcoinIcon className="w-3 h-3" />
+            <span className="text-caption text-btc">BTC</span>
           </div>
-          <div className="flex items-center gap-1.5 px-2 py-1 rounded-full bg-privacy/10 border border-privacy/20 neon-border-pulse">
-            <Shield className="w-3 h-3 text-privacy privacy-glow" />
-            <span className="text-caption text-privacy neon-privacy">ZK</span>
+          <div className="flex items-center gap-1.5 px-2 py-1 rounded-full bg-privacy/10 border border-privacy/20">
+            <Shield className="w-3 h-3 text-privacy" />
+            <span className="text-caption text-privacy">ZK</span>
           </div>
         </div>
       </div>
@@ -157,8 +175,7 @@ export default function BridgePage() {
       <div
         className={cn(
           "bg-card border border-solid border-gray/30 p-6",
-          "w-[680px] max-w-[calc(100vw-32px)] rounded-[20px]",
-          "glow-border cyber-corners relative z-10"
+          "w-[680px] max-w-[calc(100vw-32px)] rounded-[20px]"
         )}
       >
         {/* Title Section */}
@@ -417,8 +434,8 @@ export default function BridgePage() {
           </div>
         )}
 
-        {/* Feature Cards Grid - 2x2 layout */}
-        <div className="grid grid-cols-2 gap-4 mb-6">
+        {/* Feature Cards Grid */}
+        <div className="grid grid-cols-2 sm:grid-cols-3 gap-4 mb-6">
           {features.map((feature) => (
             <FeatureCard
               key={feature.title}
