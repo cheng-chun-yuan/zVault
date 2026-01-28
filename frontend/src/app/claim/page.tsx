@@ -20,10 +20,13 @@ import {
   createNote,
   initPoseidon,
   initProver,
-  generateClaimProofWasm,
+  generateClaimProof,
   proofToBytes,
   isProverAvailable,
+  pointMul,
+  GRUMPKIN_GENERATOR,
   type ProofData,
+  type ClaimInputs,
 } from "@zvault/sdk";
 import { useConnection } from "@solana/wallet-adapter-react";
 import { buildClaimTransaction } from "@/lib/solana/instructions";
@@ -406,16 +409,24 @@ function ClaimContent() {
           const merkleSiblings = Array(20).fill(0n); // 20-level tree
           const merkleIndices = Array(20).fill(0);
 
-          const proofData = await generateClaimProofWasm({
-            nullifier: note.nullifier,
-            secret: note.secret,
+          // Unified Model: use nullifier as privKey, derive pubKeyX from Grumpkin curve
+          const privKey = note.nullifier;
+          const pubKeyPoint = pointMul(privKey, GRUMPKIN_GENERATOR);
+          const pubKeyX = pubKeyPoint[0]; // x-coordinate
+
+          const claimInputs: ClaimInputs = {
+            privKey,
+            pubKeyX,
             amount: BigInt(amountSats),
+            leafIndex: 0n, // Placeholder - would come from on-chain
             merkleRoot,
             merkleProof: {
               siblings: merkleSiblings,
               indices: merkleIndices,
             },
-          });
+          };
+
+          const proofData = await generateClaimProof(claimInputs);
 
           proofBytes = proofToBytes(proofData);
           proofStatus = "zk_verified";

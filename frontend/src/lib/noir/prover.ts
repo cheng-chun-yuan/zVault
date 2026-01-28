@@ -10,23 +10,21 @@ export type {
   ProofData as NoirProof,
   MerkleProofInput as MerkleProof,
   ClaimInputs,
-  SplitInputs,
-  TransferInputs,
-  WithdrawInputs,
+  SpendSplitInputs,
+  SpendPartialPublicInputs,
+  CircuitType,
 } from "@zvault/sdk";
 
-export type CircuitType = "claim" | "transfer" | "split" | "partial_withdraw";
-
-// Import SDK prover functions
-import {
+// Re-export proof generation functions directly from SDK
+export {
   initProver,
   isProverAvailable,
-  generateClaimProofWasm,
-  generateSplitProofWasm,
-  generateTransferProofWasm,
-  generateWithdrawProofWasm,
-  verifyProofWasm,
+  generateClaimProof,
+  generateSpendSplitProof,
+  generateSpendPartialPublicProof,
+  verifyProofWasm as verifyNoirProof,
   setCircuitPath,
+  getCircuitPath,
   circuitExists,
   proofToBytes,
   cleanupProver,
@@ -40,9 +38,12 @@ const CIRCUIT_CDN_URL = process.env.NEXT_PUBLIC_CIRCUIT_CDN_URL || "/circuits/no
 // Set default circuit path for frontend (CDN or public folder)
 // Only run in browser to avoid SSR issues
 let circuitPathSet = false;
+
+import { setCircuitPath as sdkSetCircuitPath } from "@zvault/sdk";
+
 function ensureCircuitPath() {
   if (!circuitPathSet && typeof window !== "undefined") {
-    setCircuitPath(CIRCUIT_CDN_URL);
+    sdkSetCircuitPath(CIRCUIT_CDN_URL);
     circuitPathSet = true;
   }
 }
@@ -52,6 +53,7 @@ function ensureCircuitPath() {
  */
 export async function initNoirProver(): Promise<void> {
   ensureCircuitPath();
+  const { initProver } = await import("@zvault/sdk");
   await initProver();
 }
 
@@ -63,141 +65,31 @@ export async function isNoirAvailable(): Promise<boolean> {
     return false;
   }
   ensureCircuitPath();
+  const { isProverAvailable } = await import("@zvault/sdk");
   return isProverAvailable();
-}
-
-/**
- * Generate a claim proof
- */
-export async function generateClaimProof(
-  nullifier: bigint,
-  secret: bigint,
-  amount: bigint,
-  merkleRoot: bigint,
-  merkleProof: MerkleProofInput
-): Promise<ProofData> {
-  ensureCircuitPath();
-  return generateClaimProofWasm({
-    nullifier,
-    secret,
-    amount,
-    merkleRoot,
-    merkleProof,
-  });
-}
-
-/**
- * Generate a transfer proof
- */
-export async function generateTransferProof(
-  inputNullifier: bigint,
-  inputSecret: bigint,
-  amount: bigint,
-  merkleRoot: bigint,
-  merkleProof: MerkleProofInput,
-  outputNullifier: bigint,
-  outputSecret: bigint
-): Promise<ProofData> {
-  return generateTransferProofWasm({
-    inputNullifier,
-    inputSecret,
-    amount,
-    merkleRoot,
-    merkleProof,
-    outputNullifier,
-    outputSecret,
-  });
-}
-
-/**
- * Generate a split proof
- */
-export async function generateSplitProof(
-  inputNullifier: bigint,
-  inputSecret: bigint,
-  inputAmount: bigint,
-  merkleRoot: bigint,
-  merkleProof: MerkleProofInput,
-  output1Nullifier: bigint,
-  output1Secret: bigint,
-  output1Amount: bigint,
-  output2Nullifier: bigint,
-  output2Secret: bigint,
-  output2Amount: bigint
-): Promise<ProofData> {
-  return generateSplitProofWasm({
-    inputNullifier,
-    inputSecret,
-    inputAmount,
-    merkleRoot,
-    merkleProof,
-    output1Nullifier,
-    output1Secret,
-    output1Amount,
-    output2Nullifier,
-    output2Secret,
-    output2Amount,
-  });
-}
-
-/**
- * Generate a partial withdraw proof
- */
-export async function generatePartialWithdrawProofNoir(
-  nullifier: bigint,
-  secret: bigint,
-  amount: bigint,
-  merkleRoot: bigint,
-  merkleProof: MerkleProofInput,
-  withdrawAmount: bigint,
-  changeNullifier: bigint,
-  changeSecret: bigint,
-  changeAmount: bigint,
-  recipient: bigint
-): Promise<ProofData> {
-  return generateWithdrawProofWasm({
-    nullifier,
-    secret,
-    amount,
-    merkleRoot,
-    merkleProof,
-    withdrawAmount,
-    changeNullifier,
-    changeSecret,
-    changeAmount,
-    recipient,
-  });
-}
-
-/**
- * Verify a proof locally
- */
-export async function verifyNoirProof(
-  circuitType: CircuitType,
-  proof: ProofData
-): Promise<boolean> {
-  return verifyProofWasm(circuitType, proof);
 }
 
 /**
  * Check if a circuit artifact exists
  */
 export async function circuitArtifactExists(
-  circuitType: CircuitType
+  circuitType: import("@zvault/sdk").CircuitType
 ): Promise<boolean> {
+  const { circuitExists } = await import("@zvault/sdk");
   return circuitExists(circuitType);
 }
 
 /**
  * Convert proof to raw bytes for on-chain submission
  */
-export function noirProofToBytes(proof: ProofData): Uint8Array {
-  return proofToBytes(proof);
+export function noirProofToBytes(proof: import("@zvault/sdk").ProofData): Uint8Array {
+  return proof.proof;
 }
 
 /**
  * Cleanup all cached resources
  */
 export async function cleanup(): Promise<void> {
+  const { cleanupProver } = await import("@zvault/sdk");
   await cleanupProver();
 }
