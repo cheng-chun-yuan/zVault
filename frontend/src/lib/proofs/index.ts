@@ -5,7 +5,7 @@
  * Browser-compatible proof generation.
  */
 
-import type { NoteData } from "@zvault/sdk";
+import { bigintToBytes, bytesToBigint, type NoteData } from "@zvault/sdk";
 import {
   generatePartialWithdrawProofNoir,
   generateClaimProof as generateClaimProofNoir,
@@ -204,27 +204,9 @@ export function parsePartialWithdrawSignals(
 
 /**
  * Convert bigint to 32-byte array (big-endian)
+ * Re-exported from SDK for convenience
  */
-export function bigintToBytes32(value: bigint): Uint8Array {
-  const bytes = new Uint8Array(32);
-  let v = value;
-  for (let i = 31; i >= 0; i--) {
-    bytes[i] = Number(v & 0xffn);
-    v = v >> 8n;
-  }
-  return bytes;
-}
-
-/**
- * Convert 32-byte array to bigint (big-endian)
- */
-export function bytes32ToBigint(bytes: Uint8Array): bigint {
-  let result = 0n;
-  for (let i = 0; i < 32; i++) {
-    result = (result << 8n) + BigInt(bytes[i]);
-  }
-  return result;
-}
+export { bigintToBytes as bigintToBytes32, bytesToBigint as bytes32ToBigint };
 
 // Re-export Noir prover functions for direct access
 export {

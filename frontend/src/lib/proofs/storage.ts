@@ -9,7 +9,7 @@
  * and proofs are generated from the on-chain state.
  */
 
-import { initPoseidon, type NoteData } from "@zvault/sdk";
+import { initPoseidon, bigintToBytes, bytesToBigint, type NoteData } from "@zvault/sdk";
 import { sha256 } from "@noble/hashes/sha2.js";
 import type { MerkleProof } from "./index";
 
@@ -30,30 +30,6 @@ export interface StoredNote extends NoteData {
 export interface SerializedMerkleTree {
   leaves: string[];
   root: string;
-}
-
-/**
- * Convert bigint to 32-byte array
- */
-function bigintToBytes(n: bigint): Uint8Array {
-  const bytes = new Uint8Array(32);
-  let value = n;
-  for (let i = 31; i >= 0; i--) {
-    bytes[i] = Number(value & 0xffn);
-    value >>= 8n;
-  }
-  return bytes;
-}
-
-/**
- * Convert bytes to bigint
- */
-function bytesToBigint(bytes: Uint8Array): bigint {
-  let result = 0n;
-  for (let i = 0; i < bytes.length; i++) {
-    result = (result << 8n) + BigInt(bytes[i]);
-  }
-  return result;
 }
 
 /**
