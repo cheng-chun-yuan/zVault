@@ -122,9 +122,8 @@ export {
   computeCommitment,
   computeNullifier,
   hashNullifier,
-  // Legacy exports for backwards compatibility
-  computeCommitmentLegacy,
-  computeNullifierHashLegacy,
+  computeNote,
+  computeNoteCommitment,
   BN254_SCALAR_FIELD,
 } from "./poseidon2";
 
@@ -163,14 +162,6 @@ export {
   stealthNoteHasComputedHashes,
   type StealthNote,
   type SerializedStealthNote,
-  // Backwards compatibility aliases (deprecated)
-  createNoteV2,
-  updateNoteV2WithHashes,
-  serializeNoteV2,
-  deserializeNoteV2,
-  noteV2HasComputedHashes,
-  type NoteV2,
-  type SerializedNoteV2,
 } from "./note";
 
 // ==========================================================================
@@ -611,9 +602,4 @@ export {
   type PoolOperationStep,
   type PoolOperationStatus,
   type PoolOperationProgressCallback,
-  // Legacy (deprecated - use stealth functions)
-  type PoolPosition,
-  type SerializedPoolPosition,
-  generatePoolPosition,
-  createPoolPositionFromSecrets,
 } from "./yield-pool";

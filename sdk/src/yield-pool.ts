@@ -42,7 +42,6 @@ import {
   type PoolClaimYieldInputs,
   type MerkleProofInput,
 } from "./prover";
-import { computeCommitmentLegacy, computeNullifierHashLegacy } from "./poseidon2";
 
 // ==========================================================================
 // Operation Status Types
@@ -1342,95 +1341,3 @@ export function formatEpochDuration(seconds: number): string {
   return `${Math.floor(seconds / 86400)}d`;
 }
 
-// ==========================================================================
-// Legacy Compatibility (Deprecated - use stealth functions)
-// ==========================================================================
-
-/** @deprecated Use StealthPoolPosition instead */
-export interface PoolPosition {
-  nullifier: bigint;
-  secret: bigint;
-  principal: bigint;
-  depositEpoch: bigint;
-  poolId: Uint8Array;
-  note: bigint;
-  commitment: bigint;
-  nullifierHash: bigint;
-  nullifierBytes: Uint8Array;
-  secretBytes: Uint8Array;
-  commitmentBytes: Uint8Array;
-  nullifierHashBytes: Uint8Array;
-}
-
-/** @deprecated Use SerializedStealthPoolPosition instead */
-export interface SerializedPoolPosition {
-  nullifier: string;
-  secret: string;
-  principal: string;
-  depositEpoch: string;
-  poolId: string;
-  commitment?: string;
-  nullifierHash?: string;
-}
-
-/** @deprecated Use createSelfStealthPoolDeposit instead */
-export function generatePoolPosition(
-  principal: bigint,
-  depositEpoch: bigint,
-  poolId: Uint8Array
-): PoolPosition {
-  console.warn(
-    "generatePoolPosition is deprecated. Use createSelfStealthPoolDeposit for stealth-based positions."
-  );
-  const nullifier = BigInt(Math.floor(Math.random() * Number.MAX_SAFE_INTEGER));
-  const secret = BigInt(Math.floor(Math.random() * Number.MAX_SAFE_INTEGER));
-  const note = poseidon2Hash([nullifier, secret]);
-  const commitment = poseidon2Hash([note, principal, depositEpoch]);
-  const nullifierHash = poseidon2Hash([nullifier]);
-
-  return {
-    nullifier,
-    secret,
-    principal,
-    depositEpoch,
-    poolId,
-    note,
-    commitment,
-    nullifierHash,
-    nullifierBytes: bigintToBytes(nullifier),
-    secretBytes: bigintToBytes(secret),
-    commitmentBytes: bigintToBytes(commitment),
-    nullifierHashBytes: bigintToBytes(nullifierHash),
-  };
-}
-
-/** @deprecated Use createSelfStealthPoolDeposit instead */
-export function createPoolPositionFromSecrets(
-  nullifier: bigint,
-  secret: bigint,
-  principal: bigint,
-  depositEpoch: bigint,
-  poolId: Uint8Array
-): PoolPosition {
-  console.warn(
-    "createPoolPositionFromSecrets is deprecated. Use stealth-based positions."
-  );
-  const note = poseidon2Hash([nullifier, secret]);
-  const commitment = poseidon2Hash([note, principal, depositEpoch]);
-  const nullifierHash = poseidon2Hash([nullifier]);
-
-  return {
-    nullifier,
-    secret,
-    principal,
-    depositEpoch,
-    poolId,
-    note,
-    commitment,
-    nullifierHash,
-    nullifierBytes: bigintToBytes(nullifier),
-    secretBytes: bigintToBytes(secret),
-    commitmentBytes: bigintToBytes(commitment),
-    nullifierHashBytes: bigintToBytes(nullifierHash),
-  };
-}

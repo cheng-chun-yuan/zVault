@@ -17,7 +17,7 @@ import {
   cleanup,
   circuitExists,
 } from "./prover";
-import { computeNullifierHashLegacy, computeCommitmentLegacy, poseidon2Hash } from "./poseidon2";
+import { hashNullifier, computeNoteCommitment, poseidon2Hash } from "./poseidon2";
 
 /**
  * Compute merkle root from commitment using all-zero siblings.
@@ -70,7 +70,7 @@ describe("CLAIM PROOF", () => {
     const amount = 100000n;
 
     // Compute commitment = poseidon2([poseidon2([nullifier, secret]), amount])
-    const commitment = computeCommitmentLegacy(nullifier, secret, amount);
+    const commitment = computeNoteCommitment(nullifier, secret, amount);
 
     // Compute merkle root using depth-20 tree with all-zero siblings
     // This mirrors the test in claim/src/main.nr
@@ -122,7 +122,7 @@ describe("SPLIT PROOF", () => {
     const output2Amount = 40000000n; // 60000000 + 40000000 = 100000000
 
     // Compute input commitment and merkle root (depth 20)
-    const inputCommitment = computeCommitmentLegacy(inputNullifier, inputSecret, inputAmount);
+    const inputCommitment = computeNoteCommitment(inputNullifier, inputSecret, inputAmount);
     const merkleRoot = computeMerkleRootFromCommitment(inputCommitment, 20);
 
     // 20-level merkle proof (matching circuit)
@@ -191,7 +191,7 @@ describe("TRANSFER PROOF", () => {
     const outputNullifier = 11111n;
     const outputSecret = 22222n;
 
-    const inputCommitment = computeCommitmentLegacy(inputNullifier, inputSecret, amount);
+    const inputCommitment = computeNoteCommitment(inputNullifier, inputSecret, amount);
     const merkleRoot = computeMerkleRootFromCommitment(inputCommitment, 20);
 
     // 20-level merkle proof
@@ -228,7 +228,7 @@ describe("PROOF SERIALIZATION", () => {
     const secret = 67890n;
     const amount = 100000n;
 
-    const commitment = computeCommitmentLegacy(nullifier, secret, amount);
+    const commitment = computeNoteCommitment(nullifier, secret, amount);
     const merkleRoot = computeMerkleRootFromCommitment(commitment, 20);
 
     const merkleProof = {

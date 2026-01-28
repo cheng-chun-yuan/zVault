@@ -34,19 +34,13 @@ export const computeNullifier = (spendingPriv: bigint, leafIndex: bigint): bigin
 export const hashNullifier = (nullifier: bigint): bigint =>
   zkPoseidon2([nullifier]);
 
-/** Compute note from nullifier and secret (legacy) */
+/** Compute note from nullifier and secret */
 export const computeNote = (nullifier: bigint, secret: bigint): bigint =>
   zkPoseidon2([nullifier, secret]);
 
-// Legacy helpers
-
-/** @deprecated Use computeCommitment */
-export const computeCommitmentLegacy = (nullifier: bigint, secret: bigint, amount: bigint): bigint =>
+/** Compute note-based commitment: commitment = poseidon2([note, amount]) where note = poseidon2([nullifier, secret]) */
+export const computeNoteCommitment = (nullifier: bigint, secret: bigint, amount: bigint): bigint =>
   zkPoseidon2([zkPoseidon2([nullifier, secret]), amount]);
-
-/** @deprecated Use computeNullifier */
-export const computeNullifierHashLegacy = (nullifier: bigint): bigint =>
-  zkPoseidon2([nullifier]);
 
 // No-op for backwards compatibility
 export const initPoseidon2Sync = async (): Promise<void> => {};

@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect } from "react";
 import Link from "next/link";
 import {
   ArrowLeft,
@@ -10,9 +10,7 @@ import {
   Clock,
   ArrowDownToLine,
   ArrowUpFromLine,
-  RefreshCw,
   Lock,
-  Unlock,
   Eye,
   EyeOff,
   Info,
@@ -20,6 +18,7 @@ import {
   ChevronDown,
   ChevronUp,
   Search,
+  AlertTriangle,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useWallet } from "@solana/wallet-adapter-react";
@@ -27,7 +26,6 @@ import { useWalletModal } from "@solana/wallet-adapter-react-ui";
 import { useZVaultKeys, useStealthInbox } from "@/hooks/use-zvault";
 import { useYieldPool, type PoolStats, type EnrichedPoolPosition } from "@/hooks/use-yield-pool";
 import { createStealthMetaAddress } from "@zvault/sdk";
-import { AlertTriangle } from "lucide-react";
 import {
   OperationStatus,
   type PoolOperationStatus,
@@ -57,7 +55,7 @@ function formatTimeAgo(timestamp: number): string {
   return `${days}d ago`;
 }
 
-// Pool Stats Card
+// Pool Stats Card - Shows APY and Epoch only (Total Staked is owner-only)
 function PoolStatsCard({ stats }: { stats: PoolStats | null }) {
   if (!stats) {
     return (
@@ -74,9 +72,15 @@ function PoolStatsCard({ stats }: { stats: PoolStats | null }) {
       <div className="flex items-center gap-2 mb-4">
         <TrendingUp className="w-5 h-5 text-privacy" />
         <h2 className="text-body1 text-foreground">zkEarn Pool</h2>
-        <span className="px-2 py-0.5 bg-green-500/10 text-green-400 text-caption rounded-full">
-          Live
-        </span>
+        {stats.paused ? (
+          <span className="px-2 py-0.5 bg-btc/10 text-btc text-caption rounded-full">
+            Paused
+          </span>
+        ) : (
+          <span className="px-2 py-0.5 bg-green-500/10 text-green-400 text-caption rounded-full">
+            Live
+          </span>
+        )}
       </div>
 
       <div className="grid grid-cols-2 gap-4">
@@ -87,23 +91,18 @@ function PoolStatsCard({ stats }: { stats: PoolStats | null }) {
           </p>
         </div>
         <div className="p-3 bg-background/50 rounded-[12px]">
-          <p className="text-caption text-gray mb-1">Total Staked</p>
-          <p className="text-heading6 text-foreground font-mono">
-            {formatBtc(stats.totalPrincipal)} BTC
-          </p>
-        </div>
-        <div className="p-3 bg-background/50 rounded-[12px]">
           <p className="text-caption text-gray mb-1">Epoch</p>
-          <p className="text-body1 text-foreground font-mono">
+          <p className="text-heading6 text-foreground font-mono">
             #{stats.currentEpoch.toString()}
           </p>
         </div>
-        <div className="p-3 bg-background/50 rounded-[12px]">
-          <p className="text-caption text-gray mb-1">Epoch Duration</p>
-          <p className="text-body1 text-foreground font-mono">
-            {formatDuration(stats.epochDuration)}
-          </p>
-        </div>
+      </div>
+
+      <div className="mt-3 p-3 bg-background/50 rounded-[12px]">
+        <p className="text-caption text-gray mb-1">Epoch Duration</p>
+        <p className="text-body1 text-foreground font-mono">
+          {formatDuration(stats.epochDuration)}
+        </p>
       </div>
 
       {/* Privacy Notice */}
@@ -113,8 +112,8 @@ function PoolStatsCard({ stats }: { stats: PoolStats | null }) {
           <div>
             <p className="text-caption text-privacy mb-1">Privacy Guaranteed</p>
             <p className="text-caption text-gray">
-              Only aggregate pool stats are visible on-chain. Individual positions
-              are discovered using your viewing key via ECDH.
+              Your positions are discovered using your viewing key via ECDH.
+              Only you can see your deposits.
             </p>
           </div>
         </div>
@@ -123,21 +122,13 @@ function PoolStatsCard({ stats }: { stats: PoolStats | null }) {
   );
 }
 
-// Position Card (Stealth-based)
+// Position Card (Stealth-based) - Display only, no actions for now
 function PositionCard({
   position,
   stats,
-  onWithdraw,
-  onClaimYield,
-  onCompound,
-  isLoading,
 }: {
   position: EnrichedPoolPosition;
   stats: PoolStats | null;
-  onWithdraw: () => void;
-  onClaimYield: () => void;
-  onCompound: () => void;
-  isLoading: boolean;
 }) {
   const [showDetails, setShowDetails] = useState(false);
 
@@ -182,7 +173,7 @@ function PositionCard({
         </div>
       </div>
 
-      <div className="p-2 bg-privacy/10 rounded-[8px] mb-3">
+      <div className="p-2 bg-privacy/10 rounded-[8px]">
         <div className="flex items-center justify-between">
           <span className="text-caption text-gray">Total Value</span>
           <span className="text-body1-semibold text-privacy font-mono">
@@ -192,7 +183,7 @@ function PositionCard({
       </div>
 
       {showDetails && (
-        <div className="p-3 bg-background/50 rounded-[10px] mb-3 space-y-2">
+        <div className="p-3 bg-background/50 rounded-[10px] mt-3 space-y-2">
           <div className="flex justify-between text-caption">
             <span className="text-gray">Deposit Epoch</span>
             <span className="text-foreground font-mono">
@@ -220,46 +211,6 @@ function PositionCard({
           </div>
         </div>
       )}
-
-      {/* Actions */}
-      <div className="grid grid-cols-3 gap-2">
-        <button
-          onClick={onClaimYield}
-          disabled={isLoading || position.earnedYield === 0n}
-          className={cn(
-            "flex items-center justify-center gap-1.5 px-3 py-2 rounded-[8px]",
-            "bg-privacy/10 hover:bg-privacy/20 text-privacy text-caption",
-            "disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
-          )}
-        >
-          <TrendingUp className="w-3.5 h-3.5" />
-          Claim
-        </button>
-        <button
-          onClick={onCompound}
-          disabled={isLoading || position.earnedYield === 0n}
-          className={cn(
-            "flex items-center justify-center gap-1.5 px-3 py-2 rounded-[8px]",
-            "bg-gray/10 hover:bg-gray/20 text-gray-light text-caption",
-            "disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
-          )}
-        >
-          <RefreshCw className="w-3.5 h-3.5" />
-          Auto
-        </button>
-        <button
-          onClick={onWithdraw}
-          disabled={isLoading}
-          className={cn(
-            "flex items-center justify-center gap-1.5 px-3 py-2 rounded-[8px]",
-            "bg-btc/10 hover:bg-btc/20 text-btc text-caption",
-            "disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
-          )}
-        >
-          <Unlock className="w-3.5 h-3.5" />
-          Exit
-        </button>
-      </div>
     </div>
   );
 }
@@ -299,19 +250,6 @@ function DepositModal({
           Select a zkBTC note to deposit into the yield pool. Your position will use
           a stealth address - only your viewing key can discover it.
         </p>
-
-        {/* TODO Banner - Backend not ready */}
-        <div className="mb-4 p-3 bg-btc/10 border border-btc/30 rounded-[10px]">
-          <div className="flex items-center gap-2">
-            <AlertTriangle className="w-4 h-4 text-btc shrink-0" />
-            <div>
-              <p className="text-caption text-btc font-medium">Demo Mode</p>
-              <p className="text-caption text-gray">
-                Deposit contract not yet deployed. Position will be created locally for demo.
-              </p>
-            </div>
-          </div>
-        </div>
 
         {availableNotes.length === 0 ? (
           <div className="p-4 bg-muted rounded-[12px] text-center">
@@ -419,9 +357,6 @@ export default function EarnPage() {
   const [operationStatus, setOperationStatus] = useState<PoolOperationStatus | null>(null);
   const [isProcessing, setIsProcessing] = useState(false);
 
-  // Default pool ID
-  const POOL_ID = new Uint8Array(8).fill(0x01);
-
   // Auto-scan when keys become available
   useEffect(() => {
     if (keys && !lastScan) {
@@ -435,8 +370,7 @@ export default function EarnPage() {
     setOperationStatus(null);
   };
 
-  // Handlers
-  // TODO: Deposit needs backend contract to be deployed
+  // Handle deposit using SDK
   const handleDeposit = async (noteIndex: number) => {
     if (!keys) return;
 
@@ -455,7 +389,7 @@ export default function EarnPage() {
 
       // Create deposit position using real SDK function
       setOperationStatus({ step: "generating_proof", message: "Generating ZK proof...", progress: 30 });
-      const position = await createDeposit(meta, BigInt(note.amount), POOL_ID);
+      const position = await createDeposit(meta, BigInt(note.amount));
       console.log("Created position:", position);
 
       // TODO: Submit to chain when backend ready
@@ -473,84 +407,6 @@ export default function EarnPage() {
       });
     } finally {
       setIsLoading(false);
-    }
-  };
-
-  // TODO: Withdraw needs backend contract
-  const handleWithdraw = async (position: EnrichedPoolPosition) => {
-    setIsProcessing(true);
-    setOperationStatus({ step: "preparing", message: "Preparing withdrawal..." });
-
-    try {
-      setOperationStatus({ step: "generating_proof", message: "Generating ZK proof...", progress: 30 });
-      // Simulate proof generation time
-      await new Promise((r) => setTimeout(r, 1500));
-
-      setOperationStatus({ step: "building_tx", message: "Building transaction... (Demo mode)", progress: 60 });
-      await new Promise((r) => setTimeout(r, 500));
-
-      setOperationStatus({
-        step: "complete",
-        message: `Withdraw: Contract not yet deployed. Would withdraw ${formatBtc(position.currentValue)} BTC`,
-      });
-    } catch (err) {
-      setOperationStatus({
-        step: "error",
-        message: "Withdraw failed",
-        error: err instanceof Error ? err.message : "Unknown error",
-      });
-    }
-  };
-
-  // TODO: Claim yield needs backend contract
-  const handleClaimYield = async (position: EnrichedPoolPosition) => {
-    setIsProcessing(true);
-    setOperationStatus({ step: "preparing", message: "Preparing yield claim..." });
-
-    try {
-      setOperationStatus({ step: "generating_proof", message: "Generating ZK proof...", progress: 30 });
-      // Simulate proof generation time
-      await new Promise((r) => setTimeout(r, 1500));
-
-      setOperationStatus({ step: "building_tx", message: "Building transaction... (Demo mode)", progress: 60 });
-      await new Promise((r) => setTimeout(r, 500));
-
-      setOperationStatus({
-        step: "complete",
-        message: `Claim Yield: Contract not yet deployed. Would claim ${formatBtc(position.earnedYield)} BTC`,
-      });
-    } catch (err) {
-      setOperationStatus({
-        step: "error",
-        message: "Claim failed",
-        error: err instanceof Error ? err.message : "Unknown error",
-      });
-    }
-  };
-
-  // TODO: Compound needs backend contract
-  const handleCompound = async (position: EnrichedPoolPosition) => {
-    setIsProcessing(true);
-    setOperationStatus({ step: "preparing", message: "Preparing compound..." });
-
-    try {
-      setOperationStatus({ step: "generating_proof", message: "Generating ZK proof...", progress: 30 });
-      // Simulate proof generation time
-      await new Promise((r) => setTimeout(r, 1500));
-
-      setOperationStatus({ step: "building_tx", message: "Building transaction... (Demo mode)", progress: 60 });
-      await new Promise((r) => setTimeout(r, 500));
-
-      setOperationStatus({
-        step: "complete",
-        message: `Compound: Contract not yet deployed. Would compound ${formatBtc(position.earnedYield)} BTC`,
-      });
-    } catch (err) {
-      setOperationStatus({
-        step: "error",
-        message: "Compound failed",
-        error: err instanceof Error ? err.message : "Unknown error",
-      });
     }
   };
 
@@ -671,16 +527,15 @@ export default function EarnPage() {
                   </button>
                   <button
                     onClick={() => setIsDepositModalOpen(true)}
+                    disabled={poolStats?.paused}
                     className={cn(
                       "flex items-center gap-1.5 px-3 py-1.5 rounded-[8px]",
-                      "bg-privacy hover:bg-privacy/80 text-background text-caption transition-colors"
+                      "bg-privacy hover:bg-privacy/80 text-background text-caption transition-colors",
+                      "disabled:opacity-50 disabled:cursor-not-allowed"
                     )}
                   >
                     <ArrowDownToLine className="w-3.5 h-3.5" />
                     New Deposit
-                    <span className="ml-1 px-1.5 py-0.5 bg-btc/20 text-btc text-[10px] rounded">
-                      TODO
-                    </span>
                   </button>
                 </div>
               </div>
@@ -720,10 +575,6 @@ export default function EarnPage() {
                       key={`${position.poolId}-${position.leafIndex}-${idx}`}
                       position={position}
                       stats={poolStats}
-                      onWithdraw={() => handleWithdraw(position)}
-                      onClaimYield={() => handleClaimYield(position)}
-                      onCompound={() => handleCompound(position)}
-                      isLoading={isLoading || isProcessing}
                     />
                   ))}
                 </div>

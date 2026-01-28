@@ -5,10 +5,7 @@
  * Uses UltraHonk proofs via @aztec/bb.js with lazy loading.
  */
 
-import {
-  computeNullifierHashLegacy,
-  computeCommitmentLegacy,
-} from "./poseidon2";
+import { hashNullifier, computeNoteCommitment } from "./poseidon2";
 
 export interface MerkleProofInput {
   siblings: bigint[];
@@ -324,7 +321,7 @@ export async function generateClaimProof(inputs: ClaimInputs): Promise<ProofData
   const pathIndices = inputs.merkleProof.indices;
 
   // Compute nullifier_hash = poseidon2([nullifier])
-  const nullifierHash = computeNullifierHashLegacy(inputs.nullifier);
+  const nullifierHash = hashNullifier(inputs.nullifier);
 
   const circuitInputs: InputMap = {
     nullifier: inputs.nullifier.toString(),
@@ -378,13 +375,13 @@ export async function generateSplitProof(inputs: SplitInputs): Promise<ProofData
   const pathIndices = inputs.merkleProof.indices;
 
   // Compute required hashes
-  const inputNullifierHash = computeNullifierHashLegacy(inputs.inputNullifier);
-  const outputCommitment1 = computeCommitmentLegacy(
+  const inputNullifierHash = hashNullifier(inputs.inputNullifier);
+  const outputCommitment1 = computeNoteCommitment(
     inputs.output1Nullifier,
     inputs.output1Secret,
     inputs.output1Amount
   );
-  const outputCommitment2 = computeCommitmentLegacy(
+  const outputCommitment2 = computeNoteCommitment(
     inputs.output2Nullifier,
     inputs.output2Secret,
     inputs.output2Amount
@@ -434,8 +431,8 @@ export async function generateTransferProof(inputs: TransferInputs): Promise<Pro
   const pathIndices = inputs.merkleProof.indices;
 
   // Compute nullifier hash and output commitment
-  const nullifierHash = computeNullifierHashLegacy(inputs.inputNullifier);
-  const outputCommitment = computeCommitmentLegacy(
+  const nullifierHash = hashNullifier(inputs.inputNullifier);
+  const outputCommitment = computeNoteCommitment(
     inputs.outputNullifier,
     inputs.outputSecret,
     inputs.amount

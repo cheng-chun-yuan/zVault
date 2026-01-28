@@ -609,21 +609,3 @@ export function stealthNoteHasComputedHashes(note: StealthNote): boolean {
   return note.notePubKey !== 0n && note.commitment !== 0n;
 }
 
-// ============================================================================
-// Backwards Compatibility Aliases (deprecated)
-// ============================================================================
-
-/** @deprecated Use StealthNote instead */
-export type NoteV2 = StealthNote;
-/** @deprecated Use SerializedStealthNote instead */
-export type SerializedNoteV2 = SerializedStealthNote;
-/** @deprecated Use createStealthNote instead */
-export const createNoteV2 = createStealthNote;
-/** @deprecated Use updateStealthNoteWithHashes instead */
-export const updateNoteV2WithHashes = updateStealthNoteWithHashes;
-/** @deprecated Use serializeStealthNote instead */
-export const serializeNoteV2 = serializeStealthNote;
-/** @deprecated Use deserializeStealthNote instead */
-export const deserializeNoteV2 = deserializeStealthNote;
-/** @deprecated Use stealthNoteHasComputedHashes instead */
-export const noteV2HasComputedHashes = stealthNoteHasComputedHashes;
