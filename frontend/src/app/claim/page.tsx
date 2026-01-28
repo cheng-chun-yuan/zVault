@@ -378,9 +378,11 @@ function ClaimContent() {
         }
       }
 
-      // If not in index, check on-chain by fetching commitment tree
-      // For now, use demo amount of 10000 sats (standard addDemoNote amount)
-      const amountSats = foundAmount ?? 10000; // Default to demo note amount
+      // If not found in index, we cannot proceed without knowing the amount
+      if (foundAmount === null) {
+        throw new Error("Commitment not found in index. Please ensure your deposit has been confirmed on-chain.");
+      }
+      const amountSats = foundAmount;
 
       // Compute commitment with found/default amount
       const commitment = computeUnifiedCommitment(pubKeyX, BigInt(amountSats));
@@ -430,9 +432,12 @@ function ClaimContent() {
       const pubKeyX = pubKeyPoint.x; // x-coordinate
 
       // Compute commitment = Poseidon2(pubKeyX, amount)
-      // First try to get amount from index, fallback to verified amount or demo amount
+      // Must have verified amount from verification step
+      if (!verifyResult?.amountSats) {
+        throw new Error("Please verify your claim first to determine the deposit amount.");
+      }
       const commitmentIndex = getCommitmentIndex();
-      let amountSats = verifyResult?.amountSats ?? 10000; // Demo amount default
+      let amountSats = verifyResult.amountSats;
       let leafIndexBigint = 0n;
       let merkleRoot = 0n;
       let merkleSiblings: bigint[] = Array(20).fill(0n);
@@ -526,6 +531,11 @@ function ClaimContent() {
         throw new Error("Prover not ready. Please wait for initialization.");
       }
 
+      // Ensure we have a valid proof before proceeding
+      if (!proofBytes) {
+        throw new Error("No valid ZK proof generated. Cannot proceed with claim.");
+      }
+
       setClaimProgress("submitting");
 
       // Build claim transaction
@@ -547,7 +557,7 @@ function ClaimContent() {
       const transaction = await buildClaimTransaction(connection, {
         nullifierHash: nullifierHashBytes,
         merkleRoot: merkleRootBytes,
-        zkProof: proofBytes ?? new Uint8Array(32), // Placeholder for demo
+        zkProof: proofBytes,
         amountSats: BigInt(amountSats),
         userPubkey: publicKey,
         commitment: commitmentBytes,
