@@ -188,6 +188,21 @@ const withdraw = await client.withdraw(output1.note, 'tb1qxyz...');
 
 ---
 
+## Roadmap
+
+See [`roadmap/`](./roadmap/) for the full development roadmap and todo list.
+
+**Vision:** Make Bitcoin private on every chain - starting with Solana, expanding to become the universal private layer for Bitcoin in DeFi.
+
+| Phase | Timeline | Goal |
+|-------|----------|------|
+| Beta | Month 1 | Mainnet launch, $10K limit |
+| Decentralize | Month 2 | FROST 2-of-3, $50K limit |
+| Audit | Month 3 | Security audit, $250K limit |
+| Yield | Month 4+ | zkEarn, $1M+ TVL |
+
+---
+
 ## Documentation
 
 Comprehensive documentation is available in the [`docs/`](./docs/) folder:
