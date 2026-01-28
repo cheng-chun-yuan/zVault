@@ -10,34 +10,37 @@
  *   2. sharedSecret = ECDH(ephemeral.priv, recipientViewingPub)
  *   3. stealthPub = spendingPub + hash(sharedSecret) * G
  *   4. commitment = Poseidon2(stealthPub.x, amount)
+ *   5. encryptedAmount = amount XOR sha256(sharedSecret)[0..8]
  *
- * Recipient (viewing key - can detect):
+ * Recipient (viewing key only - can detect and see amount):
  *   1. sharedSecret = ECDH(viewingPriv, ephemeralPub)
- *   2. stealthPub = spendingPub + hash(sharedSecret) * G
- *   3. Verify: commitment == Poseidon2(stealthPub.x, amount)
+ *   2. amount = encryptedAmount XOR sha256(sharedSecret)[0..8]
+ *   3. stealthPub = spendingPub + hash(sharedSecret) * G
+ *   4. Verify: commitment == Poseidon2(stealthPub.x, amount)
  *
  * Recipient (spending key - can claim):
  *   1. stealthPriv = spendingPriv + hash(sharedSecret)
  *   2. nullifier = Poseidon2(stealthPriv, leafIndex)
  * ```
  *
- * Format (98 bytes on-chain):
+ * Format (91 bytes on-chain):
  * - ephemeral_pub (33 bytes) - Single Grumpkin key for ECDH
- * - amount_sats (8 bytes) - Verified BTC amount from SPV proof
+ * - encrypted_amount (8 bytes) - XOR encrypted with shared secret
  * - commitment (32 bytes) - Poseidon2 hash for Merkle tree
  * - leaf_index (8 bytes) - Position in Merkle tree
  * - created_at (8 bytes) - Timestamp
  *
- * Security Properties:
- * - Viewing key can detect deposits but CANNOT derive stealthPriv (ECDLP)
+ * Privacy Properties:
+ * - Amount is ENCRYPTED - only recipient with viewing key can decrypt
+ * - Viewing key can detect deposits and decrypt amount, but CANNOT spend
  * - Spending key required for stealthPriv and nullifier derivation
- * - Single ephemeral key is standard (EIP-5564, Umbra, Railgun pattern)
+ * - ZK proof guarantees amount conservation without revealing value on-chain
  */
 
 // ========== Constants (defined before imports to ensure availability) ==========
 
 /** StealthAnnouncement account size (91 bytes - single ephemeral key)
- * Layout: 1 (disc) + 1 (bump) + 33 (ephemeral) + 8 (amount) + 32 (commitment) + 8 (leaf_idx) + 8 (created_at) */
+ * Layout: 1 (disc) + 1 (bump) + 33 (ephemeral) + 8 (encrypted_amount) + 32 (commitment) + 8 (leaf_idx) + 8 (created_at) */
 export const STEALTH_ANNOUNCEMENT_SIZE = 91;
 
 /** Discriminator for StealthAnnouncement */
@@ -69,6 +72,74 @@ import {
   computeNullifier as poseidon2ComputeNullifier,
 } from "./poseidon2";
 
+// ========== Amount Encryption Helpers ==========
+
+/**
+ * Derive encryption key from ECDH shared secret
+ *
+ * Uses SHA256 of the shared secret's x-coordinate to derive an 8-byte key.
+ * Both sender and recipient can compute this from their respective keys:
+ * - Sender: sha256(ECDH(ephemeralPriv, viewingPub).x)
+ * - Recipient: sha256(ECDH(viewingPriv, ephemeralPub).x)
+ */
+function deriveAmountEncryptionKey(sharedSecret: GrumpkinPoint): Uint8Array {
+  const sharedSecretBytes = scalarToBytes(sharedSecret.x);
+  const hash = sha256(sharedSecretBytes);
+  return hash.slice(0, 8); // First 8 bytes as encryption key
+}
+
+/**
+ * Encrypt amount using XOR with derived key
+ *
+ * @param amount - Amount in satoshis (bigint)
+ * @param sharedSecret - ECDH shared secret point
+ * @returns 8 bytes of encrypted amount
+ */
+export function encryptAmount(amount: bigint, sharedSecret: GrumpkinPoint): Uint8Array {
+  const key = deriveAmountEncryptionKey(sharedSecret);
+  const amountBytes = new Uint8Array(8);
+
+  // Convert amount to little-endian bytes
+  let temp = amount;
+  for (let i = 0; i < 8; i++) {
+    amountBytes[i] = Number(temp & 0xffn);
+    temp = temp >> 8n;
+  }
+
+  // XOR with key
+  const encrypted = new Uint8Array(8);
+  for (let i = 0; i < 8; i++) {
+    encrypted[i] = amountBytes[i] ^ key[i];
+  }
+
+  return encrypted;
+}
+
+/**
+ * Decrypt amount using XOR with derived key
+ *
+ * @param encryptedAmount - 8 bytes of encrypted amount
+ * @param sharedSecret - ECDH shared secret point
+ * @returns Decrypted amount in satoshis (bigint)
+ */
+export function decryptAmount(encryptedAmount: Uint8Array, sharedSecret: GrumpkinPoint): bigint {
+  const key = deriveAmountEncryptionKey(sharedSecret);
+
+  // XOR with key to decrypt
+  const decrypted = new Uint8Array(8);
+  for (let i = 0; i < 8; i++) {
+    decrypted[i] = encryptedAmount[i] ^ key[i];
+  }
+
+  // Convert little-endian bytes to bigint
+  let amount = 0n;
+  for (let i = 7; i >= 0; i--) {
+    amount = (amount << 8n) | BigInt(decrypted[i]);
+  }
+
+  return amount;
+}
+
 // ========== Type Guard ==========
 
 /**
@@ -94,13 +165,15 @@ export function isWalletAdapter(source: unknown): source is WalletSignerAdapter 
  * - sharedSecret = ECDH(ephemeral.priv, viewingPub)
  * - stealthPub = spendingPub + hash(sharedSecret) * G
  * - commitment = Poseidon2(stealthPub.x, amount)
+ * - encryptedAmount = amount XOR sha256(sharedSecret.x)[0..8]
  */
 export interface StealthDeposit {
   /** Single Grumpkin ephemeral public key (33 bytes compressed) */
   ephemeralPub: Uint8Array;
 
-  /** Amount in satoshis (stored directly - no encryption needed) */
-  amountSats: bigint;
+  /** Encrypted amount (8 bytes) - XOR with sha256(sharedSecret.x)[0..8]
+   * Only recipient with viewing key can decrypt */
+  encryptedAmount: Uint8Array;
 
   /** Commitment for Merkle tree (32 bytes) - Poseidon2(stealthPub.x, amount) */
   commitment: Uint8Array;
@@ -171,10 +244,14 @@ export interface ClaimInputs {
 
 /**
  * Parsed stealth announcement from on-chain data
+ *
+ * Note: encryptedAmount can only be decrypted by the recipient using their viewing key.
+ * Use scanAnnouncements() to automatically decrypt and verify.
  */
 export interface OnChainStealthAnnouncement {
   ephemeralPub: Uint8Array;
-  amountSats: bigint;
+  /** Encrypted amount (8 bytes) - decrypt with viewing key via scanAnnouncements() */
+  encryptedAmount: Uint8Array;
   commitment: Uint8Array;
   leafIndex: number;
   createdAt: number;
@@ -242,6 +319,10 @@ function deriveStealthPrivKey(
  * 1. sharedSecret = ECDH(ephemeral.priv, recipientViewingPub)
  * 2. stealthPub = spendingPub + hash(sharedSecret) * G
  * 3. commitment = Poseidon2(stealthPub.x, amount)
+ * 4. encryptedAmount = amount XOR sha256(sharedSecret.x)[0..8]
+ *
+ * The amount is encrypted so only the recipient (with viewing key) can see it.
+ * The ZK proof guarantees amount conservation without revealing the value on-chain.
  *
  * @param recipientMeta - Recipient's stealth meta-address
  * @param amountSats - Amount in satoshis
@@ -269,9 +350,12 @@ export async function createStealthDeposit(
   const commitmentBigint = poseidon2Hash([stealthPub.x, amountSats]);
   const commitment = bigintToBytes(commitmentBigint);
 
+  // Encrypt amount with shared secret (only recipient can decrypt)
+  const encryptedAmount = encryptAmount(amountSats, sharedSecret);
+
   return {
     ephemeralPub: pointToCompressedBytes(ephemeral.pubKey),
-    amountSats,
+    encryptedAmount,
     commitment,
     createdAt: Date.now(),
   };
@@ -284,22 +368,29 @@ export async function createStealthDeposit(
  *
  * For each announcement, computes:
  * 1. sharedSecret = ECDH(viewingPriv, ephemeralPub)
- * 2. stealthPub = spendingPub + hash(sharedSecret) * G
- * 3. Verifies: commitment == Poseidon2(stealthPub.x, amount)
+ * 2. amount = decrypt(encryptedAmount, sharedSecret)
+ * 3. stealthPub = spendingPub + hash(sharedSecret) * G
+ * 4. Verifies: commitment == Poseidon2(stealthPub.x, amount)
  *
- * This function can DETECT deposits but CANNOT:
+ * KEY PRIVACY FEATURE: The viewing key can:
+ * - Decrypt the amount (only you can see how much was sent)
+ * - Detect which deposits are for you
+ * - View your balance without spending capability
+ *
+ * The viewing key CANNOT:
  * - Derive stealthPriv (requires spending key)
  * - Generate nullifier or spending proofs
+ * - Spend your funds
  *
  * @param source - Wallet adapter OR pre-derived ZVaultKeys
- * @param announcements - Array of on-chain announcements
- * @returns Array of found notes (ready for claim preparation)
+ * @param announcements - Array of on-chain announcements (with encrypted amounts)
+ * @returns Array of found notes with decrypted amounts
  */
 export async function scanAnnouncements(
   source: WalletSignerAdapter | ZVaultKeys,
   announcements: {
     ephemeralPub: Uint8Array;
-    amountSats: bigint;
+    encryptedAmount: Uint8Array;
     commitment: Uint8Array;
     leafIndex: number;
   }[]
@@ -312,32 +403,35 @@ export async function scanAnnouncements(
 
   for (const ann of announcements) {
     try {
-      // Basic sanity check on amount
-      if (ann.amountSats <= 0n || ann.amountSats > MAX_SATS) {
-        continue;
-      }
-
       // Parse ephemeral pubkey
       const ephemeralPub = pointFromCompressedBytes(ann.ephemeralPub);
 
       // Compute shared secret with viewing key
       const sharedSecret = grumpkinEcdh(keys.viewingPrivKey, ephemeralPub);
 
-      // Derive stealth public key
-      const stealthPub = deriveStealthPubKey(keys.spendingPubKey, sharedSecret);
+      // Decrypt amount using shared secret (only viewing key holder can do this!)
+      const amount = decryptAmount(ann.encryptedAmount, sharedSecret);
 
-      // Verify commitment matches
-      const expectedCommitment = poseidon2Hash([stealthPub.x, ann.amountSats]);
-      const actualCommitment = bytesToBigint(ann.commitment);
-
-      if (expectedCommitment !== actualCommitment) {
-        // Not for us - commitment doesn't match
+      // Basic sanity check on decrypted amount
+      if (amount <= 0n || amount > MAX_SATS) {
         continue;
       }
 
-      // This announcement is for us!
+      // Derive stealth public key
+      const stealthPub = deriveStealthPubKey(keys.spendingPubKey, sharedSecret);
+
+      // Verify commitment matches decrypted amount
+      const expectedCommitment = poseidon2Hash([stealthPub.x, amount]);
+      const actualCommitment = bytesToBigint(ann.commitment);
+
+      if (expectedCommitment !== actualCommitment) {
+        // Not for us - commitment doesn't match our decrypted amount
+        continue;
+      }
+
+      // This announcement is for us! Amount successfully decrypted.
       found.push({
-        amount: ann.amountSats,
+        amount,
         ephemeralPub,
         stealthPub,
         leafIndex: ann.leafIndex,
@@ -350,6 +444,143 @@ export async function scanAnnouncements(
   }
 
   return found;
+}
+
+// ========== View-Only Scanning (No Spending Key Required) ==========
+
+/**
+ * View-only keys for scanning without spending capability
+ *
+ * Use this for portfolio trackers, watch-only wallets, or delegated viewing.
+ */
+export interface ViewOnlyKeys {
+  /** Viewing private key (Grumpkin scalar) - for ECDH */
+  viewingPrivKey: bigint;
+  /** Spending public key (Grumpkin point) - for stealth derivation */
+  spendingPubKey: GrumpkinPoint;
+}
+
+/**
+ * Scanned note from view-only scanning (no spending capability)
+ */
+export interface ViewOnlyScannedNote {
+  /** Decrypted amount in satoshis */
+  amount: bigint;
+  /** Leaf index in Merkle tree */
+  leafIndex: number;
+  /** Commitment for verification */
+  commitment: Uint8Array;
+  /** Ephemeral public key (needed for claiming later) */
+  ephemeralPub: Uint8Array;
+}
+
+/**
+ * Scan announcements with VIEW-ONLY keys (no spending capability)
+ *
+ * This function is designed for:
+ * - Portfolio trackers (view balance without spending risk)
+ * - Watch-only wallets
+ * - Delegated viewing (give viewing key to accountant)
+ *
+ * The viewing key can:
+ * ✅ Decrypt the amount (see how much was sent)
+ * ✅ Detect which deposits are for you
+ * ✅ Calculate total balance
+ *
+ * The viewing key CANNOT:
+ * ❌ Derive the stealth private key
+ * ❌ Generate the nullifier
+ * ❌ Spend your funds
+ *
+ * @param viewOnlyKeys - Viewing private key + spending public key
+ * @param announcements - Array of on-chain announcements
+ * @returns Array of found notes with decrypted amounts
+ *
+ * @example
+ * ```typescript
+ * // Create view-only keys (export from full keys)
+ * const viewOnly: ViewOnlyKeys = {
+ *   viewingPrivKey: keys.viewingPrivKey,
+ *   spendingPubKey: keys.spendingPubKey,
+ * };
+ *
+ * // Scan without spending capability
+ * const notes = await scanAnnouncementsViewOnly(viewOnly, announcements);
+ * const totalBalance = notes.reduce((sum, n) => sum + n.amount, 0n);
+ * console.log(`Balance: ${totalBalance} sats`);
+ * ```
+ */
+export async function scanAnnouncementsViewOnly(
+  viewOnlyKeys: ViewOnlyKeys,
+  announcements: {
+    ephemeralPub: Uint8Array;
+    encryptedAmount: Uint8Array;
+    commitment: Uint8Array;
+    leafIndex: number;
+  }[]
+): Promise<ViewOnlyScannedNote[]> {
+  const found: ViewOnlyScannedNote[] = [];
+  const MAX_SATS = 21_000_000n * 100_000_000n;
+
+  for (const ann of announcements) {
+    try {
+      const ephemeralPub = pointFromCompressedBytes(ann.ephemeralPub);
+
+      // Compute shared secret with viewing key
+      const sharedSecret = grumpkinEcdh(viewOnlyKeys.viewingPrivKey, ephemeralPub);
+
+      // Decrypt amount
+      const amount = decryptAmount(ann.encryptedAmount, sharedSecret);
+
+      if (amount <= 0n || amount > MAX_SATS) {
+        continue;
+      }
+
+      // Derive stealth public key to verify commitment
+      const stealthPub = deriveStealthPubKey(viewOnlyKeys.spendingPubKey, sharedSecret);
+
+      // Verify commitment
+      const expectedCommitment = poseidon2Hash([stealthPub.x, amount]);
+      const actualCommitment = bytesToBigint(ann.commitment);
+
+      if (expectedCommitment !== actualCommitment) {
+        continue;
+      }
+
+      found.push({
+        amount,
+        leafIndex: ann.leafIndex,
+        commitment: ann.commitment,
+        ephemeralPub: ann.ephemeralPub,
+      });
+    } catch {
+      continue;
+    }
+  }
+
+  return found;
+}
+
+/**
+ * Export view-only keys from full ZVaultKeys
+ *
+ * Use this to create a view-only version of your keys that can
+ * scan and decrypt amounts but cannot spend funds.
+ *
+ * @example
+ * ```typescript
+ * const fullKeys = await deriveKeysFromWallet(wallet);
+ * const viewOnly = exportViewOnlyKeys(fullKeys);
+ *
+ * // Give viewOnly to a portfolio tracker app
+ * // They can see your balance but cannot spend
+ * ```
+ */
+export function exportViewOnlyKeys(keys: ZVaultKeys): ViewOnlyKeys {
+  return {
+    viewingPrivKey: keys.viewingPrivKey,
+    spendingPubKey: keys.spendingPubKey,
+  };
 }
 
 // ========== Claim Preparation (Spending Key Required) ==========
@@ -426,14 +657,17 @@ export async function prepareClaimInputs(
 /**
  * Parse a StealthAnnouncement account data (single ephemeral key)
  *
- * Layout (98 bytes):
+ * Layout (91 bytes):
  * - discriminator (1 byte)
  * - bump (1 byte)
  * - ephemeral_pub (33 bytes) - Single Grumpkin key
- * - amount_sats (8 bytes) - verified BTC amount
+ * - encrypted_amount (8 bytes) - XOR encrypted with shared secret
  * - commitment (32 bytes)
  * - leaf_index (8 bytes)
  * - created_at (8 bytes)
+ *
+ * Note: The amount is encrypted and can only be decrypted by the recipient
+ * using their viewing key. Use scanAnnouncements() to decrypt.
  */
 export function parseStealthAnnouncement(
   data: Uint8Array
@@ -452,13 +686,8 @@ export function parseStealthAnnouncement(
   const ephemeralPub = data.slice(offset, offset + 33);
   offset += 33;
 
-  // Parse amount_sats (8 bytes, LE)
-  const amountView = new DataView(
-    data.buffer,
-    data.byteOffset + offset,
-    8
-  );
-  const amountSats = amountView.getBigUint64(0, true);
+  // Parse encrypted_amount (8 bytes, raw - will be decrypted by recipient)
+  const encryptedAmount = data.slice(offset, offset + 8);
   offset += 8;
 
   const commitment = data.slice(offset, offset + 32);
@@ -483,7 +712,7 @@ export function parseStealthAnnouncement(
 
   return {
     ephemeralPub,
-    amountSats,
+    encryptedAmount,
     commitment,
     leafIndex,
     createdAt,
@@ -497,13 +726,13 @@ export function announcementToScanFormat(
   announcement: OnChainStealthAnnouncement
 ): {
   ephemeralPub: Uint8Array;
-  amountSats: bigint;
+  encryptedAmount: Uint8Array;
   commitment: Uint8Array;
   leafIndex: number;
 } {
   return {
     ephemeralPub: announcement.ephemeralPub,
-    amountSats: announcement.amountSats,
+    encryptedAmount: announcement.encryptedAmount,
     commitment: announcement.commitment,
     leafIndex: announcement.leafIndex,
   };
@@ -562,7 +791,7 @@ export async function scanByZkeyName(
   connection: ConnectionAdapter,
   announcements: {
     ephemeralPub: Uint8Array;
-    amountSats: bigint;
+    encryptedAmount: Uint8Array;
     commitment: Uint8Array;
     leafIndex: number;
   }[],

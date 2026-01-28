@@ -8,10 +8,16 @@
 //! - No recipient hint (prevents linking deposits to same recipient)
 //! - Single ephemeral pubkey: Grumpkin for stealth address derivation
 //! - Viewing key can detect but CANNOT derive stealth private key
+//! - Amount is ENCRYPTED with shared secret (only recipient can decrypt)
 //!
 //! Stealth Address Flow:
 //! - Sender: stealthPub = spendingPub + hash(ECDH(ephemeral, viewingPub)) * G
 //! - Recipient: stealthPriv = spendingPriv + hash(ECDH(viewingPriv, ephemeralPub))
+//!
+//! Amount Encryption:
+//! - encryption_key = SHA256(shared_secret || "amount")[0..8]
+//! - encrypted_amount = amount_sats XOR encryption_key
+//! - Only recipient with viewing key can derive shared_secret and decrypt
 
 use pinocchio::program_error::ProgramError;
 
@@ -24,14 +30,14 @@ pub const STEALTH_ANNOUNCEMENT_DISCRIMINATOR: u8 = 0x08;
 /// - discriminator (1 byte)
 /// - bump (1 byte)
 /// - ephemeral_pub (33 bytes, Grumpkin compressed)
-/// - amount_sats (8 bytes, verified from BTC tx)
+/// - encrypted_amount (8 bytes, XOR encrypted with shared secret)
 /// - commitment (32 bytes)
 /// - leaf_index (8 bytes, position in Merkle tree)
 /// - created_at (8 bytes)
 pub const STEALTH_ANNOUNCEMENT_SIZE: usize = 1 + // discriminator
     1 + // bump
     33 + // ephemeral_pub (single Grumpkin key)
-    8 + // amount_sats (verified from BTC tx, stored directly)
+    8 + // encrypted_amount (XOR with SHA256(shared_secret || "amount")[0..8])
     32 + // commitment
     8 + // leaf_index (position in Merkle tree)
     8; // created_at = 91 bytes
@@ -48,8 +54,9 @@ pub const STEALTH_ANNOUNCEMENT_SIZE: usize = 1 + // discriminator
 /// - Spending key required for stealthPriv and nullifier derivation
 ///
 /// Security Properties:
-/// - Amount stored directly (BTC amount is public on Bitcoin blockchain)
-/// - Commitment = Poseidon2(stealthPub.x, amount)
+/// - Amount is ENCRYPTED (only recipient can decrypt with viewing key)
+/// - Commitment = Poseidon2(stealthPub.x, amount) binds the actual amount
+/// - ZK proof guarantees amount conservation without revealing value
 ///
 /// PDA: [b"stealth", ephemeral_pub]
 #[repr(C)]
@@ -65,9 +72,11 @@ pub struct StealthAnnouncement {
     /// Then: stealthPub = spendingPub + hash(sharedSecret) * G
     pub ephemeral_pub: [u8; 33],
 
-    /// Amount in satoshis (verified from BTC transaction, stored directly)
-    /// No encryption needed - BTC amount is public on Bitcoin blockchain
-    amount_sats_bytes: [u8; 8],
+    /// Encrypted amount in satoshis
+    /// encryption_key = SHA256(shared_secret || "amount")[0..8]
+    /// encrypted_amount = amount_sats XOR encryption_key
+    /// Only recipient with viewing key can decrypt
+    encrypted_amount_bytes: [u8; 8],
 
     /// Commitment for Merkle tree verification
     /// commitment = Poseidon2(stealthPub.x, amount)
@@ -85,14 +94,14 @@ impl StealthAnnouncement {
     pub const SEED: &'static [u8] = b"stealth";
     pub const SIZE: usize = STEALTH_ANNOUNCEMENT_SIZE;
 
-    /// Get amount_sats as u64
-    pub fn amount_sats(&self) -> u64 {
-        u64::from_le_bytes(self.amount_sats_bytes)
+    /// Get encrypted_amount bytes (caller must decrypt with shared secret)
+    pub fn encrypted_amount(&self) -> [u8; 8] {
+        self.encrypted_amount_bytes
     }
 
-    /// Set amount_sats
-    pub fn set_amount_sats(&mut self, value: u64) {
-        self.amount_sats_bytes = value.to_le_bytes();
+    /// Set encrypted_amount bytes (caller must encrypt with shared secret first)
+    pub fn set_encrypted_amount(&mut self, value: [u8; 8]) {
+        self.encrypted_amount_bytes = value;
     }
 
     /// Get leaf_index as u64

@@ -324,11 +324,16 @@ export {
   isWalletAdapter,
   createStealthDeposit,
   scanAnnouncements,
+  scanAnnouncementsViewOnly,
+  exportViewOnlyKeys,
   prepareClaimInputs,
   parseStealthAnnouncement,
   announcementToScanFormat,
   scanByZkeyName,
   resolveZkeyName,
+  // Amount encryption (for advanced use cases)
+  encryptAmount,
+  decryptAmount,
   STEALTH_ANNOUNCEMENT_SIZE,
   STEALTH_ANNOUNCEMENT_DISCRIMINATOR,
   type StealthDeposit,
@@ -336,6 +341,8 @@ export {
   type ClaimInputs,
   type OnChainStealthAnnouncement,
   type ConnectionAdapter,
+  type ViewOnlyKeys,
+  type ViewOnlyScannedNote,
 } from "./stealth";
 
 // ==========================================================================

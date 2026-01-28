@@ -37,16 +37,21 @@ use crate::utils::{
 /// - input_nullifier_hash: [u8; 32] (To prevent double-spend)
 /// - output_commitment: [u8; 32] (New commitment for recipient)
 /// - ephemeral_pub: [u8; 33] (For recipient to scan)
-/// - amount_sats: u64 (Transfer amount)
+/// - encrypted_amount: [u8; 8] (XOR encrypted with shared secret)
 ///
 /// Total: 256 + 32 + 32 + 32 + 33 + 8 = 393 bytes
+///
+/// Note: Amount is encrypted by sender using:
+///   encryption_key = SHA256(shared_secret || "amount")[0..8]
+///   encrypted_amount = amount_sats.to_le_bytes() XOR encryption_key
+/// ZK proof guarantees amount conservation without revealing value.
 pub struct TransferStealthData {
     pub proof: [u8; PROOF_SIZE],
     pub merkle_root: [u8; 32],
     pub input_nullifier_hash: [u8; 32],
     pub output_commitment: [u8; 32],
     pub ephemeral_pub: [u8; 33],
-    pub amount_sats: u64,
+    pub encrypted_amount: [u8; 8],
 }
 
 impl TransferStealthData {
@@ -72,7 +77,8 @@ impl TransferStealthData {
         let mut ephemeral_pub = [0u8; 33];
         ephemeral_pub.copy_from_slice(&data[352..385]);
 
-        let amount_sats = u64::from_le_bytes(data[385..393].try_into().unwrap());
+        let mut encrypted_amount = [0u8; 8];
+        encrypted_amount.copy_from_slice(&data[385..393]);
 
         Ok(Self {
             proof,
@@ -80,7 +86,7 @@ impl TransferStealthData {
             input_nullifier_hash,
             output_commitment,
             ephemeral_pub,
-            amount_sats,
+            encrypted_amount,
         })
     }
 }
@@ -143,10 +149,8 @@ pub fn process_transfer_stealth(
     let accounts = TransferStealthAccounts::from_accounts(accounts)?;
     let ix_data = TransferStealthData::from_bytes(data)?;
 
-    // SECURITY: Validate non-zero amount
-    if ix_data.amount_sats == 0 {
-        return Err(ZVaultError::ZeroAmount.into());
-    }
+    // Note: Cannot validate amount here - it's encrypted
+    // ZK proof guarantees amount conservation (input == output)
 
     // SECURITY: Validate account owners BEFORE deserializing any data
     validate_program_owner(accounts.pool_state, program_id)?;
@@ -289,7 +293,7 @@ pub fn process_transfer_stealth(
 
         announcement.bump = stealth_bump;
         announcement.ephemeral_pub = ix_data.ephemeral_pub;
-        announcement.set_amount_sats(ix_data.amount_sats);
+        announcement.set_encrypted_amount(ix_data.encrypted_amount);
         announcement.commitment = ix_data.output_commitment;
         announcement.set_created_at(clock.unix_timestamp);
 
