@@ -153,8 +153,8 @@ pub const REFUND_TIMELOCK_BLOCKS: u16 = 144;
 /// For testnet (faster testing): 6 blocks ≈ 1 hour
 pub const REFUND_TIMELOCK_BLOCKS_TESTNET: u16 = 6;
 
-/// Required confirmations for admin sweep
-pub const ADMIN_SWEEP_CONFIRMATIONS: u32 = 2;
+/// Required confirmations for admin sweep (devnet: 1, production: 2+)
+pub const ADMIN_SWEEP_CONFIRMATIONS: u32 = 1;
 
 /// SPV: Required block confirmations (reduced to 1 for demo/testing)
 pub const SPV_REQUIRED_CONFIRMATIONS: u64 = 1;
