@@ -65,7 +65,7 @@ import {
 } from "./grumpkin";
 import type { StealthMetaAddress, ZVaultKeys, WalletSignerAdapter } from "./keys";
 import { deriveKeysFromWallet, parseStealthMetaAddress, constantTimeCompare } from "./keys";
-import { lookupZkeyName, type ZkeyStealthAddress } from "./name-registry";
+import { lookupZkeySubdomain, type StealthMetaAddress as SnsStealthAddress } from "./sns-subdomain";
 import {
   poseidon2Hash,
   computeNullifier as poseidon2ComputeNullifier,
@@ -762,23 +762,22 @@ export interface ConnectionAdapter {
   ) => Promise<{ data: Uint8Array } | null>;
 }
 
-// ========== Scan by .zkey Name ==========
+// ========== Scan by .zkey.sol Name (SNS Subdomain) ==========
 
 /**
- * Scan stealth announcements for deposits sent to a .zkey name
+ * Scan stealth announcements for deposits sent to a .zkey.sol name
  *
- * Combines name lookup + scanning in one call. Verifies that the provided
- * keys match the registered .zkey name before scanning.
+ * Combines SNS subdomain lookup + scanning in one call. Verifies that the
+ * provided keys match the registered .zkey.sol name before scanning.
  *
  * IMPORTANT: Scanning requires the viewing private key. This function
- * verifies that your spending public key matches the registered .zkey name,
+ * verifies that your spending public key matches the registered .zkey.sol name,
  * then scans using your viewing key.
  *
  * @param keys - User's full ZVaultKeys (spending + viewing keys required)
- * @param expectedName - The .zkey name to verify ownership (e.g., "alice" or "alice.zkey")
- * @param connection - Solana connection adapter for account lookups
+ * @param expectedName - The .zkey.sol name to verify ownership (e.g., "alice" or "alice.zkey.sol")
+ * @param connection - Solana connection (must have getAccountInfo method)
  * @param announcements - Array of on-chain stealth announcements to scan
- * @param programId - Optional program ID (defaults to devnet)
  * @returns Array of found notes belonging to this address
  * @throws Error if name not found or keys don't match registered name
  *
@@ -791,7 +790,7 @@ export interface ConnectionAdapter {
  *   connection,
  *   announcements
  * );
- * console.log(`Found ${notes.length} deposits for alice.zkey`);
+ * console.log(`Found ${notes.length} deposits for alice.zkey.sol`);
  * ```
  */
 export async function scanByZkeyName(
@@ -803,20 +802,19 @@ export async function scanByZkeyName(
     encryptedAmount: Uint8Array;
     commitment: Uint8Array;
     leafIndex: number;
-  }[],
-  programId?: string
+  }[]
 ): Promise<ScannedNote[]> {
-  // 1. Lookup .zkey name to get registered stealth address
-  const zkeyAddress = await lookupZkeyName(connection, expectedName, programId);
+  // 1. Lookup .zkey.sol subdomain via SNS to get registered stealth address
+  const zkeyAddress = await lookupZkeySubdomain(connection as any, expectedName);
   if (!zkeyAddress) {
-    throw new Error(`Name "${expectedName}.zkey" not found`);
+    throw new Error(`Name "${expectedName}.zkey.sol" not found`);
   }
 
   // 2. Verify keys match registered name
   const userSpendingPub = pointToCompressedBytes(keys.spendingPubKey);
   if (!constantTimeCompare(userSpendingPub, zkeyAddress.spendingPubKey)) {
     throw new Error(
-      `Keys do not match "${expectedName}.zkey" registration. ` +
+      `Keys do not match "${expectedName}.zkey.sol" registration. ` +
       `The provided spending key does not match the registered spending key.`
     );
   }
@@ -825,7 +823,7 @@ export async function scanByZkeyName(
   const userViewingPub = pointToCompressedBytes(keys.viewingPubKey);
   if (!constantTimeCompare(userViewingPub, zkeyAddress.viewingPubKey)) {
     throw new Error(
-      `Keys do not match "${expectedName}.zkey" registration. ` +
+      `Keys do not match "${expectedName}.zkey.sol" registration. ` +
       `The provided viewing key does not match the registered viewing key.`
     );
   }
@@ -835,20 +833,18 @@ export async function scanByZkeyName(
 }
 
 /**
- * Look up a .zkey name and return the stealth address
+ * Look up a .zkey.sol name and return the stealth address
  *
- * Convenience re-export that doesn't require keys (for sending only).
+ * Uses Solana Name Service (SNS) subdomains for lookup.
  * For scanning deposits, use scanByZkeyName() which requires keys.
  *
- * @param connection - Solana connection adapter
- * @param name - The .zkey name to look up
- * @param programId - Optional program ID
+ * @param connection - Solana connection
+ * @param name - The .zkey.sol name to look up (e.g., "alice" or "alice.zkey.sol")
  * @returns Stealth address or null if not found
  */
 export async function resolveZkeyName(
   connection: ConnectionAdapter,
-  name: string,
-  programId?: string
-): Promise<ZkeyStealthAddress | null> {
-  return lookupZkeyName(connection, name, programId);
+  name: string
+): Promise<StealthMetaAddress | null> {
+  return lookupZkeySubdomain(connection as any, name);
 }

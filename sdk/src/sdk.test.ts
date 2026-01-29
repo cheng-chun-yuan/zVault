@@ -242,7 +242,7 @@ describe("NAME REGISTRY", () => {
   test("hashName() is deterministic", () => {
     expect(hashName("alice")).toEqual(hashName("alice"));
     expect(hashName("alice")).not.toEqual(hashName("bob"));
-    expect(hashName("alice")).toEqual(hashName("Alice.zkey")); // normalizes
+    expect(hashName("alice")).toEqual(hashName("Alice.zkey.sol")); // normalizes
   });
 
   test("buildRegisterNameData() creates valid instruction", () => {

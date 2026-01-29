@@ -1,18 +1,18 @@
 /**
- * Name Registry utilities for ZVault
+ * Name Registry utilities for ZVault (LEGACY - Custom Registry)
  *
- * Provides on-chain lookup for .zkey names (human-readable stealth addresses).
- * Names map to (spendingPubKey, viewingPubKey) for easy stealth sends.
+ * @deprecated This module uses the legacy custom name registry.
+ * For new integrations, use SNS subdomains via `sns-subdomain.ts`:
  *
- * Example:
  * ```typescript
- * import { lookupZkeyName } from '@zvault/sdk';
+ * // NEW: Use SNS subdomains (.zkey.sol)
+ * import { lookupZkeySubdomain, registerZkeySubdomain } from '@zvault/sdk';
  *
- * const entry = await lookupZkeyName(connection, 'alice');
- * if (entry) {
- *   console.log('Found alice.zkey:', entry.spendingPubKey);
- * }
+ * const stealth = await lookupZkeySubdomain(connection, 'alice');
+ * // Returns alice.zkey.sol stealth address
  * ```
+ *
+ * This module is kept for backwards compatibility with existing registrations.
  */
 
 import { sha256 } from "@noble/hashes/sha2.js";
@@ -96,21 +96,23 @@ export function isValidName(name: string): boolean {
 }
 
 /**
- * Normalize a name (lowercase, trim, remove .zkey suffix)
+ * Normalize a name (lowercase, trim, remove .zkey.sol or .zkey suffix)
  */
 export function normalizeName(name: string): string {
   let normalized = name.toLowerCase().trim();
-  if (normalized.endsWith(".zkey")) {
+  if (normalized.endsWith(".zkey.sol")) {
+    normalized = normalized.slice(0, -9);
+  } else if (normalized.endsWith(".zkey")) {
     normalized = normalized.slice(0, -5);
   }
   return normalized;
 }
 
 /**
- * Format a name with .zkey suffix
+ * Format a name with .zkey.sol suffix (SNS subdomain format)
  */
 export function formatZkeyName(name: string): string {
-  return `${normalizeName(name)}.zkey`;
+  return `${normalizeName(name)}.zkey.sol`;
 }
 
 /**
