@@ -24,9 +24,21 @@ export async function GET(
 ) {
   try {
     const { height } = await params;
+
+    // Validate input length to prevent DoS
+    if (!height || height.length > 10) {
+      return NextResponse.json(
+        { exists: false, error: "Invalid block height" },
+        { status: 400 }
+      );
+    }
+
     const blockHeight = parseInt(height, 10);
 
-    if (isNaN(blockHeight)) {
+    // Validate block height range (0 to max reasonable Bitcoin block height)
+    // Bitcoin block time ~10 min, so max ~50M blocks in 1000 years
+    const MAX_BLOCK_HEIGHT = 100_000_000;
+    if (isNaN(blockHeight) || blockHeight < 0 || blockHeight > MAX_BLOCK_HEIGHT) {
       return NextResponse.json(
         { exists: false, error: "Invalid block height" },
         { status: 400 }

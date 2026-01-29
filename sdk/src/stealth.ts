@@ -692,22 +692,32 @@ export function parseStealthAnnouncement(
   const commitment = data.slice(offset, offset + 32);
   offset += 32;
 
-  // Parse leaf_index (8 bytes, LE)
+  // Parse leaf_index (8 bytes, LE) with overflow check
   const leafIndexView = new DataView(
     data.buffer,
     data.byteOffset + offset,
     8
   );
-  const leafIndex = Number(leafIndexView.getBigUint64(0, true));
+  const leafIndexBigInt = leafIndexView.getBigUint64(0, true);
+  // Check for overflow - leaf index should fit in safe integer range
+  if (leafIndexBigInt > BigInt(Number.MAX_SAFE_INTEGER)) {
+    throw new Error("Leaf index overflow - value exceeds safe integer range");
+  }
+  const leafIndex = Number(leafIndexBigInt);
   offset += 8;
 
-  // Parse created_at (8 bytes, LE)
+  // Parse created_at (8 bytes, LE) with overflow check
   const createdAtView = new DataView(
     data.buffer,
     data.byteOffset + offset,
     8
   );
-  const createdAt = Number(createdAtView.getBigInt64(0, true));
+  const createdAtBigInt = createdAtView.getBigInt64(0, true);
+  // Clamp timestamp to safe range (negative timestamps are invalid)
+  const maxSafeTimestamp = BigInt(Number.MAX_SAFE_INTEGER);
+  const createdAt = createdAtBigInt < 0n ? 0 :
+    createdAtBigInt > maxSafeTimestamp ? Number.MAX_SAFE_INTEGER :
+    Number(createdAtBigInt);
 
   return {
     ephemeralPub,

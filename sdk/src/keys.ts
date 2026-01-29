@@ -44,6 +44,7 @@
  */
 
 import { sha256 } from "@noble/hashes/sha2.js";
+import { pbkdf2 } from "@noble/hashes/pbkdf2";
 import {
   scalarFromBytes,
   pointMul,
@@ -372,10 +373,10 @@ export function createDelegatedViewKey(
  * @param password - Password for encryption (optional, if not provided returns unencrypted - NOT RECOMMENDED)
  * @returns Encrypted JSON string
  */
-export function serializeDelegatedViewKey(
+export async function serializeDelegatedViewKey(
   key: DelegatedViewKey,
   password?: string
-): string {
+): Promise<string> {
   // Convert bigint to bytes for serialization
   const viewingPrivKeyBytes = scalarToBytes(key.viewingPrivKey);
 
@@ -396,36 +397,55 @@ export function serializeDelegatedViewKey(
     return JSON.stringify(obj);
   }
 
-  // Derive encryption key from password using SHA256
+  // Derive encryption key from password using PBKDF2 with 100,000 iterations
   const passwordBytes = new TextEncoder().encode(password);
   const salt = new Uint8Array(16);
   crypto.getRandomValues(salt);
 
-  // Simple PBKDF: key = SHA256(password || salt)
-  const keyMaterial = concatBytes(passwordBytes, salt);
-  const encryptionKey = sha256(keyMaterial);
+  // PBKDF2-SHA256 with 100,000 iterations (OWASP recommendation)
+  const PBKDF2_ITERATIONS = 100_000;
+  const encryptionKey = pbkdf2(sha256, passwordBytes, salt, { c: PBKDF2_ITERATIONS, dkLen: 32 });
 
-  // Generate nonce for XOR encryption
-  const nonce = new Uint8Array(32);
+  // Generate 12-byte nonce for AES-GCM (standard size)
+  const nonce = new Uint8Array(12);
   crypto.getRandomValues(nonce);
 
-  // Encrypt viewing private key: ciphertext = privKey XOR SHA256(encryptionKey || nonce)
-  const xorKey = sha256(concatBytes(encryptionKey, nonce));
-  const encryptedPrivKey = new Uint8Array(32);
-  for (let i = 0; i < 32; i++) {
-    encryptedPrivKey[i] = viewingPrivKeyBytes[i] ^ xorKey[i];
-  }
+  // Use Web Crypto API for AES-GCM authenticated encryption
+  // Create proper ArrayBuffer copies to satisfy TypeScript's strict type checking
+  const keyBuffer = encryptionKey.buffer.slice(
+    encryptionKey.byteOffset,
+    encryptionKey.byteOffset + encryptionKey.byteLength
+  ) as ArrayBuffer;
+  const nonceBuffer = nonce.buffer.slice(
+    nonce.byteOffset,
+    nonce.byteOffset + nonce.byteLength
+  ) as ArrayBuffer;
+  const dataBuffer = viewingPrivKeyBytes.buffer.slice(
+    viewingPrivKeyBytes.byteOffset,
+    viewingPrivKeyBytes.byteOffset + viewingPrivKeyBytes.byteLength
+  ) as ArrayBuffer;
 
-  // Compute MAC: SHA256(encryptionKey || encryptedPrivKey)
-  const mac = sha256(concatBytes(encryptionKey, encryptedPrivKey));
+  const cryptoKey = await crypto.subtle.importKey(
+    "raw",
+    keyBuffer,
+    { name: "AES-GCM" },
+    false,
+    ["encrypt"]
+  );
+
+  const ciphertext = await crypto.subtle.encrypt(
+    { name: "AES-GCM", iv: nonceBuffer },
+    cryptoKey,
+    dataBuffer
+  );
 
   const obj = {
-    version: 3,
+    version: 4, // New version for AES-GCM encryption
     encrypted: true,
     salt: bytesToHex(salt),
     nonce: bytesToHex(nonce),
-    ciphertext: bytesToHex(encryptedPrivKey),
-    mac: bytesToHex(mac),
+    ciphertext: bytesToHex(new Uint8Array(ciphertext)),
+    iterations: PBKDF2_ITERATIONS,
     permissions: key.permissions,
     expiresAt: key.expiresAt,
     label: key.label,
@@ -436,15 +456,22 @@ export function serializeDelegatedViewKey(
 /**
  * Deserialize a delegated viewing key from JSON
  *
+ * Supports both version 3 (legacy XOR, deprecated) and version 4 (AES-GCM) formats.
+ *
  * @param json - Serialized viewing key (encrypted or unencrypted)
  * @param password - Password for decryption (required if encrypted)
  * @returns Delegated viewing key
  */
-export function deserializeDelegatedViewKey(
+export async function deserializeDelegatedViewKey(
   json: string,
   password?: string
-): DelegatedViewKey {
-  const obj = JSON.parse(json);
+): Promise<DelegatedViewKey> {
+  let obj;
+  try {
+    obj = JSON.parse(json);
+  } catch {
+    throw new Error("Invalid delegated view key format");
+  }
 
   if (!obj.encrypted) {
     // Unencrypted format
@@ -457,7 +484,6 @@ export function deserializeDelegatedViewKey(
     };
   }
 
-  // Encrypted format (version 2 or 3)
   if (!password) {
     throw new Error("Password required to decrypt viewing key");
   }
@@ -465,10 +491,60 @@ export function deserializeDelegatedViewKey(
   const salt = hexToBytes(obj.salt);
   const nonce = hexToBytes(obj.nonce);
   const ciphertext = hexToBytes(obj.ciphertext);
+  const passwordBytes = new TextEncoder().encode(password);
+
+  // Version 4: AES-GCM with PBKDF2
+  if (obj.version === 4) {
+    const iterations = obj.iterations || 100_000;
+    const encryptionKey = pbkdf2(sha256, passwordBytes, salt, { c: iterations, dkLen: 32 });
+
+    // Create proper ArrayBuffer copies to satisfy TypeScript's strict type checking
+    const keyBuffer = encryptionKey.buffer.slice(
+      encryptionKey.byteOffset,
+      encryptionKey.byteOffset + encryptionKey.byteLength
+    ) as ArrayBuffer;
+    const nonceBuffer = nonce.buffer.slice(
+      nonce.byteOffset,
+      nonce.byteOffset + nonce.byteLength
+    ) as ArrayBuffer;
+    const ciphertextBuffer = ciphertext.buffer.slice(
+      ciphertext.byteOffset,
+      ciphertext.byteOffset + ciphertext.byteLength
+    ) as ArrayBuffer;
+
+    const cryptoKey = await crypto.subtle.importKey(
+      "raw",
+      keyBuffer,
+      { name: "AES-GCM" },
+      false,
+      ["decrypt"]
+    );
+
+    try {
+      const plaintext = await crypto.subtle.decrypt(
+        { name: "AES-GCM", iv: nonceBuffer },
+        cryptoKey,
+        ciphertextBuffer
+      );
+      return {
+        viewingPrivKey: scalarFromBytes(new Uint8Array(plaintext)),
+        permissions: obj.permissions,
+        expiresAt: obj.expiresAt,
+        label: obj.label,
+      };
+    } catch {
+      throw new Error("Invalid password or corrupted data");
+    }
+  }
+
+  // Version 2/3: Legacy XOR encryption (deprecated, for backward compatibility)
+  console.warn(
+    "WARNING: Decrypting legacy format (version 2/3). " +
+    "Re-encrypt with a new password to upgrade to secure format."
+  );
   const storedMac = hexToBytes(obj.mac);
 
-  // Derive encryption key
-  const passwordBytes = new TextEncoder().encode(password);
+  // Derive encryption key (legacy method)
   const keyMaterial = concatBytes(passwordBytes, salt);
   const encryptionKey = sha256(keyMaterial);
 
@@ -478,7 +554,7 @@ export function deserializeDelegatedViewKey(
     throw new Error("Invalid password or corrupted data");
   }
 
-  // Decrypt viewing private key
+  // Decrypt viewing private key (legacy XOR method)
   const xorKey = sha256(concatBytes(encryptionKey, nonce));
   const viewingPrivKeyBytes = new Uint8Array(32);
   for (let i = 0; i < 32; i++) {

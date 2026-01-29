@@ -228,8 +228,17 @@ export function parseNameRegistry(
   const createdAtView = new DataView(createdAtBytes.buffer, createdAtBytes.byteOffset, 8);
   const updatedAtView = new DataView(updatedAtBytes.buffer, updatedAtBytes.byteOffset, 8);
 
-  const createdAt = new Date(Number(createdAtView.getBigInt64(0, true)) * 1000);
-  const updatedAt = new Date(Number(updatedAtView.getBigInt64(0, true)) * 1000);
+  // Safe BigInt to Number conversion with overflow check
+  const createdAtBigInt = createdAtView.getBigInt64(0, true);
+  const updatedAtBigInt = updatedAtView.getBigInt64(0, true);
+
+  // Check for overflow before converting to Number (timestamps should be reasonable)
+  const MAX_SAFE_TIMESTAMP = BigInt(Number.MAX_SAFE_INTEGER);
+  const createdAtNum = createdAtBigInt > MAX_SAFE_TIMESTAMP ? Number.MAX_SAFE_INTEGER : Number(createdAtBigInt);
+  const updatedAtNum = updatedAtBigInt > MAX_SAFE_TIMESTAMP ? Number.MAX_SAFE_INTEGER : Number(updatedAtBigInt);
+
+  const createdAt = new Date(createdAtNum * 1000);
+  const updatedAt = new Date(updatedAtNum * 1000);
 
   return {
     name: name ? normalizeName(name) : "",

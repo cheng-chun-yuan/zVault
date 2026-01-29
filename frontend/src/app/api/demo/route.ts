@@ -19,8 +19,9 @@ function getAdminKeypair(): Keypair | null {
   try {
     const secretKey = JSON.parse(process.env.ADMIN_KEYPAIR);
     return Keypair.fromSecretKey(Uint8Array.from(secretKey));
-  } catch (error) {
-    console.error("[Demo API] Failed to parse ADMIN_KEYPAIR:", error);
+  } catch {
+    // Don't log error details - could expose key format information
+    console.error("[Demo API] Failed to parse ADMIN_KEYPAIR");
     return null;
   }
 }
@@ -38,22 +39,22 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // Validate stealth mode params
-    if (!ephemeralPub || typeof ephemeralPub !== "string" || ephemeralPub.length !== 66) {
+    // Validate stealth mode params with proper hex validation
+    if (!isValidHex(ephemeralPub, 66)) {
       return NextResponse.json(
-        { success: false, error: "Invalid ephemeralPub. Must be 66 hex characters (33 bytes)" },
+        { success: false, error: "Invalid ephemeralPub. Must be 66 valid hex characters (33 bytes)" },
         { status: 400 }
       );
     }
-    if (!commitment || typeof commitment !== "string" || commitment.length !== 64) {
+    if (!isValidHex(commitment, 64)) {
       return NextResponse.json(
-        { success: false, error: "Invalid commitment. Must be 64 hex characters (32 bytes)" },
+        { success: false, error: "Invalid commitment. Must be 64 valid hex characters (32 bytes)" },
         { status: 400 }
       );
     }
-    if (!encryptedAmount || typeof encryptedAmount !== "string" || encryptedAmount.length !== 16) {
+    if (!isValidHex(encryptedAmount, 16)) {
       return NextResponse.json(
-        { success: false, error: "Invalid encryptedAmount. Must be 16 hex characters (8 bytes)" },
+        { success: false, error: "Invalid encryptedAmount. Must be 16 valid hex characters (8 bytes)" },
         { status: 400 }
       );
     }
@@ -100,27 +101,43 @@ export async function POST(request: NextRequest) {
         message: "Demo stealth deposit added on-chain",
       });
     } catch (txError: unknown) {
+      // Log full error server-side for debugging, but don't expose to client
       console.error("[Demo API] Transaction failed:", txError);
-      const errorMessage = txError instanceof Error ? txError.message : "Transaction failed";
 
+      // Return generic error message to avoid leaking implementation details
       return NextResponse.json(
-        { success: false, error: errorMessage },
+        { success: false, error: "Transaction processing failed. Please try again." },
         { status: 500 }
       );
     }
   } catch (error) {
+    // Log full error server-side for debugging
     console.error("[Demo API] Error:", error);
+
+    // Return generic error message to avoid leaking implementation details
     return NextResponse.json(
       {
         success: false,
-        error: error instanceof Error ? error.message : "Internal server error",
+        error: "Internal server error",
       },
       { status: 500 }
     );
   }
 }
 
-// Convert hex string to bytes
+/**
+ * Validate hex string format
+ */
+function isValidHex(hex: string, expectedLength: number): boolean {
+  if (typeof hex !== "string" || hex.length !== expectedLength) {
+    return false;
+  }
+  return /^[0-9a-fA-F]+$/.test(hex);
+}
+
+/**
+ * Convert hex string to bytes (assumes already validated)
+ */
 function hexToBytes(hex: string): Uint8Array {
   const bytes = new Uint8Array(hex.length / 2);
   for (let i = 0; i < hex.length; i += 2) {

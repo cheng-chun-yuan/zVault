@@ -279,10 +279,15 @@ export function deserializeDeposit(data: SerializedDeposit): PendingDeposit {
 }
 
 /**
- * Generate a unique ID for a deposit
+ * Generate a unique ID for a deposit using cryptographically secure random
  */
 export function generateDepositId(): string {
   const timestamp = Date.now().toString(36);
-  const random = Math.random().toString(36).substring(2, 10);
+  // Use crypto.getRandomValues for unpredictable random bytes
+  const randomBytes = new Uint8Array(8);
+  crypto.getRandomValues(randomBytes);
+  const random = Array.from(randomBytes)
+    .map((b) => b.toString(16).padStart(2, "0"))
+    .join("");
   return `dep_${timestamp}_${random}`;
 }

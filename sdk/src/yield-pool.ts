@@ -692,10 +692,19 @@ export function parseStealthPoolAnnouncement(
   const poolCommitment = data.slice(offset, offset + 32);
   offset += 32;
 
-  const leafIndex = Number(view.getBigUint64(offset, true));
+  // Safe BigInt to Number conversion with overflow check
+  const leafIndexBigInt = view.getBigUint64(offset, true);
+  if (leafIndexBigInt > BigInt(Number.MAX_SAFE_INTEGER)) {
+    throw new Error("Leaf index overflow - value exceeds safe integer range");
+  }
+  const leafIndex = Number(leafIndexBigInt);
   offset += 8;
 
-  const createdAt = Number(view.getBigInt64(offset, true));
+  const createdAtBigInt = view.getBigInt64(offset, true);
+  const maxSafeTimestamp = BigInt(Number.MAX_SAFE_INTEGER);
+  const createdAt = createdAtBigInt < 0n ? 0 :
+    createdAtBigInt > maxSafeTimestamp ? Number.MAX_SAFE_INTEGER :
+    Number(createdAtBigInt);
 
   return {
     poolId: new Uint8Array(poolId),
@@ -721,7 +730,14 @@ export function parseYieldPool(data: Uint8Array): YieldPoolConfig | null {
   const poolId = data.slice(4, 12);
   const yieldRateBps = view.getUint16(12, true);
   const currentEpoch = view.getBigUint64(36, true);
-  const epochDuration = Number(view.getBigInt64(44, true));
+
+  // Safe BigInt to Number conversion for epochDuration
+  const epochDurationBigInt = view.getBigInt64(44, true);
+  const maxSafeDuration = BigInt(Number.MAX_SAFE_INTEGER);
+  const epochDuration = epochDurationBigInt < 0n ? 0 :
+    epochDurationBigInt > maxSafeDuration ? Number.MAX_SAFE_INTEGER :
+    Number(epochDurationBigInt);
+
   const totalPrincipal = view.getBigUint64(52, true);
   const paused = (data[2] & 1) !== 0;
 
