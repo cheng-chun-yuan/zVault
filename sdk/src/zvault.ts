@@ -7,7 +7,6 @@
  * - deposit() - Generate deposit credentials (taproot address + claim link)
  * - claimNote() - Claim zkBTC tokens with ZK proof
  * - claimPublic() - Claim zkBTC to public wallet (reveals amount)
- * - sendStealth() - Send to specific recipient via stealth ECDH
  *
  * ## TRANSFER (zkBTC → Someone)
  * - splitNote() - Split one note into two outputs
@@ -55,16 +54,13 @@ import {
   withdraw as apiWithdraw,
   claimNote as apiClaimNote,
   splitNote as apiSplitNote,
-  createClaimLinkFromNote as apiCreateClaimLink,
-  sendStealth as apiSendStealth,
   type DepositResult,
   type WithdrawResult,
   type ClaimResult as ApiClaimResultType,
   type SplitResult as ApiSplitResultType,
-  type StealthResult,
   type ApiClientConfig,
-  type StealthMetaAddress,
 } from "./api";
+import { type StealthMetaAddress } from "./keys";
 
 // Re-export program ID from pda module
 export { ZVAULT_PROGRAM_ID } from "./pda";
@@ -219,17 +215,6 @@ export class ZVaultClient {
     return apiClaimNote(this.getApiConfig(), note, merkleProof);
   }
 
-  /**
-   * Send to specific recipient via dual-key ECDH (for new deposits)
-   */
-  async sendStealth(
-    recipientMeta: StealthMetaAddress,
-    amountSats: bigint,
-    leafIndex: number = 0
-  ): Promise<StealthResult> {
-    return apiSendStealth(this.getApiConfig(), recipientMeta, amountSats, leafIndex);
-  }
-
   // ==========================================================================
   // TRANSFER Functions (zkBTC → Someone)
   // ==========================================================================
@@ -246,7 +231,7 @@ export class ZVaultClient {
    * Create shareable claim link (off-chain)
    */
   createClaimLink(note: Note, baseUrl?: string): string {
-    return apiCreateClaimLink(note, baseUrl);
+    return createClaimLink(note, baseUrl);
   }
 
   // ==========================================================================
@@ -414,7 +399,6 @@ export function createClient(rpc: ApiClientConfig["rpc"]): ZVaultClient {
 export type {
   DepositResult,
   WithdrawResult,
-  StealthResult,
 } from "./api";
 
 export type { ClaimResult as ApiClaimResult } from "./api";

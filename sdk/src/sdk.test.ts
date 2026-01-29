@@ -2,8 +2,8 @@
  * zVault SDK Tests (Consolidated)
  *
  * Core tests for all SDK functionality:
- * - DEPOSIT: deposit, claimNote, claimPublic, sendStealth
- * - TRANSFER: splitNote, createClaimLinkFromNote
+ * - DEPOSIT: deposit, claimNote, claimPublic
+ * - TRANSFER: splitNote, createClaimLink
  * - WITHDRAW: withdraw
  * - KEYS: deriveKeysFromSeed, createStealthMetaAddress
  * - YIELD POOL: createStealthPoolDeposit, scanPoolAnnouncements
@@ -14,7 +14,7 @@ import { expect, test, describe } from "bun:test";
 import { address, createSolanaRpc, getProgramDerivedAddress, type Address } from "@solana/kit";
 
 // Core SDK imports
-import { depositToNote, claimNote, splitNote, sendStealth, createClaimLinkFromNote } from "./api";
+import { depositToNote, claimNote, splitNote } from "./api";
 import { generateNote, formatBtc, parseBtc } from "./note";
 import { createClaimLink, parseClaimLink } from "./claim-link";
 import { deriveKeysFromSeed, createStealthMetaAddress, encodeStealthMetaAddress, decodeStealthMetaAddress } from "./keys";
@@ -50,9 +50,8 @@ describe("DEPOSIT", () => {
     expect(d1.taprootAddress).not.toBe(d2.taprootAddress);
   });
 
-  test("claimNote/sendStealth functions exist", () => {
+  test("claimNote function exists", () => {
     expect(typeof claimNote).toBe("function");
-    expect(typeof sendStealth).toBe("function");
   });
 });
 
@@ -61,9 +60,9 @@ describe("DEPOSIT", () => {
 // ============================================================================
 
 describe("TRANSFER", () => {
-  test("createClaimLinkFromNote() creates parseable link", () => {
+  test("createClaimLink() creates parseable link", () => {
     const note = generateNote(50_000n);
-    const link = createClaimLinkFromNote(note);
+    const link = createClaimLink(note);
 
     expect(link).toContain("zvault.app/claim");
     const parsed = parseClaimLink(link);
@@ -306,7 +305,6 @@ describe("ZVaultClient", () => {
     // Deposit
     expect(typeof client.deposit).toBe("function");
     expect(typeof client.claimNote).toBe("function");
-    expect(typeof client.sendStealth).toBe("function");
 
     // Transfer
     expect(typeof client.splitNote).toBe("function");

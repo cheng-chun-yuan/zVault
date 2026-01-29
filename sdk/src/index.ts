@@ -13,18 +13,17 @@
  * - **claimNote**: Claim zkBTC tokens with ZK proof
  * - **claimPublic**: Claim zkBTC to public wallet (reveals amount)
  * - **claimPublicStealth**: Claim stealth note to public wallet
- * - **sendStealth**: Send to specific recipient via stealth ECDH (for new deposits)
  *
  * ### TRANSFER (zkBTC → Someone)
  * - **splitNote**: Split one note into two outputs
- * - **createClaimLinkFromNote**: Create shareable claim URL (off-chain)
+ * - **createClaimLink**: Create shareable claim URL (off-chain)
  *
  * ### WITHDRAW (zkBTC → BTC)
  * - **withdraw**: Request BTC withdrawal (burn zkBTC)
  *
  * ## Quick Start
  * ```typescript
- * import { deposit, claimNote, claimPublic, splitNote, createClaimLinkFromNote } from '@zvault/sdk';
+ * import { deposit, claimNote, claimPublic, splitNote, createClaimLink } from '@zvault/sdk';
  *
  * // 1. DEPOSIT: Generate credentials
  * const result = await deposit(100_000n); // 0.001 BTC
@@ -40,7 +39,7 @@
  * const { output1, output2 } = await splitNote(config, result.note, 50_000n);
  *
  * // 4. SEND: Via claim link
- * const link = createClaimLinkFromNote(output1);
+ * const link = createClaimLink(output1);
  * ```
  */
 
@@ -382,10 +381,10 @@ export {
 // ==========================================================================
 //
 // DEPOSIT (BTC → zkBTC):
-//   deposit, claimNote, claimPublic, claimPublicStealth, sendStealth
+//   deposit, claimNote, claimPublic, claimPublicStealth
 //
 // TRANSFER (zkBTC → Someone):
-//   splitNote, createClaimLinkFromNote
+//   splitNote
 //
 // WITHDRAW (zkBTC → BTC):
 //   withdraw
@@ -398,10 +397,8 @@ export {
   claimNote,
   claimPublic,
   claimPublicStealth,
-  sendStealth,
   // Transfer functions
   splitNote,
-  createClaimLinkFromNote,
   // Withdraw function
   withdraw,
 } from "./api";
@@ -413,7 +410,6 @@ export type {
   ClaimPublicResult,
   ClaimPublicStealthResult,
   SplitResult as SplitNoteResult,
-  StealthResult,
   ApiClientConfig,
 } from "./api";
 

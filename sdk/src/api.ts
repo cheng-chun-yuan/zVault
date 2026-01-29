@@ -8,11 +8,9 @@
  * - claimNote: Claim zkBTC tokens with ZK proof
  * - claimPublic: Claim zkBTC to public wallet (reveals amount)
  * - claimPublicStealth: Claim stealth note to public wallet
- * - sendStealth: Send to specific recipient via stealth ECDH (new deposit)
  *
  * TRANSFER (zkBTC → Someone):
  * - splitNote: Split one note into two outputs
- * - createClaimLink: Create shareable claim URL (off-chain)
  *
  * WITHDRAW (zkBTC → BTC):
  * - withdraw: Request BTC withdrawal (burn zkBTC)
@@ -151,19 +149,6 @@ export interface SplitResult {
   /** Nullifier hash of spent input */
   inputNullifierHash: Uint8Array;
 }
-
-/**
- * Result from sendStealth()
- */
-export interface StealthResult {
-  /** Transaction signature */
-  signature: string;
-  /** Ephemeral public key (for recipient to scan) */
-  ephemeralPubKey: Uint8Array;
-  /** Leaf index in commitment tree */
-  leafIndex: number;
-}
-
 
 /**
  * Signer interface for v2 transactions
@@ -1024,73 +1009,6 @@ export async function splitNote(
     output2,
     inputNullifierHash: inputNote.nullifierHashBytes,
   };
-}
-
-// ============================================================================
-// 5. CREATE_CLAIM_LINK (Off-chain URL Encoding)
-// ============================================================================
-
-/**
- * Create a shareable claim link (off-chain)
- *
- * Encodes a note into a shareable URL. Anyone with the link can claim.
- * This is purely client-side - no on-chain transaction.
- *
- * **Use case:** Share funds directly via messaging, email, QR code.
- *
- * @param note - Note to create link for
- * @param baseUrl - Base URL for the link
- * @returns Claim link URL
- *
- * @example
- * ```typescript
- * const link = createClaimLinkFromNote(myNote);
- * // => "https://zkbtc.app/claim?note=eyJhbW91bnQ..."
- *
- * // Share link with recipient
- * // Recipient calls: await claimNote(config, link);
- * ```
- */
-export function createClaimLinkFromNote(note: Note, baseUrl?: string): string {
-  return createClaimLink(note, baseUrl);
-}
-
-// ============================================================================
-// 6. SEND_STEALTH (ECDH Mode)
-// ============================================================================
-
-/**
- * Send to specific recipient via stealth address (dual-key ECDH)
- *
- * Creates an on-chain stealth announcement that only the recipient
- * can discover by scanning with their view key.
- *
- * **Flow:**
- * 1. Dual ECDH key exchange: Grumpkin (viewing) + Grumpkin (spending)
- * 2. Compute commitment using Poseidon2
- * 3. Create on-chain StealthAnnouncement
- * 4. Recipient scans announcements with view key
- * 5. Recipient prepares claim inputs with spending key
- *
- * @deprecated Use backend-managed stealth deposits via verify_stealth_deposit instead.
- * In the unified stealth model, announcements are created during BTC deposit verification.
- *
- * @param config - Client configuration
- * @param recipientMeta - Recipient's stealth meta-address (spending + viewing public keys)
- * @param amountSats - Amount in satoshis
- * @param leafIndex - Leaf index in commitment tree
- * @returns Stealth result
- */
-export async function sendStealth(
-  _config: ApiClientConfig,
-  _recipientMeta: StealthMetaAddress,
-  _amountSats: bigint,
-  _leafIndex: number = 0
-): Promise<StealthResult> {
-  throw new Error(
-    "sendStealth is deprecated. Use backend-managed stealth deposits via verify_stealth_deposit. " +
-    "In the unified stealth model, stealth announcements are created during BTC deposit verification."
-  );
 }
 
 // ============================================================================
