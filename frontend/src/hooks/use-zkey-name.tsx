@@ -2,21 +2,26 @@
 
 import { useState, useCallback, useEffect } from "react";
 import { useConnection, useWallet } from "@solana/wallet-adapter-react";
-import { PublicKey, Transaction } from "@solana/web3.js";
-import {
-  // SNS subdomain functions from SDK
-  isValidSubdomainName,
-  formatSubdomainName,
-  createSubdomainInstruction,
-  resolveSubdomain,
-  isSubdomainAvailable,
-  type ResolvedSubdomain,
-  type StealthMetaAddress,
-} from "@zvault/sdk";
+import { PublicKey, TransactionInstruction, Transaction } from "@solana/web3.js";
+import { sha256 } from "@noble/hashes/sha2.js";
 import { useZVaultKeys } from "./use-zvault";
 
+// Program ID for zVault
+const PROGRAM_ID = new PublicKey("DjnryiDxMsUY8pzYCgynVUGDgv45J9b3XbSDnp4qDYrq");
+
+// Constants
+const NAME_REGISTRY_SEED = "zkey";
+const NAME_REGISTRY_DISCRIMINATOR = 0x09;
+const REGISTER_NAME_DISCRIMINATOR = 17;
+
+interface NameRegistryEntry {
+  name: string;
+  owner: Uint8Array;
+  spendingPubKey: Uint8Array;
+  viewingPubKey: Uint8Array;
+}
+
 interface UseZkeyNameReturn {
-  // State
   registeredName: string | null;
   hasRegisteredName: boolean;
   isLoading: boolean;
@@ -24,29 +29,82 @@ interface UseZkeyNameReturn {
   isCheckingAvailability: boolean;
   isNameTaken: boolean;
   error: string | null;
-
-  // Actions
   lookupMyName: () => Promise<void>;
   registerName: (name: string) => Promise<boolean>;
-  lookupName: (name: string) => Promise<ResolvedSubdomain | null>;
+  lookupName: (name: string) => Promise<NameRegistryEntry | null>;
   checkAvailability: (name: string) => Promise<boolean>;
   verifyMyName: (name: string) => Promise<boolean>;
-
-  // Validation
   validateName: (name: string) => string | null;
   formatName: (name: string) => string;
 }
 
+// Hash name using SHA256
+function hashName(name: string): Uint8Array {
+  const normalized = name.toLowerCase().replace(/\.zkey\.sol$/, "").replace(/\.zkey$/, "");
+  return sha256(new TextEncoder().encode(normalized));
+}
+
+// Validate name
+function isValidName(name: string): boolean {
+  if (!name || name.length < 1 || name.length > 32) return false;
+  return /^[a-z0-9_]+$/.test(name);
+}
+
+// Normalize name
+function normalizeName(name: string): string {
+  return name.toLowerCase().replace(/\.zkey\.sol$/, "").replace(/\.zkey$/, "").trim();
+}
+
+// Format with .zkey.sol suffix
+function formatZkeyName(name: string): string {
+  return `${normalizeName(name)}.zkey.sol`;
+}
+
+// Get validation error
+function getNameValidationError(name: string): string | null {
+  if (!name) return "Name is required";
+  if (name.length < 1) return "Name must be at least 1 character";
+  if (name.length > 32) return "Name must be at most 32 characters";
+  if (!/^[a-z0-9_]+$/.test(name)) return "Name can only contain lowercase letters, numbers, and underscores";
+  return null;
+}
+
+// Parse name registry account data
+function parseNameRegistry(data: Uint8Array, name: string): NameRegistryEntry | null {
+  if (data.length < 100) return null;
+  if (data[0] !== NAME_REGISTRY_DISCRIMINATOR) return null;
+
+  return {
+    name,
+    owner: data.slice(34, 66),
+    spendingPubKey: data.slice(66, 99),
+    viewingPubKey: data.slice(99, 132),
+  };
+}
+
+// Build register name instruction data
+function buildRegisterNameData(
+  name: string,
+  spendingPubKey: Uint8Array,
+  viewingPubKey: Uint8Array
+): Uint8Array {
+  const nameBytes = new TextEncoder().encode(name);
+  const data = new Uint8Array(1 + 1 + nameBytes.length + 33 + 33);
+  let offset = 0;
+
+  data[offset++] = REGISTER_NAME_DISCRIMINATOR;
+  data[offset++] = nameBytes.length;
+  data.set(nameBytes, offset);
+  offset += nameBytes.length;
+  data.set(spendingPubKey, offset);
+  offset += 33;
+  data.set(viewingPubKey, offset);
+
+  return data;
+}
+
 /**
- * Hook for managing .zkey.sol name registration via SNS subdomains
- *
- * Uses Solana Name Service (SNS) subdomains for discoverability.
- * Example: alice.zkey.sol → stealth meta-address
- *
- * Benefits:
- * - Free on devnet (only gas fees)
- * - Leverages SNS ecosystem (150+ apps)
- * - Cross-chain compatible (MetaMask integration)
+ * Hook for managing .zkey.sol name registration
  */
 export function useZkeyName(): UseZkeyNameReturn {
   const { connection } = useConnection();
@@ -61,108 +119,81 @@ export function useZkeyName(): UseZkeyNameReturn {
   const [isNameTaken, setIsNameTaken] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  /**
-   * Validate a subdomain name
-   * Returns error message or null if valid
-   */
-  const validateName = useCallback((name: string): string | null => {
-    const clean = name.toLowerCase().replace(/\.zkey\.sol$/, "");
-
-    if (!clean) {
-      return "Name is required";
-    }
-    if (clean.length < 1) {
-      return "Name must be at least 1 character";
-    }
-    if (clean.length > 32) {
-      return "Name must be at most 32 characters";
-    }
-    if (!isValidSubdomainName(clean)) {
-      return "Name must be lowercase letters and numbers only (a-z, 0-9)";
-    }
-    return null;
+  // Derive PDA for a name
+  const deriveNamePDA = useCallback((name: string): [PublicKey, number] => {
+    const nameHash = hashName(name);
+    return PublicKey.findProgramAddressSync(
+      [Buffer.from(NAME_REGISTRY_SEED), Buffer.from(nameHash)],
+      PROGRAM_ID
+    );
   }, []);
 
-  /**
-   * Format name with .zkey.sol suffix
-   */
-  const formatName = useCallback((name: string): string => {
-    return formatSubdomainName(name);
-  }, []);
+  // Look up a name on-chain
+  const lookupName = useCallback(async (name: string): Promise<NameRegistryEntry | null> => {
+    try {
+      const normalized = normalizeName(name);
+      if (!isValidName(normalized)) return null;
 
-  /**
-   * Look up a name on SNS
-   */
-  const lookupName = useCallback(
-    async (name: string): Promise<ResolvedSubdomain | null> => {
-      try {
-        const clean = name.toLowerCase().replace(/\.zkey\.sol$/, "");
-        if (!isValidSubdomainName(clean)) {
-          return null;
-        }
+      const [pda] = deriveNamePDA(normalized);
+      const accountInfo = await connection.getAccountInfo(pda);
+      if (!accountInfo) return null;
 
-        const resolved = await resolveSubdomain(
-          { connection: connection as any },
-          clean
-        );
-        return resolved;
-      } catch (err) {
-        console.error("Failed to lookup name:", err);
-        return null;
-      }
-    },
-    [connection]
-  );
+      return parseNameRegistry(new Uint8Array(accountInfo.data), normalized);
+    } catch (err) {
+      console.error("Failed to lookup name:", err);
+      return null;
+    }
+  }, [connection, deriveNamePDA]);
 
-  /**
-   * Check if a name is available (not taken)
-   * Returns true if available, false if taken
-   */
-  const checkAvailability = useCallback(
-    async (name: string): Promise<boolean> => {
-      const clean = name.toLowerCase().replace(/\.zkey\.sol$/, "");
-      if (!isValidSubdomainName(clean)) {
-        setIsNameTaken(false);
-        return true;
-      }
+  // Check availability
+  const checkAvailability = useCallback(async (name: string): Promise<boolean> => {
+    const normalized = normalizeName(name);
+    if (!isValidName(normalized)) {
+      setIsNameTaken(false);
+      return true;
+    }
 
-      setIsCheckingAvailability(true);
-      try {
-        const available = await isSubdomainAvailable(
-          { connection: connection as any },
-          clean
-        );
-        setIsNameTaken(!available);
-        return available;
-      } catch (err) {
-        console.error("Failed to check name availability:", err);
-        setIsNameTaken(false);
-        return true;
-      } finally {
-        setIsCheckingAvailability(false);
-      }
-    },
-    [connection]
-  );
+    setIsCheckingAvailability(true);
+    try {
+      const existing = await lookupName(normalized);
+      const taken = existing !== null;
+      setIsNameTaken(taken);
+      return !taken;
+    } catch {
+      setIsNameTaken(false);
+      return true;
+    } finally {
+      setIsCheckingAvailability(false);
+    }
+  }, [lookupName]);
 
-  /**
-   * Look up if current wallet has a registered .zkey.sol subdomain
-   *
-   * Note: SNS doesn't have a direct "get subdomains by owner" query,
-   * so we can only detect registration if user provides the name.
-   */
+  // Look up if current wallet has a registered name
   const lookupMyName = useCallback(async () => {
-    if (!wallet.publicKey || !stealthAddress) {
-      return;
-    }
+    if (!wallet.publicKey || !stealthAddress) return;
 
     setIsLoading(true);
     setError(null);
 
     try {
-      // SNS doesn't support querying subdomains by owner directly
-      // User needs to verify their name using verifyMyName()
-      // For now, we just reset the state
+      const accounts = await connection.getProgramAccounts(PROGRAM_ID, {
+        filters: [
+          { dataSize: 180 },
+          { memcmp: { offset: 34, bytes: wallet.publicKey.toBase58() } },
+        ],
+      });
+
+      for (const { account } of accounts) {
+        const entry = parseNameRegistry(new Uint8Array(account.data), "");
+        if (entry) {
+          const entrySpendingHex = Buffer.from(entry.spendingPubKey).toString("hex");
+          const ourSpendingHex = Buffer.from(stealthAddress.spendingPubKey).toString("hex");
+          if (entrySpendingHex === ourSpendingHex) {
+            setHasRegisteredName(true);
+            return;
+          }
+        }
+      }
+
       setHasRegisteredName(false);
       setRegisteredName(null);
     } catch (err) {
@@ -171,161 +202,112 @@ export function useZkeyName(): UseZkeyNameReturn {
     } finally {
       setIsLoading(false);
     }
-  }, [wallet.publicKey, stealthAddress]);
+  }, [wallet.publicKey, stealthAddress, connection]);
 
-  /**
-   * Verify ownership of a specific .zkey.sol name
-   */
-  const verifyMyName = useCallback(
-    async (name: string): Promise<boolean> => {
-      if (!wallet.publicKey || !stealthAddress) {
-        return false;
-      }
+  // Verify ownership of a specific name
+  const verifyMyName = useCallback(async (name: string): Promise<boolean> => {
+    if (!wallet.publicKey || !stealthAddress) return false;
 
-      const clean = name.toLowerCase().replace(/\.zkey\.sol$/, "");
-      if (!isValidSubdomainName(clean)) {
-        return false;
-      }
+    const normalized = normalizeName(name);
+    if (!isValidName(normalized)) return false;
 
-      try {
-        const resolved = await lookupName(clean);
-        if (!resolved) {
-          return false;
-        }
+    try {
+      const entry = await lookupName(normalized);
+      if (!entry) return false;
 
-        // Check if this subdomain's stealth address matches ours
-        const resolvedSpendingHex = Buffer.from(resolved.stealthAddress.spendingPubKey).toString("hex");
-        const ourSpendingHex = Buffer.from(stealthAddress.spendingPubKey).toString("hex");
+      const entrySpendingHex = Buffer.from(entry.spendingPubKey).toString("hex");
+      const ourSpendingHex = Buffer.from(stealthAddress.spendingPubKey).toString("hex");
 
-        if (resolvedSpendingHex === ourSpendingHex) {
-          // Verified - this name belongs to us
-          setRegisteredName(clean);
-          setHasRegisteredName(true);
-          return true;
-        }
-
-        return false;
-      } catch (err) {
-        console.error("Failed to verify name:", err);
-        return false;
-      }
-    },
-    [wallet.publicKey, stealthAddress, lookupName]
-  );
-
-  /**
-   * Register a new .zkey.sol subdomain on SNS
-   */
-  const registerName = useCallback(
-    async (name: string): Promise<boolean> => {
-      if (!wallet.publicKey || !wallet.signTransaction || !stealthAddress) {
-        setError("Wallet not connected or keys not derived");
-        return false;
-      }
-
-      const clean = name.toLowerCase().replace(/\.zkey\.sol$/, "");
-      const validationError = validateName(clean);
-      if (validationError) {
-        setError(validationError);
-        return false;
-      }
-
-      setIsRegistering(true);
-      setError(null);
-
-      try {
-        // Check if name is available
-        const available = await isSubdomainAvailable(
-          { connection: connection as any },
-          clean
-        );
-        if (!available) {
-          setError(`Name "${formatSubdomainName(clean)}" is already taken`);
-          return false;
-        }
-
-        // Create stealth meta-address for storage
-        const stealthMeta: StealthMetaAddress = {
-          spendingPubKey: stealthAddress.spendingPubKey,
-          viewingPubKey: stealthAddress.viewingPubKey,
-        };
-
-        // Create subdomain instruction
-        const instructions = await createSubdomainInstruction(
-          { connection: connection as any },
-          {
-            name: clean,
-            owner: wallet.publicKey,
-            stealthAddress: stealthMeta,
-          }
-        );
-
-        // Build and send transaction
-        const transaction = new Transaction();
-        for (const ix of instructions) {
-          transaction.add(ix);
-        }
-        transaction.feePayer = wallet.publicKey;
-        const { blockhash, lastValidBlockHeight } = await connection.getLatestBlockhash();
-        transaction.recentBlockhash = blockhash;
-
-        const signed = await wallet.signTransaction(transaction);
-        const txid = await connection.sendRawTransaction(signed.serialize(), {
-          skipPreflight: false,
-          preflightCommitment: "confirmed",
-        });
-
-        // Wait for confirmation
-        const confirmation = await connection.confirmTransaction(
-          { signature: txid, blockhash, lastValidBlockHeight },
-          "confirmed"
-        );
-
-        if (confirmation.value.err) {
-          throw new Error(`Transaction failed: ${JSON.stringify(confirmation.value.err)}`);
-        }
-
-        // Registration successful
-        setRegisteredName(clean);
+      if (entrySpendingHex === ourSpendingHex) {
+        setRegisteredName(normalized);
         setHasRegisteredName(true);
-        console.log(`[zkey.sol] Registered: ${formatSubdomainName(clean)} (tx: ${txid})`);
         return true;
-      } catch (err) {
-        console.error("Failed to register name:", err);
-
-        const errorMessage = err instanceof Error ? err.message : String(err);
-
-        // Handle specific errors
-        if (errorMessage.includes("already been processed")) {
-          // Check if registration succeeded
-          try {
-            const resolved = await lookupName(clean);
-            if (resolved) {
-              const resolvedSpendingHex = Buffer.from(resolved.stealthAddress.spendingPubKey).toString("hex");
-              const ourSpendingHex = Buffer.from(stealthAddress.spendingPubKey).toString("hex");
-              if (resolvedSpendingHex === ourSpendingHex) {
-                setRegisteredName(clean);
-                setHasRegisteredName(true);
-                return true;
-              }
-            }
-          } catch {
-            // Ignore lookup errors
-          }
-          setError("Transaction already processed. Please try again.");
-          return false;
-        }
-
-        setError(errorMessage || "Failed to register name");
-        return false;
-      } finally {
-        setIsRegistering(false);
       }
-    },
-    [wallet, stealthAddress, connection, validateName, lookupName]
-  );
+      return false;
+    } catch {
+      return false;
+    }
+  }, [wallet.publicKey, stealthAddress, lookupName]);
 
-  // Check for existing name when wallet/keys change
+  // Register a new name
+  const registerName = useCallback(async (name: string): Promise<boolean> => {
+    if (!wallet.publicKey || !wallet.signTransaction || !stealthAddress) {
+      setError("Wallet not connected or keys not derived");
+      return false;
+    }
+
+    const normalized = normalizeName(name);
+    const validationError = getNameValidationError(normalized);
+    if (validationError) {
+      setError(validationError);
+      return false;
+    }
+
+    setIsRegistering(true);
+    setError(null);
+
+    try {
+      // Check if taken
+      const existing = await lookupName(normalized);
+      if (existing) {
+        setError(`Name "${formatZkeyName(normalized)}" is already registered`);
+        return false;
+      }
+
+      // Build instruction
+      const instructionData = buildRegisterNameData(
+        normalized,
+        stealthAddress.spendingPubKey,
+        stealthAddress.viewingPubKey
+      );
+
+      const [namePDA] = deriveNamePDA(normalized);
+
+      const instruction = new TransactionInstruction({
+        keys: [
+          { pubkey: namePDA, isSigner: false, isWritable: true },
+          { pubkey: wallet.publicKey, isSigner: true, isWritable: true },
+          { pubkey: new PublicKey("11111111111111111111111111111111"), isSigner: false, isWritable: false },
+        ],
+        programId: PROGRAM_ID,
+        data: Buffer.from(instructionData),
+      });
+
+      const transaction = new Transaction().add(instruction);
+      transaction.feePayer = wallet.publicKey;
+      const { blockhash, lastValidBlockHeight } = await connection.getLatestBlockhash();
+      transaction.recentBlockhash = blockhash;
+
+      const signed = await wallet.signTransaction(transaction);
+      const txid = await connection.sendRawTransaction(signed.serialize(), {
+        skipPreflight: false,
+        preflightCommitment: "confirmed",
+      });
+
+      const confirmation = await connection.confirmTransaction(
+        { signature: txid, blockhash, lastValidBlockHeight },
+        "confirmed"
+      );
+
+      if (confirmation.value.err) {
+        throw new Error(`Transaction failed: ${JSON.stringify(confirmation.value.err)}`);
+      }
+
+      setRegisteredName(normalized);
+      setHasRegisteredName(true);
+      console.log(`[zkey.sol] Registered: ${formatZkeyName(normalized)} (tx: ${txid})`);
+      return true;
+    } catch (err) {
+      console.error("Failed to register name:", err);
+      const errorMessage = err instanceof Error ? err.message : String(err);
+      setError(errorMessage || "Failed to register name");
+      return false;
+    } finally {
+      setIsRegistering(false);
+    }
+  }, [wallet, stealthAddress, connection, deriveNamePDA, lookupName]);
+
+  // Check for existing name on mount
   useEffect(() => {
     if (wallet.publicKey && stealthAddress) {
       lookupMyName();
@@ -348,7 +330,7 @@ export function useZkeyName(): UseZkeyNameReturn {
     lookupName,
     checkAvailability,
     verifyMyName,
-    validateName,
-    formatName,
+    validateName: getNameValidationError,
+    formatName: formatZkeyName,
   };
 }

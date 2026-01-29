@@ -23,7 +23,7 @@ import { createStealthPoolDeposit, scanPoolAnnouncements, calculateYield, calcul
 import { createEmptyMerkleProof, TREE_DEPTH } from "./merkle";
 import { poseidon2Hash } from "./poseidon2";
 import { generateKeyPair, pointMul, GRUMPKIN_GENERATOR, isOnCurve } from "./grumpkin";
-import { hashName, isValidName } from "./name-registry";
+import { buildRegisterNameData, hashName, isValidName, NAME_REGISTRY_SEED, ZVAULT_PROGRAM_ID } from "./name-registry";
 import { createClient, ZVaultClient } from "./zvault";
 
 // SNS subdomain imports
@@ -227,10 +227,10 @@ describe("YIELD POOL", () => {
 });
 
 // ============================================================================
-// 5. NAME VALIDATION (used by SNS subdomains)
+// 5. NAME REGISTRY (.zkey.sol)
 // ============================================================================
 
-describe("NAME VALIDATION", () => {
+describe("NAME REGISTRY", () => {
   test("isValidName() validates correctly", () => {
     expect(isValidName("alice")).toBe(true);
     expect(isValidName("bob123")).toBe(true);
@@ -243,6 +243,27 @@ describe("NAME VALIDATION", () => {
     expect(hashName("alice")).toEqual(hashName("alice"));
     expect(hashName("alice")).not.toEqual(hashName("bob"));
     expect(hashName("alice")).toEqual(hashName("Alice.zkey.sol")); // normalizes
+  });
+
+  test("buildRegisterNameData() creates valid instruction", () => {
+    const keys = deriveKeysFromSeed(TEST_SEED);
+    const meta = createStealthMetaAddress(keys);
+
+    const data = buildRegisterNameData("test", meta.spendingPubKey, meta.viewingPubKey);
+
+    expect(data[0]).toBe(17); // REGISTER_NAME discriminator
+    expect(data[1]).toBe(4);  // name length
+  });
+
+  test("PDA derivation works", async () => {
+    const nameHash = hashName("alice");
+    const [pda, bump] = await getProgramDerivedAddress({
+      seeds: [new TextEncoder().encode(NAME_REGISTRY_SEED), nameHash],
+      programAddress: address(ZVAULT_PROGRAM_ID),
+    });
+
+    expect(typeof pda).toBe("string");
+    expect(bump).toBeGreaterThanOrEqual(0);
   });
 });
 

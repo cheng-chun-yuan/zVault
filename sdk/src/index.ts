@@ -467,20 +467,29 @@ export {
 } from "./react";
 
 // ==========================================================================
-// Name Registry (DEPRECATED - Use SNS Subdomains instead)
+// Name Registry (.zkey.sol names)
 // ==========================================================================
-//
-// The custom name registry is deprecated. Use SNS subdomains (.zkey.sol):
-//   import { registerZkeySubdomain, lookupZkeySubdomain } from '@zvault/sdk';
-//
-// These exports are kept for backwards compatibility only.
 
 export {
-  // Validation (still useful)
+  // Lookup functions
+  lookupZkeyName,
+  lookupZkeyNameWithPDA,
+  parseNameRegistry,
+  // Validation
   isValidName,
   normalizeName,
   formatZkeyName,
   getNameValidationError,
+  hashName,
+  // Instruction builders
+  buildRegisterNameData,
+  buildUpdateNameData,
+  buildTransferNameData,
+  // Constants
+  MAX_NAME_LENGTH,
+  NAME_REGISTRY_SEED,
+  NAME_REGISTRY_DISCRIMINATOR,
+  NAME_REGISTRY_SIZE,
   // Types
   type NameRegistryEntry,
   type ZkeyStealthAddress,

@@ -1,18 +1,18 @@
 /**
- * Name Registry utilities for ZVault (LEGACY - Custom Registry)
+ * Name Registry utilities for ZVault (.zkey.sol names)
  *
- * @deprecated This module uses the legacy custom name registry.
- * For new integrations, use SNS subdomains via `sns-subdomain.ts`:
+ * Provides on-chain lookup for .zkey.sol names (human-readable stealth addresses).
+ * Names map to (spendingPubKey, viewingPubKey) for easy stealth sends.
  *
+ * Example:
  * ```typescript
- * // NEW: Use SNS subdomains (.zkey.sol)
- * import { lookupZkeySubdomain, registerZkeySubdomain } from '@zvault/sdk';
+ * import { lookupZkeyName } from '@zvault/sdk';
  *
- * const stealth = await lookupZkeySubdomain(connection, 'alice');
- * // Returns alice.zkey.sol stealth address
+ * const entry = await lookupZkeyName(connection, 'alice');
+ * if (entry) {
+ *   console.log('Found alice.zkey.sol:', entry.spendingPubKey);
+ * }
  * ```
- *
- * This module is kept for backwards compatibility with existing registrations.
  */
 
 import { sha256 } from "@noble/hashes/sha2.js";
