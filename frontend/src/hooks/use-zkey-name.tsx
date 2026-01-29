@@ -24,6 +24,7 @@ const PROGRAM_ID = new PublicKey(ZVAULT_PROGRAM_ID);
 interface UseZkeyNameReturn {
   // State
   registeredName: string | null;
+  hasRegisteredName: boolean;
   isLoading: boolean;
   isRegistering: boolean;
   isCheckingAvailability: boolean;
@@ -35,6 +36,7 @@ interface UseZkeyNameReturn {
   registerName: (name: string) => Promise<boolean>;
   lookupName: (name: string) => Promise<NameRegistryEntry | null>;
   checkAvailability: (name: string) => Promise<boolean>;
+  verifyMyName: (name: string) => Promise<boolean>;
 
   // Validation (from SDK)
   validateName: (name: string) => string | null;
@@ -52,6 +54,7 @@ export function useZkeyName(): UseZkeyNameReturn {
   const { stealthAddress } = useZVaultKeys();
 
   const [registeredName, setRegisteredName] = useState<string | null>(null);
+  const [hasRegisteredName, setHasRegisteredName] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const [isRegistering, setIsRegistering] = useState(false);
   const [isCheckingAvailability, setIsCheckingAvailability] = useState(false);
@@ -130,7 +133,9 @@ export function useZkeyName(): UseZkeyNameReturn {
   );
 
   /**
-   * Look up if current wallet has a registered name
+   * Look up if current wallet has a registered name by querying on-chain registry
+   * Note: On-chain stores name_hash, not the original name. We can detect
+   * registration but can't recover the name without user input.
    */
   const lookupMyName = useCallback(async () => {
     if (!wallet.publicKey || !stealthAddress) {
@@ -141,28 +146,35 @@ export function useZkeyName(): UseZkeyNameReturn {
     setError(null);
 
     try {
-      // Check localStorage for previously registered name
-      const storedName = localStorage.getItem(
-        `zkey-name-${wallet.publicKey.toBase58()}`
-      );
+      // Query on-chain registry for names owned by this wallet
+      // Filter by account size (180 bytes) and owner pubkey
+      const accounts = await connection.getProgramAccounts(PROGRAM_ID, {
+        filters: [
+          // Filter by account size (NameRegistry = 180 bytes)
+          { dataSize: 180 },
+          // Filter by owner (at offset 34 = 1 discriminator + 1 bump + 32 name_hash)
+          { memcmp: { offset: 34, bytes: wallet.publicKey.toBase58() } },
+        ],
+      });
 
-      if (storedName) {
-        // Verify it's still registered on-chain
-        const entry = await lookupName(storedName);
+      // Check each account for matching stealth address
+      for (const { account } of accounts) {
+        const entry = parseNameRegistry(new Uint8Array(account.data), "");
         if (entry) {
-          // Verify it matches our stealth address
           const entrySpendingHex = Buffer.from(entry.spendingPubKey).toString("hex");
           const ourSpendingHex = Buffer.from(stealthAddress.spendingPubKey).toString("hex");
 
           if (entrySpendingHex === ourSpendingHex) {
-            setRegisteredName(storedName);
+            // Found a matching registration
+            // Note: We can't recover the name from on-chain data (only hash is stored)
+            // User can use verifyMyName() to confirm ownership of a specific name
+            setHasRegisteredName(true);
             return;
           }
         }
-        // Name no longer valid, clear it
-        localStorage.removeItem(`zkey-name-${wallet.publicKey.toBase58()}`);
       }
 
+      setHasRegisteredName(false);
       setRegisteredName(null);
     } catch (err) {
       console.error("Failed to lookup my name:", err);
@@ -170,7 +182,48 @@ export function useZkeyName(): UseZkeyNameReturn {
     } finally {
       setIsLoading(false);
     }
-  }, [wallet.publicKey, stealthAddress, lookupName]);
+  }, [wallet.publicKey, stealthAddress, connection]);
+
+  /**
+   * Verify ownership of a specific .zkey name
+   * Since on-chain only stores name_hash, user must provide the name to verify
+   */
+  const verifyMyName = useCallback(
+    async (name: string): Promise<boolean> => {
+      if (!wallet.publicKey || !stealthAddress) {
+        return false;
+      }
+
+      const normalized = normalizeName(name);
+      if (!isValidName(normalized)) {
+        return false;
+      }
+
+      try {
+        const entry = await lookupName(normalized);
+        if (!entry) {
+          return false;
+        }
+
+        // Check if this entry belongs to us (matches our stealth address)
+        const entrySpendingHex = Buffer.from(entry.spendingPubKey).toString("hex");
+        const ourSpendingHex = Buffer.from(stealthAddress.spendingPubKey).toString("hex");
+
+        if (entrySpendingHex === ourSpendingHex) {
+          // Verified - this name belongs to us
+          setRegisteredName(normalized);
+          setHasRegisteredName(true);
+          return true;
+        }
+
+        return false;
+      } catch (err) {
+        console.error("Failed to verify name:", err);
+        return false;
+      }
+    },
+    [wallet.publicKey, stealthAddress, lookupName]
+  );
 
   /**
    * Register a new .zkey name on-chain
@@ -243,13 +296,9 @@ export function useZkeyName(): UseZkeyNameReturn {
           throw new Error(`Transaction failed: ${JSON.stringify(confirmation.value.err)}`);
         }
 
-        // Store in localStorage for quick lookup
-        localStorage.setItem(
-          `zkey-name-${wallet.publicKey.toBase58()}`,
-          normalized
-        );
-
+        // Name registered on-chain - no local storage needed
         setRegisteredName(normalized);
+        setHasRegisteredName(true);
         console.log(`[zkey] Registered on-chain: ${formatZkeyName(normalized)} (tx: ${txid})`);
         return true;
       } catch (err) {
@@ -259,7 +308,7 @@ export function useZkeyName(): UseZkeyNameReturn {
 
         // Check for "already processed" error - might mean name was registered
         if (errorMessage.includes("already been processed")) {
-          // Transaction was already processed - check if name is now registered
+          // Transaction was already processed - check if name is now registered on-chain
           try {
             const entry = await lookupName(normalized);
             if (entry) {
@@ -267,11 +316,8 @@ export function useZkeyName(): UseZkeyNameReturn {
               const ourSpendingHex = Buffer.from(stealthAddress.spendingPubKey).toString("hex");
               if (entrySpendingHex === ourSpendingHex) {
                 // Name was successfully registered by us
-                localStorage.setItem(
-                  `zkey-name-${wallet.publicKey.toBase58()}`,
-                  normalized
-                );
                 setRegisteredName(normalized);
+                setHasRegisteredName(true);
                 return true;
               }
             }
@@ -297,11 +343,13 @@ export function useZkeyName(): UseZkeyNameReturn {
       lookupMyName();
     } else {
       setRegisteredName(null);
+      setHasRegisteredName(false);
     }
   }, [wallet.publicKey, stealthAddress, lookupMyName]);
 
   return {
     registeredName,
+    hasRegisteredName,
     isLoading,
     isRegistering,
     isCheckingAvailability,
@@ -311,6 +359,7 @@ export function useZkeyName(): UseZkeyNameReturn {
     registerName,
     lookupName,
     checkAvailability,
+    verifyMyName,
     validateName: getNameValidationError,
     formatName: formatZkeyName,
   };
