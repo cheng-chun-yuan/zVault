@@ -170,7 +170,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Step 3: Compute BIP-341 Taproot sighash
     println!("\n=== Step 3: Computing BIP-341 sighash ===\n");
 
-    let prevout_script = ScriptBuf::new_p2tr(&secp, group_pubkey, None);
+    // The deposit address was created with raw internal key as output key (no tweak)
+    // So we use TweakedPublicKey::dangerous_assume_tweaked to create the prevout script
+    use bitcoin::key::TweakedPublicKey;
+    let tweaked_pubkey = TweakedPublicKey::dangerous_assume_tweaked(group_pubkey);
+    let prevout_script = ScriptBuf::new_p2tr_tweaked(tweaked_pubkey);
     let prevout = TxOut {
         value: Amount::from_sat(UTXO_AMOUNT),
         script_pubkey: prevout_script,
@@ -194,7 +198,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let session_id = uuid::Uuid::new_v4().to_string();
     println!("Session: {}", session_id);
 
-    // Round 1: Collect commitments
+    // Round 1: Collect commitments (no tweak - deposit address uses raw internal key)
     println!("\nRound 1: Collecting commitments...");
     let mut commitments: BTreeMap<u16, String> = BTreeMap::new();
     let mut identifier_map: BTreeMap<u16, String> = BTreeMap::new();
@@ -203,7 +207,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         let request = Round1Request {
             session_id: session_id.clone(),
             sighash: sighash_hex.clone(),
-            tweak: None,
+            tweak: None, // No tweak - address uses raw internal key
         };
 
         let response: Round1Response = client
@@ -217,7 +221,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         identifier_map.insert(response.signer_id, response.frost_identifier);
     }
 
-    // Round 2: Collect signature shares
+    // Round 2: Collect signature shares (no tweak - deposit address uses raw internal key)
     println!("\nRound 2: Collecting signature shares...");
     let mut signature_shares: BTreeMap<u16, String> = BTreeMap::new();
 
@@ -225,7 +229,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         let request = Round2Request {
             session_id: session_id.clone(),
             sighash: sighash_hex.clone(),
-            tweak: None,
+            tweak: None, // No tweak - address uses raw internal key
             commitments: commitments.clone(),
             identifier_map: identifier_map.clone(),
         };
