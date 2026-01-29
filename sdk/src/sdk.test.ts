@@ -135,9 +135,10 @@ describe("KEY & STEALTH", () => {
 
     const found = await scanAnnouncements(keys, [{
       ephemeralPub: deposit.ephemeralPub,
-      amountSats: deposit.amountSats,
+      encryptedAmount: deposit.encryptedAmount,
       commitment: deposit.commitment,
       leafIndex: 0,
+      createdAt: deposit.createdAt,
     }]);
 
     expect(found.length).toBe(1);
@@ -152,9 +153,10 @@ describe("KEY & STEALTH", () => {
 
     const found = await scanAnnouncements(wrongKeys, [{
       ephemeralPub: deposit.ephemeralPub,
-      amountSats: deposit.amountSats,
+      encryptedAmount: deposit.encryptedAmount,
       commitment: deposit.commitment,
       leafIndex: 0,
+      createdAt: deposit.createdAt,
     }]);
 
     expect(found.length).toBe(0);
