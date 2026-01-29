@@ -44,8 +44,7 @@ pub mod api;
 // Legacy Modules (for backward compatibility)
 // =============================================================================
 
-#[path = "api_legacy.rs"]
-pub mod api_legacy;
+pub mod api_server;
 pub mod btc_client;
 pub mod btc_spv;
 pub mod config;

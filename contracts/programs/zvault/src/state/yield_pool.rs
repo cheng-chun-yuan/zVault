@@ -316,13 +316,6 @@ impl YieldPool {
         Ok(step2 / 10000)
     }
 
-    /// Calculate yield (legacy - saturating, for backwards compatibility)
-    #[deprecated(note = "Use calculate_yield_checked for proper error handling")]
-    pub fn calculate_yield(&self, principal: u64, epochs_staked: u64) -> u64 {
-        self.calculate_yield_checked(principal, epochs_staked)
-            .unwrap_or(0)
-    }
-
     /// Advance epoch if enough time has passed
     pub fn try_advance_epoch(&mut self, current_timestamp: i64) -> bool {
         let duration = self.epoch_duration();

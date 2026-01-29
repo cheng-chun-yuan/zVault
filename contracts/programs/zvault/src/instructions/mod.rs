@@ -34,8 +34,8 @@ pub mod announce_stealth;
 pub mod add_demo_note;
 pub mod add_demo_stealth;
 
-// Backend-managed stealth deposit v2
-pub mod verify_stealth_deposit_v2;
+// Backend-managed stealth deposit
+pub mod verify_stealth_deposit;
 
 // Name registry
 pub mod register_name;
@@ -64,7 +64,7 @@ pub use announce_stealth::*;
 pub use add_demo_note::*;
 pub use add_demo_stealth::*;
 pub use register_name::*;
-pub use verify_stealth_deposit_v2::*;
+pub use verify_stealth_deposit::*;
 
 // Yield pool re-exports
 pub use create_yield_pool::*;

@@ -236,6 +236,48 @@ export class CommitmentTreeIndex {
   }
 
   /**
+   * Get tree status (for API compatibility)
+   */
+  getStatus(): {
+    root: string;
+    nextIndex: number;
+    size: number;
+  } {
+    return {
+      root: this.currentRoot.toString(16).padStart(64, "0"),
+      nextIndex: this.leaves.length,
+      size: this.leaves.length,
+    };
+  }
+
+  /**
+   * Get path (merkle proof) for a commitment by hex string
+   * Convenience wrapper around getMerkleProof for API compatibility
+   */
+  getPath(commitmentHex: string): {
+    siblings: string[];
+    indices: number[];
+    leafIndex: string;
+    root: string;
+  } | null {
+    // Normalize hex
+    const normalized = commitmentHex.startsWith("0x")
+      ? commitmentHex.slice(2)
+      : commitmentHex;
+    const commitment = BigInt("0x" + normalized);
+
+    const proof = this.getMerkleProof(commitment);
+    if (!proof) return null;
+
+    return {
+      siblings: proof.siblings.map((s) => s.toString(16).padStart(64, "0")),
+      indices: proof.indices,
+      leafIndex: proof.leafIndex.toString(),
+      root: proof.root.toString(16).padStart(64, "0"),
+    };
+  }
+
+  /**
    * Export index for persistence
    */
   export(): { commitments: [string, { index: string; amount: string }][] } {

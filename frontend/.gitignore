@@ -45,3 +45,6 @@ next-env.d.ts
 
 # circuit artifacts (hosted on CDN)
 /public/circuits/
+
+# runtime data (commitment index)
+/data/
