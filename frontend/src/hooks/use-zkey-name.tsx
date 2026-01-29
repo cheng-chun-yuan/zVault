@@ -83,19 +83,25 @@ function parseNameRegistry(data: Uint8Array, name: string): NameRegistryEntry | 
 }
 
 // Build register name instruction data
+// Layout: discriminator (1) + name_len (1) + name (name_len) + name_hash (32) + spending_pubkey (33) + viewing_pubkey (33)
 function buildRegisterNameData(
   name: string,
   spendingPubKey: Uint8Array,
   viewingPubKey: Uint8Array
 ): Uint8Array {
   const nameBytes = new TextEncoder().encode(name);
-  const data = new Uint8Array(1 + 1 + nameBytes.length + 33 + 33);
+  const nameHashBytes = hashName(name);
+
+  // Total: 1 (discriminator) + 1 (name_len) + name_len + 32 (name_hash) + 33 (spending) + 33 (viewing)
+  const data = new Uint8Array(1 + 1 + nameBytes.length + 32 + 33 + 33);
   let offset = 0;
 
   data[offset++] = REGISTER_NAME_DISCRIMINATOR;
   data[offset++] = nameBytes.length;
   data.set(nameBytes, offset);
   offset += nameBytes.length;
+  data.set(nameHashBytes, offset);
+  offset += 32;
   data.set(spendingPubKey, offset);
   offset += 33;
   data.set(viewingPubKey, offset);
