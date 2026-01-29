@@ -3,10 +3,7 @@ import {
   Keypair,
   sendAndConfirmTransaction,
 } from "@solana/web3.js";
-import {
-  buildAddDemoNoteTransaction,
-  buildAddDemoStealthTransaction,
-} from "@/lib/solana/demo-instructions";
+import { buildAddDemoStealthTransaction } from "@/lib/solana/demo-instructions";
 import { getHeliusConnection, isHeliusConfigured } from "@/lib/helius-server";
 
 export const runtime = "nodejs";
@@ -31,49 +28,37 @@ function getAdminKeypair(): Keypair | null {
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
-    const { type, secret, ephemeralPub, commitment, encryptedAmount } = body;
+    const { type, ephemeralPub, commitment, encryptedAmount } = body;
 
-    // Validate type
-    if (!type || !["note", "stealth"].includes(type)) {
+    // Validate type - only stealth mode is supported
+    if (type && type !== "stealth") {
       return NextResponse.json(
-        { success: false, error: "Invalid type. Must be 'note' or 'stealth'" },
+        { success: false, error: "Only 'stealth' type is supported. Use stealth deposits." },
         { status: 400 }
       );
     }
 
-    // Validate note mode params
-    if (type === "note") {
-      if (!secret || typeof secret !== "string" || secret.length !== 64) {
-        return NextResponse.json(
-          { success: false, error: "Invalid secret. Must be 64 hex characters (32 bytes)" },
-          { status: 400 }
-        );
-      }
-    }
-
     // Validate stealth mode params
-    if (type === "stealth") {
-      if (!ephemeralPub || typeof ephemeralPub !== "string" || ephemeralPub.length !== 66) {
-        return NextResponse.json(
-          { success: false, error: "Invalid ephemeralPub. Must be 66 hex characters (33 bytes)" },
-          { status: 400 }
-        );
-      }
-      if (!commitment || typeof commitment !== "string" || commitment.length !== 64) {
-        return NextResponse.json(
-          { success: false, error: "Invalid commitment. Must be 64 hex characters (32 bytes)" },
-          { status: 400 }
-        );
-      }
-      if (!encryptedAmount || typeof encryptedAmount !== "string" || encryptedAmount.length !== 16) {
-        return NextResponse.json(
-          { success: false, error: "Invalid encryptedAmount. Must be 16 hex characters (8 bytes)" },
-          { status: 400 }
-        );
-      }
+    if (!ephemeralPub || typeof ephemeralPub !== "string" || ephemeralPub.length !== 66) {
+      return NextResponse.json(
+        { success: false, error: "Invalid ephemeralPub. Must be 66 hex characters (33 bytes)" },
+        { status: 400 }
+      );
+    }
+    if (!commitment || typeof commitment !== "string" || commitment.length !== 64) {
+      return NextResponse.json(
+        { success: false, error: "Invalid commitment. Must be 64 hex characters (32 bytes)" },
+        { status: 400 }
+      );
+    }
+    if (!encryptedAmount || typeof encryptedAmount !== "string" || encryptedAmount.length !== 16) {
+      return NextResponse.json(
+        { success: false, error: "Invalid encryptedAmount. Must be 16 hex characters (8 bytes)" },
+        { status: 400 }
+      );
     }
 
-    console.log(`[Demo API] Processing ${type} deposit...`);
+    console.log("[Demo API] Processing stealth deposit...");
 
     // Get admin keypair (required for demo instructions)
     const admin = getAdminKeypair();
@@ -89,27 +74,16 @@ export async function POST(request: NextRequest) {
     console.log("[Demo API] Using Helius:", isHeliusConfigured());
     console.log("[Demo API] Admin:", admin.publicKey.toBase58());
 
-    // Build transaction based on type
-    let tx;
-    if (type === "note") {
-      // Convert hex secret to bytes
-      const secretBytes = hexToBytes(secret);
-      tx = await buildAddDemoNoteTransaction(connection, {
-        payer: admin.publicKey,
-        secret: secretBytes,
-      });
-    } else {
-      // Stealth mode
-      const ephemeralPubBytes = hexToBytes(ephemeralPub);
-      const commitmentBytes = hexToBytes(commitment);
-      const encryptedAmountBytes = hexToBytes(encryptedAmount);
-      tx = await buildAddDemoStealthTransaction(connection, {
-        payer: admin.publicKey,
-        ephemeralPub: ephemeralPubBytes,
-        commitment: commitmentBytes,
-        encryptedAmount: encryptedAmountBytes,
-      });
-    }
+    // Build stealth transaction
+    const ephemeralPubBytes = hexToBytes(ephemeralPub);
+    const commitmentBytes = hexToBytes(commitment);
+    const encryptedAmountBytes = hexToBytes(encryptedAmount);
+    const tx = await buildAddDemoStealthTransaction(connection, {
+      payer: admin.publicKey,
+      ephemeralPub: ephemeralPubBytes,
+      commitment: commitmentBytes,
+      encryptedAmount: encryptedAmountBytes,
+    });
 
     // Sign and send transaction with admin keypair
     try {
@@ -121,9 +95,9 @@ export async function POST(request: NextRequest) {
 
       return NextResponse.json({
         success: true,
-        type,
+        type: "stealth",
         signature,
-        message: `Demo ${type} deposit added on-chain`,
+        message: "Demo stealth deposit added on-chain",
       });
     } catch (txError: unknown) {
       console.error("[Demo API] Transaction failed:", txError);

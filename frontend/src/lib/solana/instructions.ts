@@ -2,7 +2,7 @@
  * Solana Transaction Builders
  *
  * Build transactions for zVault Pinocchio program.
- * Instructions: VERIFY_DEPOSIT, CLAIM, SPLIT, REQUEST_REDEMPTION
+ * Instructions: CLAIM, SPLIT_COMMITMENT, REQUEST_REDEMPTION
  *
  * Program uses discriminators (first byte) to identify instruction type.
  */
@@ -36,11 +36,9 @@ export const TOKEN_2022_PROGRAM_ID = new PublicKey(
 
 /** Instruction discriminators */
 export const INSTRUCTION_DISCRIMINATORS = {
-  VERIFY_DEPOSIT: 8,
   CLAIM: 9,
   SPLIT_COMMITMENT: 4,
   REQUEST_REDEMPTION: 5,
-  ANNOUNCE_STEALTH: 12,
 } as const;
 
 // =============================================================================

@@ -80,13 +80,6 @@ export async function circuitArtifactExists(
 }
 
 /**
- * Convert proof to raw bytes for on-chain submission
- */
-export function noirProofToBytes(proof: import("@zvault/sdk").ProofData): Uint8Array {
-  return proof.proof;
-}
-
-/**
  * Cleanup all cached resources
  */
 export async function cleanup(): Promise<void> {

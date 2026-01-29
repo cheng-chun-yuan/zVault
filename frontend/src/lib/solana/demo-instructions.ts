@@ -1,7 +1,7 @@
 /**
- * Demo Instructions for Mock Deposits
+ * Demo Instructions for Mock Stealth Deposits
  *
- * These instructions allow adding commitments to the on-chain tree
+ * These instructions allow adding stealth commitments to the on-chain tree
  * without requiring actual BTC deposits. For demo/showcase only.
  *
  * Uses platform-agnostic data builders from @zvault/sdk.
@@ -18,7 +18,6 @@ import { getAssociatedTokenAddressSync } from "@solana/spl-token";
 import { ZVAULT_PROGRAM_ID, TOKEN_2022_PROGRAM_ID, derivezBTCMintPDA } from "./instructions";
 import { getPriorityFeeInstructions } from "@/lib/helius";
 import {
-  buildAddDemoNoteData,
   buildAddDemoStealthData,
   getPoolStatePDASeeds,
   getCommitmentTreePDASeeds,
@@ -88,48 +87,6 @@ export function derivePoolVaultATA(
   );
 }
 
-export interface AddDemoNoteParams {
-  /** User's public key (payer) */
-  payer: PublicKey;
-  /** 32-byte secret (contract derives nullifier and commitment) */
-  secret: Uint8Array;
-}
-
-/**
- * Build ADD_DEMO_NOTE instruction
- *
- * Takes a secret (32 bytes), the contract derives nullifier and commitment.
- * Adds the commitment to the on-chain tree for claiming.
- * Also mints zBTC to the pool vault so users can claim.
- */
-export function buildAddDemoNoteInstruction(
-  params: AddDemoNoteParams
-): TransactionInstruction {
-  const { payer, secret } = params;
-
-  const [poolState] = derivePoolStatePDA();
-  const [commitmentTree] = deriveCommitmentTreePDA();
-  const [zbtcMint] = derivezBTCMintPDA();
-  const poolVault = derivePoolVaultATA();
-
-  // Use SDK's data builder
-  const data = buildAddDemoNoteData(secret);
-
-  return new TransactionInstruction({
-    keys: [
-      { pubkey: poolState, isSigner: false, isWritable: true },
-      { pubkey: commitmentTree, isSigner: false, isWritable: true },
-      { pubkey: payer, isSigner: true, isWritable: false },
-      // Token accounts for minting zBTC to pool vault
-      { pubkey: zbtcMint, isSigner: false, isWritable: true },
-      { pubkey: poolVault, isSigner: false, isWritable: true },
-      { pubkey: TOKEN_2022_PROGRAM_ID, isSigner: false, isWritable: false },
-    ],
-    programId: ZVAULT_PROGRAM_ID,
-    data: Buffer.from(data),
-  });
-}
-
 export interface AddDemoStealthParams {
   /** User's public key (payer) */
   payer: PublicKey;
@@ -178,31 +135,6 @@ export function buildAddDemoStealthInstruction(
     programId: ZVAULT_PROGRAM_ID,
     data: Buffer.from(data),
   });
-}
-
-/**
- * Build and return ADD_DEMO_NOTE transaction
- */
-export async function buildAddDemoNoteTransaction(
-  connection: Connection,
-  params: AddDemoNoteParams
-): Promise<Transaction> {
-  const instruction = buildAddDemoNoteInstruction(params);
-
-  // Get priority fee instructions
-  const priorityFeeIxs = await getPriorityFeeInstructions([
-    ZVAULT_PROGRAM_ID.toBase58(),
-  ]);
-
-  const transaction = new Transaction();
-  transaction.add(...priorityFeeIxs);
-  transaction.add(instruction);
-  transaction.feePayer = params.payer;
-
-  const { blockhash } = await connection.getLatestBlockhash();
-  transaction.recentBlockhash = blockhash;
-
-  return transaction;
 }
 
 /**
