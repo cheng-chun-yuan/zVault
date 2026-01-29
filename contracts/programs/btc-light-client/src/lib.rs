@@ -57,22 +57,27 @@ pub const LIGHT_CLIENT_DISCRIMINATOR: u8 = 0x01;
 pub const BLOCK_HEADER_DISCRIMINATOR: u8 = 0x02;
 
 /// Light client state - tracks Bitcoin chain tip
+/// All multi-byte integers stored as little-endian byte arrays for alignment safety
 #[repr(C)]
 pub struct LightClientState {
     pub discriminator: u8,
     pub bump: u8,
-    pub tip_height: u64,
+    /// Padding for alignment
+    _padding: [u8; 6],
+    tip_height: [u8; 8],
     pub tip_hash: [u8; 32],
-    pub start_height: u64,
+    start_height: [u8; 8],
     pub start_hash: [u8; 32],
-    pub finalized_height: u64,
-    pub header_count: u64,
-    pub last_update: i64,
+    finalized_height: [u8; 8],
+    header_count: [u8; 8],
+    last_update: [u8; 8],
     pub network: u8,
+    /// Padding to maintain consistent size
+    _padding2: [u8; 7],
 }
 
 impl LightClientState {
-    pub const SIZE: usize = 1 + 1 + 8 + 32 + 8 + 32 + 8 + 8 + 8 + 1; // 107 bytes
+    pub const SIZE: usize = core::mem::size_of::<Self>();
     pub const SEED: &'static [u8] = b"light_client";
 
     pub fn from_bytes(data: &[u8]) -> Result<&Self, ProgramError> {
@@ -96,30 +101,77 @@ impl LightClientState {
         if data.len() < Self::SIZE {
             return Err(ProgramError::InvalidAccountData);
         }
-        let state = unsafe { &mut *(data.as_mut_ptr() as *mut Self) };
-        state.discriminator = LIGHT_CLIENT_DISCRIMINATOR;
-        Ok(state)
+        data[..Self::SIZE].fill(0);
+        data[0] = LIGHT_CLIENT_DISCRIMINATOR;
+        Ok(unsafe { &mut *(data.as_mut_ptr() as *mut Self) })
+    }
+
+    // Getters
+    pub fn tip_height(&self) -> u64 {
+        u64::from_le_bytes(self.tip_height)
+    }
+
+    pub fn start_height(&self) -> u64 {
+        u64::from_le_bytes(self.start_height)
+    }
+
+    pub fn finalized_height(&self) -> u64 {
+        u64::from_le_bytes(self.finalized_height)
+    }
+
+    pub fn header_count(&self) -> u64 {
+        u64::from_le_bytes(self.header_count)
+    }
+
+    pub fn last_update(&self) -> i64 {
+        i64::from_le_bytes(self.last_update)
+    }
+
+    // Setters
+    pub fn set_tip_height(&mut self, value: u64) {
+        self.tip_height = value.to_le_bytes();
+    }
+
+    pub fn set_start_height(&mut self, value: u64) {
+        self.start_height = value.to_le_bytes();
+    }
+
+    pub fn set_finalized_height(&mut self, value: u64) {
+        self.finalized_height = value.to_le_bytes();
+    }
+
+    pub fn set_header_count(&mut self, value: u64) {
+        self.header_count = value.to_le_bytes();
+    }
+
+    pub fn set_last_update(&mut self, value: i64) {
+        self.last_update = value.to_le_bytes();
     }
 }
 
 /// Individual block header
+/// All multi-byte integers stored as little-endian byte arrays for alignment safety
 #[repr(C)]
 pub struct BlockHeader {
     pub discriminator: u8,
     pub bump: u8,
-    pub height: u64,
+    /// Padding for alignment
+    _padding: [u8; 6],
+    height: [u8; 8],
     pub block_hash: [u8; 32],
     pub prev_block_hash: [u8; 32],
     pub merkle_root: [u8; 32],
-    pub timestamp: u32,
-    pub bits: u32,
-    pub nonce: u32,
+    timestamp: [u8; 4],
+    bits: [u8; 4],
+    nonce: [u8; 4],
+    /// Padding for alignment
+    _padding2: [u8; 4],
     pub submitted_by: [u8; 32],
-    pub submitted_at: i64,
+    submitted_at: [u8; 8],
 }
 
 impl BlockHeader {
-    pub const SIZE: usize = 1 + 1 + 8 + 32 + 32 + 32 + 4 + 4 + 4 + 32 + 8; // 158 bytes
+    pub const SIZE: usize = core::mem::size_of::<Self>();
     pub const SEED: &'static [u8] = b"block";
 
     pub fn from_bytes_mut(data: &mut [u8]) -> Result<&mut Self, ProgramError> {
@@ -133,9 +185,51 @@ impl BlockHeader {
         if data.len() < Self::SIZE {
             return Err(ProgramError::InvalidAccountData);
         }
-        let header = unsafe { &mut *(data.as_mut_ptr() as *mut Self) };
-        header.discriminator = BLOCK_HEADER_DISCRIMINATOR;
-        Ok(header)
+        data[..Self::SIZE].fill(0);
+        data[0] = BLOCK_HEADER_DISCRIMINATOR;
+        Ok(unsafe { &mut *(data.as_mut_ptr() as *mut Self) })
+    }
+
+    // Getters
+    pub fn height(&self) -> u64 {
+        u64::from_le_bytes(self.height)
+    }
+
+    pub fn timestamp(&self) -> u32 {
+        u32::from_le_bytes(self.timestamp)
+    }
+
+    pub fn bits(&self) -> u32 {
+        u32::from_le_bytes(self.bits)
+    }
+
+    pub fn nonce(&self) -> u32 {
+        u32::from_le_bytes(self.nonce)
+    }
+
+    pub fn submitted_at(&self) -> i64 {
+        i64::from_le_bytes(self.submitted_at)
+    }
+
+    // Setters
+    pub fn set_height(&mut self, value: u64) {
+        self.height = value.to_le_bytes();
+    }
+
+    pub fn set_timestamp(&mut self, value: u32) {
+        self.timestamp = value.to_le_bytes();
+    }
+
+    pub fn set_bits(&mut self, value: u32) {
+        self.bits = value.to_le_bytes();
+    }
+
+    pub fn set_nonce(&mut self, value: u32) {
+        self.nonce = value.to_le_bytes();
+    }
+
+    pub fn set_submitted_at(&mut self, value: i64) {
+        self.submitted_at = value.to_le_bytes();
     }
 }
 
@@ -233,13 +327,13 @@ fn process_initialize(
         let state = LightClientState::init(&mut state_data)?;
 
         state.bump = bump;
-        state.tip_height = start_height;
+        state.set_tip_height(start_height);
         state.tip_hash = start_block_hash;
-        state.start_height = start_height;
+        state.set_start_height(start_height);
         state.start_hash = start_block_hash;
-        state.finalized_height = start_height.saturating_sub(REQUIRED_CONFIRMATIONS);
-        state.header_count = 1;
-        state.last_update = clock.unix_timestamp;
+        state.set_finalized_height(start_height.saturating_sub(REQUIRED_CONFIRMATIONS));
+        state.set_header_count(1);
+        state.set_last_update(clock.unix_timestamp);
         state.network = network;
     }
 
@@ -292,7 +386,7 @@ fn process_submit_header(
         let state = LightClientState::from_bytes(&state_data)?;
 
         // Height must be tip + 1
-        if height != state.tip_height + 1 {
+        if height != state.tip_height() + 1 {
             return Err(LightClientError::InvalidHeight.into());
         }
 
@@ -342,15 +436,15 @@ fn process_submit_header(
         let header = BlockHeader::init(&mut header_data)?;
 
         header.bump = bump;
-        header.height = height;
+        header.set_height(height);
         header.block_hash = block_hash;
         header.prev_block_hash = parsed.prev_block_hash;
         header.merkle_root = parsed.merkle_root;
-        header.timestamp = parsed.timestamp;
-        header.bits = parsed.bits;
-        header.nonce = parsed.nonce;
+        header.set_timestamp(parsed.timestamp);
+        header.set_bits(parsed.bits);
+        header.set_nonce(parsed.nonce);
         header.submitted_by.copy_from_slice(submitter.key().as_ref());
-        header.submitted_at = clock.unix_timestamp;
+        header.set_submitted_at(clock.unix_timestamp);
     }
 
     // Update light client state
@@ -358,13 +452,16 @@ fn process_submit_header(
         let mut state_data = light_client.try_borrow_mut_data()?;
         let state = LightClientState::from_bytes_mut(&mut state_data)?;
 
-        state.tip_height = height;
+        state.set_tip_height(height);
         state.tip_hash = block_hash;
-        state.header_count += 1;
-        state.last_update = clock.unix_timestamp;
+        let new_count = state.header_count()
+            .checked_add(1)
+            .ok_or(ProgramError::ArithmeticOverflow)?;
+        state.set_header_count(new_count);
+        state.set_last_update(clock.unix_timestamp);
 
         if height >= REQUIRED_CONFIRMATIONS {
-            state.finalized_height = height - REQUIRED_CONFIRMATIONS;
+            state.set_finalized_height(height - REQUIRED_CONFIRMATIONS);
         }
     }
 
