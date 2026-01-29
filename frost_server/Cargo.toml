@@ -8,6 +8,10 @@ description = "FROST threshold signing server for zVault"
 name = "frost-server"
 path = "src/main.rs"
 
+[[bin]]
+name = "spend_utxo"
+path = "src/bin/spend_utxo.rs"
+
 [dependencies]
 # FROST for secp256k1 with Taproot tweaks
 frost-secp256k1-tr = "2.1"

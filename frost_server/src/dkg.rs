@@ -142,11 +142,15 @@ impl DkgParticipant {
                 .ok_or(DkgError::Round1NotCompleted)?
         };
 
-        // Parse round 1 packages from all participants
+        // Parse round 1 packages from OTHER participants (exclude self)
         let mut round1_packages: BTreeMap<frost::Identifier, frost::keys::dkg::round1::Package> =
             BTreeMap::new();
 
         for (signer_id, package_hex) in &request.round1_packages {
+            // Skip our own package - FROST part2 expects only packages from others
+            if *signer_id == self.signer_id {
+                continue;
+            }
             let package_bytes = hex::decode(package_hex)
                 .map_err(|e| DkgError::InvalidHex(e.to_string()))?;
             let package = frost::keys::dkg::round1::Package::deserialize(&package_bytes)
@@ -161,21 +165,39 @@ impl DkgParticipant {
             frost::keys::dkg::part2(round1_secret, &round1_packages)
                 .map_err(|e| DkgError::FrostError(e.to_string()))?;
 
+        // Build a mapping from FROST identifier to our signer_id
+        // Since we created identifiers via try_from(signer_id), we can reverse this
+        let mut id_to_signer: BTreeMap<frost::Identifier, u16> = BTreeMap::new();
+        for (signer_id, _) in &request.round1_packages {
+            if *signer_id == self.signer_id {
+                continue;
+            }
+            let identifier = frost::Identifier::try_from(*signer_id)
+                .map_err(|e| DkgError::FrostError(e.to_string()))?;
+            id_to_signer.insert(identifier, *signer_id);
+        }
+
         // Serialize packages for each participant
         let mut packages: BTreeMap<u16, String> = BTreeMap::new();
         for (identifier, package) in round2_packages {
             let package_bytes = package
                 .serialize()
                 .map_err(|e| DkgError::FrostError(e.to_string()))?;
-            // Extract the u16 value from identifier
-            let id_bytes = identifier.serialize();
-            let target_id = if id_bytes.len() >= 2 {
-                u16::from_le_bytes([id_bytes[0], id_bytes[1]])
-            } else if !id_bytes.is_empty() {
-                id_bytes[0] as u16
-            } else {
-                0
-            };
+            // Look up the signer_id from our mapping
+            let target_id = id_to_signer.get(&identifier).copied().unwrap_or_else(|| {
+                // Fallback: try to extract from serialization (shouldn't be needed)
+                let id_bytes = identifier.serialize();
+                if !id_bytes.is_empty() {
+                    id_bytes[id_bytes.len() - 1] as u16
+                } else {
+                    0
+                }
+            });
+            tracing::debug!(
+                signer_id = self.signer_id,
+                target_id = target_id,
+                "Generated round2 package for target"
+            );
             packages.insert(target_id, hex::encode(package_bytes));
         }
 
@@ -218,11 +240,15 @@ impl DkgParticipant {
                 .ok_or(DkgError::Round1NotCompleted)?
         };
 
-        // Parse round 1 packages
+        // Parse round 1 packages from OTHER participants (exclude self)
         let mut round1_packages: BTreeMap<frost::Identifier, frost::keys::dkg::round1::Package> =
             BTreeMap::new();
 
         for (signer_id, package_hex) in &request.round1_packages {
+            // Skip our own package - FROST part3 expects only packages from others
+            if *signer_id == self.signer_id {
+                continue;
+            }
             let package_bytes = hex::decode(package_hex)
                 .map_err(|e| DkgError::InvalidHex(e.to_string()))?;
             let package = frost::keys::dkg::round1::Package::deserialize(&package_bytes)
@@ -246,10 +272,20 @@ impl DkgParticipant {
             round2_packages.insert(identifier, package);
         }
 
+        tracing::debug!(
+            signer_id = self.signer_id,
+            round1_count = round1_packages.len(),
+            round2_count = round2_packages.len(),
+            "Finalizing DKG with packages"
+        );
+
         // Finalize DKG
         let (key_package, public_key_package) =
             frost::keys::dkg::part3(&round2_secret, &round1_packages, &round2_packages)
-                .map_err(|e| DkgError::FrostError(e.to_string()))?;
+                .map_err(|e| {
+                    tracing::error!(error = %e, "DKG part3 failed");
+                    DkgError::FrostError(e.to_string())
+                })?;
 
         // Save to keystore
         self.keystore

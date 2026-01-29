@@ -168,6 +168,28 @@ pub struct HealthResponse {
     pub key_loaded: bool,
 }
 
+/// Aggregation request - aggregate signature shares into final Schnorr signature
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AggregateRequest {
+    /// Commitments from participating signers (signer_id -> commitment hex)
+    pub commitments: BTreeMap<u16, String>,
+    /// Identifier mapping (signer_id -> FROST identifier hex)
+    pub identifier_map: BTreeMap<u16, String>,
+    /// Signature shares from participating signers (signer_id -> share hex)
+    pub signature_shares: BTreeMap<u16, String>,
+    /// The sighash that was signed (hex-encoded 32 bytes)
+    pub sighash: String,
+}
+
+/// Aggregation response - final Schnorr signature
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AggregateResponse {
+    /// The aggregated Schnorr signature (64 bytes hex)
+    pub signature: String,
+    /// Group public key (x-only, 32 bytes hex)
+    pub group_public_key: String,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

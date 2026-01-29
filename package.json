@@ -11,5 +11,9 @@
     "build": "bun run build:sdk && bun run build:frontend",
     "dev": "cd frontend && bun run dev",
     "vercel-build": "bun run build:sdk && bun run build:frontend"
+  },
+  "dependencies": {
+    "@noble/hashes": "^2.0.1",
+    "bech32": "^2.0.0"
   }
 }
