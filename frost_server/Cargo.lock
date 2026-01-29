@@ -662,6 +662,7 @@ dependencies = [
  "bitcoin",
  "clap",
  "frost-secp256k1-tr",
+ "getrandom 0.2.17",
  "hex",
  "rand",
  "reqwest",
