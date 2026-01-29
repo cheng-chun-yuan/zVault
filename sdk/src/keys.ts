@@ -537,36 +537,11 @@ export async function deserializeDelegatedViewKey(
     }
   }
 
-  // Version 2/3: Legacy XOR encryption (deprecated, for backward compatibility)
-  console.warn(
-    "WARNING: Decrypting legacy format (version 2/3). " +
-    "Re-encrypt with a new password to upgrade to secure format."
+  // Legacy formats (v2/v3) are no longer supported
+  throw new Error(
+    "Unsupported encryption format (version " + obj.version + "). " +
+    "Only version 4 (AES-GCM) is supported."
   );
-  const storedMac = hexToBytes(obj.mac);
-
-  // Derive encryption key (legacy method)
-  const keyMaterial = concatBytes(passwordBytes, salt);
-  const encryptionKey = sha256(keyMaterial);
-
-  // Verify MAC
-  const computedMac = sha256(concatBytes(encryptionKey, ciphertext));
-  if (!constantTimeCompare(computedMac, storedMac)) {
-    throw new Error("Invalid password or corrupted data");
-  }
-
-  // Decrypt viewing private key (legacy XOR method)
-  const xorKey = sha256(concatBytes(encryptionKey, nonce));
-  const viewingPrivKeyBytes = new Uint8Array(32);
-  for (let i = 0; i < 32; i++) {
-    viewingPrivKeyBytes[i] = ciphertext[i] ^ xorKey[i];
-  }
-
-  return {
-    viewingPrivKey: scalarFromBytes(viewingPrivKeyBytes),
-    permissions: obj.permissions,
-    expiresAt: obj.expiresAt,
-    label: obj.label,
-  };
 }
 
 /**
