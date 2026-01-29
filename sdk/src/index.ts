@@ -613,3 +613,27 @@ export {
   type PoolOperationStatus,
   type PoolOperationProgressCallback,
 } from "./yield-pool";
+
+// ==========================================================================
+// SNS Subdomain Integration (.zkey.sol names)
+// ==========================================================================
+
+export {
+  // High-level API
+  registerZkeySubdomain,
+  lookupZkeySubdomain,
+  // Low-level functions
+  createSubdomainInstruction,
+  resolveSubdomain,
+  isSubdomainAvailable,
+  // Validation & formatting
+  isValidSubdomainName,
+  formatSubdomainName,
+  // Constants
+  SNS_PROGRAM_ID,
+  DEVNET_SNS_PROGRAM_ID,
+  // Types
+  type SnsSubdomainConfig,
+  type SubdomainRegistration,
+  type ResolvedSubdomain,
+} from "./sns-subdomain";

@@ -26,6 +26,9 @@ import { generateKeyPair, pointMul, GRUMPKIN_GENERATOR, isOnCurve } from "./grum
 import { buildRegisterNameData, hashName, isValidName, NAME_REGISTRY_SEED, ZVAULT_PROGRAM_ID } from "./name-registry";
 import { createClient, ZVaultClient } from "./zvault";
 
+// SNS subdomain imports
+import { isValidSubdomainName, formatSubdomainName } from "./sns-subdomain";
+
 // Test constants
 const TEST_SEED = new Uint8Array(32).fill(0x42);
 const POOL_ID = new Uint8Array(8).fill(0x01);
@@ -346,5 +349,39 @@ describe("UTILITIES", () => {
     expect(proof.pathElements.length).toBe(TREE_DEPTH);
     expect(proof.pathIndices.length).toBe(TREE_DEPTH);
     expect(proof.root.length).toBe(32);
+  });
+});
+
+// ============================================================================
+// 9. SNS SUBDOMAIN (.zkey.sol)
+// ============================================================================
+
+describe("SNS SUBDOMAIN", () => {
+  test("isValidSubdomainName() validates correctly", () => {
+    // Valid names
+    expect(isValidSubdomainName("alice")).toBe(true);
+    expect(isValidSubdomainName("bob123")).toBe(true);
+    expect(isValidSubdomainName("a")).toBe(true);
+    expect(isValidSubdomainName("test1234567890")).toBe(true);
+
+    // Invalid names
+    expect(isValidSubdomainName("")).toBe(false); // empty
+    expect(isValidSubdomainName("Alice")).toBe(false); // uppercase
+    expect(isValidSubdomainName("test-name")).toBe(false); // hyphen
+    expect(isValidSubdomainName("test_name")).toBe(false); // underscore
+    expect(isValidSubdomainName("test.name")).toBe(false); // dot
+    expect(isValidSubdomainName("test name")).toBe(false); // space
+    expect(isValidSubdomainName("a".repeat(33))).toBe(false); // too long
+  });
+
+  test("formatSubdomainName() formats correctly", () => {
+    expect(formatSubdomainName("alice")).toBe("alice.zkey.sol");
+    expect(formatSubdomainName("Alice")).toBe("alice.zkey.sol"); // normalizes
+    expect(formatSubdomainName("bob.zkey.sol")).toBe("bob.zkey.sol"); // idempotent
+    expect(formatSubdomainName("charlie.sol")).toBe("charlie.zkey.sol");
+  });
+
+  test("formatSubdomainName() with custom parent", () => {
+    expect(formatSubdomainName("alice", "myapp")).toBe("alice.myapp.sol");
   });
 });
