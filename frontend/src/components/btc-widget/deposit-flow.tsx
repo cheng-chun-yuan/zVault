@@ -12,7 +12,7 @@ import { cn } from "@/lib/utils";
 import { notifyCopied, notifySuccess, notifyError } from "@/lib/notifications";
 import {
   prepareStealthDeposit,
-  lookupZkeySubdomain,
+  lookupZkeyName,
   decodeStealthMetaAddress,
   bytesToHex,
   createStealthDeposit,
@@ -130,11 +130,11 @@ export function DepositFlow() {
       const isLikelyHex = /^[0-9a-fA-F]{100,}$/.test(trimmed);
 
       if (recipientType === "zkey" || (!isLikelyHex && recipientType === "address")) {
-        // Lookup .zkey.sol subdomain on SNS
+        // Lookup .zkey.sol name on custom name registry
         // Remove .zkey.sol or .zkey suffix if user included it
         const name = trimmed.replace(/\.zkey\.sol$/i, "").replace(/\.zkey$/i, "");
         const connectionAdapter = getConnectionAdapter();
-        const result = await lookupZkeySubdomain(connectionAdapter as any, name);
+        const result = await lookupZkeyName(connectionAdapter as any, name);
         if (!result) {
           // If in address mode, also try as hex
           if (recipientType === "address") {

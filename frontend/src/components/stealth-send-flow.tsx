@@ -32,7 +32,7 @@ import {
   decodeStealthMetaAddress,
   createStealthDeposit,
   deriveTaprootAddress,
-  lookupZkeySubdomain,
+  lookupZkeyName,
   formatBtc,
   type StealthMetaAddress,
   type StealthDeposit,
@@ -132,10 +132,10 @@ export function StealthSendFlow() {
         }
         setError("Invalid stealth address format (expected 130 hex characters)");
       } else {
-        // Try as .zkey.sol name (SNS subdomain)
+        // Try as .zkey.sol name (custom name registry)
         const name = input.replace(/\.zkey\.sol$/i, "").replace(/\.zkey$/i, "");
         const connectionAdapter = getConnectionAdapter();
-        const result = await lookupZkeySubdomain(connectionAdapter as any, name);
+        const result = await lookupZkeyName(connectionAdapter as any, name);
         if (result) {
           setResolvedMeta(result);
           setResolvedName(name);
