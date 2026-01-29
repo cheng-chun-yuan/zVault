@@ -12,7 +12,7 @@ import { cn } from "@/lib/utils";
 import { notifyCopied, notifySuccess, notifyError } from "@/lib/notifications";
 import {
   prepareStealthDeposit,
-  lookupZkeyName,
+  lookupZkeySubdomain,
   decodeStealthMetaAddress,
   bytesToHex,
   createStealthDeposit,
@@ -130,11 +130,11 @@ export function DepositFlow() {
       const isLikelyHex = /^[0-9a-fA-F]{100,}$/.test(trimmed);
 
       if (recipientType === "zkey" || (!isLikelyHex && recipientType === "address")) {
-        // Lookup .zkey name on-chain
-        // Remove .zkey suffix if user included it
-        const name = trimmed.replace(/\.zkey$/i, "");
+        // Lookup .zkey.sol subdomain on SNS
+        // Remove .zkey.sol or .zkey suffix if user included it
+        const name = trimmed.replace(/\.zkey\.sol$/i, "").replace(/\.zkey$/i, "");
         const connectionAdapter = getConnectionAdapter();
-        const result = await lookupZkeyName(connectionAdapter, name);
+        const result = await lookupZkeySubdomain(connectionAdapter as any, name);
         if (!result) {
           // If in address mode, also try as hex
           if (recipientType === "address") {
@@ -144,15 +144,11 @@ export function DepositFlow() {
               return;
             }
           }
-          setError(`Name "${name}.zkey" not found`);
+          setError(`Name "${name}.zkey.sol" not found`);
           return;
         }
-        // Convert to StealthMetaAddress format
-        const meta: StealthMetaAddress = {
-          spendingPubKey: result.spendingPubKey,
-          viewingPubKey: result.viewingPubKey,
-        };
-        setResolvedMeta(meta);
+        // Use resolved stealth address directly
+        setResolvedMeta(result);
       } else {
         // Parse raw stealth address (hex encoded)
         // Try to decode as hex stealth meta-address
@@ -241,8 +237,8 @@ export function DepositFlow() {
               )}
             >
               <Tag className="w-3.5 h-3.5" />
-              .zkey Name
-              <Tooltip content="A human-readable name (like alice.zkey) that maps to a stealth address on Solana.">
+              .zkey.sol Name
+              <Tooltip content="A human-readable name (like alice.zkey.sol) that maps to a stealth address via Solana Name Service.">
                 <Info className="w-3 h-3 opacity-60" />
               </Tooltip>
             </button>
@@ -263,7 +259,7 @@ export function DepositFlow() {
           {/* Recipient Input */}
           <div className="mb-4">
             <label className="text-body2 text-gray-light pl-2 mb-2 block">
-              {recipientType === "zkey" ? "Recipient .zkey Name" : "Recipient Stealth Address"}
+              {recipientType === "zkey" ? "Recipient .zkey.sol Name" : "Recipient Stealth Address"}
             </label>
             <div className="flex gap-2">
               <div className="flex-1 relative">
@@ -271,16 +267,16 @@ export function DepositFlow() {
                   type="text"
                   value={recipient}
                   onChange={(e) => { setRecipient(e.target.value); setResolvedMeta(null); setStealthDeposit(null); }}
-                  placeholder={recipientType === "zkey" ? "alice" : "alice.zkey or 130 hex chars"}
+                  placeholder={recipientType === "zkey" ? "alice" : "alice.zkey.sol or 130 hex chars"}
                   className={cn(
                     "w-full p-3 bg-muted border border-gray/15 rounded-[12px]",
                     "text-body2 font-mono text-foreground placeholder:text-gray",
                     "outline-none focus:border-sol/40 transition-colors",
-                    recipientType === "zkey" ? "pr-16" : ""
+                    recipientType === "zkey" ? "pr-20" : ""
                   )}
                 />
                 {recipientType === "zkey" && (
-                  <span className="absolute right-3 top-1/2 -translate-y-1/2 text-body2 text-gray">.zkey</span>
+                  <span className="absolute right-3 top-1/2 -translate-y-1/2 text-body2 text-gray">.zkey.sol</span>
                 )}
               </div>
               <button

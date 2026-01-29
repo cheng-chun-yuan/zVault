@@ -32,7 +32,7 @@ import {
   decodeStealthMetaAddress,
   createStealthDeposit,
   deriveTaprootAddress,
-  lookupZkeyName,
+  lookupZkeySubdomain,
   formatBtc,
   type StealthMetaAddress,
   type StealthDeposit,
@@ -132,15 +132,12 @@ export function StealthSendFlow() {
         }
         setError("Invalid stealth address format (expected 130 hex characters)");
       } else {
-        // Try as zkey name
-        const name = input.replace(/\.zkey$/i, "");
+        // Try as .zkey.sol name (SNS subdomain)
+        const name = input.replace(/\.zkey\.sol$/i, "").replace(/\.zkey$/i, "");
         const connectionAdapter = getConnectionAdapter();
-        const result = await lookupZkeyName(connectionAdapter, name);
+        const result = await lookupZkeySubdomain(connectionAdapter as any, name);
         if (result) {
-          setResolvedMeta({
-            spendingPubKey: result.spendingPubKey,
-            viewingPubKey: result.viewingPubKey,
-          });
+          setResolvedMeta(result);
           setResolvedName(name);
           return;
         }
@@ -150,7 +147,7 @@ export function StealthSendFlow() {
           setResolvedMeta(meta);
           return;
         }
-        setError(`"${name}.zkey" not found`);
+        setError(`"${name}.zkey.sol" not found`);
       }
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to resolve recipient");
@@ -287,7 +284,7 @@ export function StealthSendFlow() {
           <div className="flex items-center justify-between">
             <span className="text-caption text-gray">Recipient</span>
             <span className="text-caption text-gray-light font-mono">
-              {resolvedName ? `${resolvedName}.zkey` : "Stealth Address"}
+              {resolvedName ? `${resolvedName}.zkey.sol` : "Stealth Address"}
             </span>
           </div>
           <div className="flex items-center justify-between">
@@ -357,7 +354,7 @@ export function StealthSendFlow() {
       {/* Recipient input - supports zkey or hex */}
       <div>
         <label className="text-body2 text-gray-light pl-2 mb-2 block">
-          Recipient (.zkey or stealth address)
+          Recipient (.zkey.sol or stealth address)
         </label>
         <div className="flex gap-2">
           <input
@@ -368,7 +365,7 @@ export function StealthSendFlow() {
               setResolvedName(null);
               setError(null);
             }}
-            placeholder="alice.zkey or 130 hex chars"
+            placeholder="alice.zkey.sol or 130 hex chars"
             className={cn(
               "flex-1 p-3 bg-muted border rounded-[10px]",
               "text-body2 font-mono text-foreground placeholder:text-gray",
@@ -394,7 +391,7 @@ export function StealthSendFlow() {
             {resolvedName ? (
               <>
                 <Tag className="w-3 h-3" />
-                {resolvedName}.zkey resolved
+                {resolvedName}.zkey.sol resolved
               </>
             ) : (
               "Valid stealth address"

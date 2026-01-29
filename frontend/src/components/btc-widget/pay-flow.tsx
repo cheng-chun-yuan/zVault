@@ -606,7 +606,7 @@ export function PayFlow() {
             </>
           )}
 
-          {/* Stealth Mode - .zkey or hex address */}
+          {/* Stealth Mode - .zkey.sol or hex address */}
           {recipientMode === "stealth" && (
             <div className="space-y-2">
               <StealthRecipientInput

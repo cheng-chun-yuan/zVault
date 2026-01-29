@@ -7,7 +7,7 @@ import { cn } from "@/lib/utils";
 import { Tooltip } from "@/components/ui/tooltip";
 import {
   decodeStealthMetaAddress,
-  lookupZkeyName,
+  lookupZkeySubdomain,
   type StealthMetaAddress,
 } from "@zvault/sdk";
 
@@ -49,10 +49,10 @@ export function StealthRecipientInput({
       const isLikelyHex = /^[0-9a-fA-F]{100,}$/.test(trimmed);
 
       if (recipientType === "zkey" || (!isLikelyHex && recipientType === "address")) {
-        // Lookup .zkey name on-chain
-        const name = trimmed.replace(/\.zkey$/i, "");
+        // Lookup .zkey.sol subdomain on SNS
+        const name = trimmed.replace(/\.zkey\.sol$/i, "").replace(/\.zkey$/i, "");
         const connectionAdapter = getConnectionAdapter();
-        const result = await lookupZkeyName(connectionAdapter, name);
+        const result = await lookupZkeySubdomain(connectionAdapter as any, name);
         if (!result) {
           // If in address mode, also try as hex
           if (recipientType === "address") {
@@ -62,16 +62,10 @@ export function StealthRecipientInput({
               return;
             }
           }
-          onError(`"${name}.zkey" not found`);
+          onError(`"${name}.zkey.sol" not found`);
           return;
         }
-        onResolved(
-          {
-            spendingPubKey: result.spendingPubKey,
-            viewingPubKey: result.viewingPubKey,
-          },
-          name
-        );
+        onResolved(result, name);
       } else {
         // Parse raw stealth address (hex encoded)
         const meta = decodeStealthMetaAddress(trimmed);
@@ -115,8 +109,8 @@ export function StealthRecipientInput({
           )}
         >
           <Tag className="w-3.5 h-3.5" />
-          .zkey Name
-          <Tooltip content="A human-readable name (like alice.zkey) that maps to a stealth address on Solana.">
+          .zkey.sol Name
+          <Tooltip content="A human-readable name (like alice.zkey.sol) that maps to a stealth address via Solana Name Service.">
             <Info className="w-3 h-3 opacity-60" />
           </Tooltip>
         </button>
@@ -137,7 +131,7 @@ export function StealthRecipientInput({
       {/* Recipient Input */}
       <div className="mb-2">
         <label className="text-body2 text-gray-light pl-2 mb-2 block">
-          {recipientType === "zkey" ? "Recipient .zkey Name" : "Recipient Stealth Address"}
+          {recipientType === "zkey" ? "Recipient .zkey.sol Name" : "Recipient Stealth Address"}
         </label>
         <div className="flex gap-3">
           <div className="flex-1 relative">
@@ -155,11 +149,11 @@ export function StealthRecipientInput({
                   : resolvedMeta
                     ? "border-privacy/40"
                     : "border-gray/20 focus:border-purple/40",
-                recipientType === "zkey" ? "pr-16" : ""
+                recipientType === "zkey" ? "pr-20" : ""
               )}
             />
             {recipientType === "zkey" && (
-              <span className="absolute right-4 top-1/2 -translate-y-1/2 text-body2 text-gray">.zkey</span>
+              <span className="absolute right-4 top-1/2 -translate-y-1/2 text-body2 text-gray">.zkey.sol</span>
             )}
           </div>
           <button
@@ -191,7 +185,7 @@ export function StealthRecipientInput({
           {resolvedName ? (
             <>
               <Tag className="w-3 h-3" />
-              {resolvedName}.zkey resolved
+              {resolvedName}.zkey.sol resolved
             </>
           ) : (
             "Valid stealth address"

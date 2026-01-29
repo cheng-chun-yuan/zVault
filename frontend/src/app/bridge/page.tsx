@@ -245,9 +245,9 @@ export default function BridgePage() {
                     {formatName(registeredName)}
                   </span>
                   <button
-                    onClick={() => { copy(formatName(registeredName)); notifyCopied(".zkey name"); }}
+                    onClick={() => { copy(formatName(registeredName)); notifyCopied(".zkey.sol name"); }}
                     className="ml-auto p-1.5 rounded-[6px] bg-privacy/10 hover:bg-privacy/20 transition-colors"
-                    title="Copy .zkey name"
+                    title="Copy .zkey.sol name"
                   >
                     {copied ? (
                       <Check className="w-3 h-3 text-green-400" />
@@ -288,8 +288,8 @@ export default function BridgePage() {
                   <Tag className="w-3 h-3" />
                   Register a{" "}
                   <TooltipText
-                    text=".zkey name"
-                    tooltip="A human-readable name (like alice.zkey) that makes it easy for others to send you private payments."
+                    text=".zkey.sol name"
+                    tooltip="A human-readable name (like alice.zkey.sol) via Solana Name Service that makes it easy for others to send you private payments."
                     className="text-privacy"
                   />
                 </button>
@@ -323,7 +323,7 @@ export default function BridgePage() {
                         <Loader2 className="absolute right-3 top-1/2 -translate-y-1/2 w-3 h-3 text-gray animate-spin" />
                       )}
                     </div>
-                    <span className="text-body2 text-gray">.zkey</span>
+                    <span className="text-body2 text-gray">.zkey.sol</span>
                   </div>
                   {nameValidationError && (
                     <p className="text-caption text-red-400 mb-2">{nameValidationError}</p>
