@@ -226,6 +226,7 @@ export function getConfig(): NetworkConfig {
  * Set the network configuration
  *
  * @param network - Network type or custom config
+ * @throws Error if mainnet is selected (not yet deployed)
  */
 export function setConfig(network: NetworkType | NetworkConfig): void {
   if (typeof network === "string") {
@@ -234,8 +235,11 @@ export function setConfig(network: NetworkType | NetworkConfig): void {
         currentConfig = DEVNET_CONFIG;
         break;
       case "mainnet":
-        currentConfig = MAINNET_CONFIG;
-        break;
+        throw new Error(
+          "Mainnet is not yet deployed. " +
+          "zVault is currently available on devnet only. " +
+          "Use setConfig('devnet') or wait for mainnet deployment announcement."
+        );
       case "localnet":
         currentConfig = LOCALNET_CONFIG;
         break;
@@ -243,6 +247,13 @@ export function setConfig(network: NetworkType | NetworkConfig): void {
         throw new Error(`Unknown network: ${network}`);
     }
   } else {
+    // Check if custom config is using placeholder mainnet addresses
+    if (network.network === "mainnet" && network.zvaultProgramId === MAINNET_CONFIG.zvaultProgramId) {
+      throw new Error(
+        "Cannot use placeholder mainnet configuration. " +
+        "Mainnet is not yet deployed."
+      );
+    }
     currentConfig = network;
   }
 }

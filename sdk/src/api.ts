@@ -165,6 +165,8 @@ export interface RpcClient {
   getLatestBlockhash: () => Promise<{ blockhash: string; lastValidBlockHeight: bigint }>;
   sendTransaction: (transaction: Uint8Array) => Promise<string>;
   confirmTransaction: (signature: string) => Promise<void>;
+  /** Optional: simulate transaction before sending (recommended for production) */
+  simulateTransaction?: (transaction: Uint8Array) => Promise<{ err: unknown | null; logs?: string[] }>;
 }
 
 /**
@@ -218,6 +220,8 @@ async function deriveCommitmentTreePDA(programId: Address): Promise<[Address, nu
 
 /**
  * Send an instruction and confirm (v2 pattern)
+ *
+ * If RPC client supports simulation, simulates first to catch errors early.
  */
 async function sendInstruction(
   config: ApiClientConfig,
@@ -244,9 +248,26 @@ async function sendInstruction(
   const compiledTx = compileTransaction(message);
   const signedTx = await config.payer.signTransaction(compiledTx as any);
 
-  // Send
+  // Get transaction bytes
   const txBytes = getBase64EncodedWireTransaction(signedTx as any);
-  const signature = await config.rpc.sendTransaction(new TextEncoder().encode(txBytes));
+  const txBytesEncoded = new TextEncoder().encode(txBytes);
+
+  // Simulate transaction before sending (if supported)
+  if (config.rpc.simulateTransaction) {
+    const simResult = await config.rpc.simulateTransaction(txBytesEncoded);
+    if (simResult.err) {
+      const errorMsg = typeof simResult.err === "string"
+        ? simResult.err
+        : JSON.stringify(simResult.err);
+      const logs = simResult.logs?.join("\n") ?? "";
+      throw new Error(
+        `Transaction simulation failed: ${errorMsg}${logs ? `\nLogs:\n${logs}` : ""}`
+      );
+    }
+  }
+
+  // Send transaction
+  const signature = await config.rpc.sendTransaction(txBytesEncoded);
   await config.rpc.confirmTransaction(signature);
 
   return signature;
@@ -347,6 +368,28 @@ async function deriveAssociatedTokenAccount(
 // 1. DEPOSIT
 // ============================================================================
 
+/** Maximum BTC supply in satoshis (21 million BTC) */
+const MAX_SATS = 21_000_000n * 100_000_000n;
+
+/** Minimum dust amount (546 sats - Bitcoin dust limit) */
+const MIN_DUST_SATS = 546n;
+
+/**
+ * Validate amount in satoshis
+ * @throws Error if amount is invalid
+ */
+function validateAmount(amountSats: bigint, context: string): void {
+  if (amountSats <= 0n) {
+    throw new Error(`${context}: Amount must be positive`);
+  }
+  if (amountSats < MIN_DUST_SATS) {
+    throw new Error(`${context}: Amount ${amountSats} sats is below dust limit (${MIN_DUST_SATS} sats)`);
+  }
+  if (amountSats > MAX_SATS) {
+    throw new Error(`${context}: Amount exceeds maximum BTC supply`);
+  }
+}
+
 /**
  * Generate deposit credentials (creates a claim link)
  *
@@ -360,10 +403,11 @@ async function deriveAssociatedTokenAccount(
  * 4. User sends BTC to taproot address externally
  * 5. Later: call verifyDeposit to add commitment to on-chain tree
  *
- * @param amountSats - Amount in satoshis
+ * @param amountSats - Amount in satoshis (must be > 546 sats dust limit)
  * @param network - Bitcoin network (mainnet/testnet)
  * @param baseUrl - Base URL for claim link
  * @returns Deposit credentials with claim link
+ * @throws Error if amount is invalid (zero, negative, dust, or exceeds max supply)
  *
  * @example
  * ```typescript
@@ -377,6 +421,9 @@ export async function depositToNote(
   network: "mainnet" | "testnet" = "testnet",
   baseUrl?: string
 ): Promise<DepositResult> {
+  // Validate amount
+  validateAmount(amountSats, "depositToNote");
+
   // Generate note with random secrets
   const note = generateNote(amountSats);
 
@@ -448,6 +495,13 @@ export async function withdraw(
   }
 
   const actualWithdrawAmount = withdrawAmount ?? note.amount;
+
+  // Validate withdrawal amount
+  validateAmount(actualWithdrawAmount, "withdraw");
+  if (actualWithdrawAmount > note.amount) {
+    throw new Error(`withdraw: Amount ${actualWithdrawAmount} exceeds note balance ${note.amount}`);
+  }
+
   const isPartialWithdraw = actualWithdrawAmount < note.amount;
 
   // Hash BTC address for recipient field
@@ -881,15 +935,15 @@ export async function claimPublicStealth(
  * 1. Knowledge of stealthPrivKey such that stealthPub = stealthPrivKey * G
  * 2. Commitment = Poseidon2(stealthPub.x, amount) exists in tree
  * 3. Nullifier = Poseidon2(stealthPrivKey, leafIndex) is correctly computed
+ *
+ * @throws Error - Stealth claim proof generation not yet implemented
  */
 async function generateStealthClaimProof(
   claimInputs: import("./stealth").ClaimInputs,
   merkleProof: MerkleProof
 ): Promise<NoirProof> {
-  // For now, return a placeholder proof
-  // In production, this would call the Noir prover with stealth_claim circuit
-  //
-  // Circuit inputs would be:
+  // TODO: Implement stealth_claim circuit integration
+  // Circuit inputs:
   // - stealth_priv_key: claimInputs.stealthPrivKey (private)
   // - amount: claimInputs.amount (private)
   // - leaf_index: claimInputs.leafIndex (private)
@@ -899,22 +953,10 @@ async function generateStealthClaimProof(
   // - nullifier_hash: hash(claimInputs.nullifier) (public)
   // - amount_pub: claimInputs.amountPub (public)
 
-  // Placeholder proof for testing
-  const placeholderProof = new Uint8Array(256);
-  placeholderProof[0] = 1;
-  placeholderProof[64] = 1;
-  placeholderProof[192] = 1;
-
-  return {
-    proof: placeholderProof,
-    publicInputs: [
-      claimInputs.merkleRoot.toString(16).padStart(64, "0"),
-      hashNullifier(claimInputs.nullifier).toString(16).padStart(64, "0"),
-      claimInputs.amountPub.toString(),
-    ],
-    verificationKey: new Uint8Array(0),
-    vkHash: new Uint8Array(32),
-  };
+  throw new Error(
+    "Stealth claim proof generation not yet implemented. " +
+    "Use claimPublic() with a regular note instead, or wait for stealth_claim circuit support."
+  );
 }
 
 // ============================================================================
@@ -963,8 +1005,12 @@ export async function splitNote(
 
   const amount2 = inputNote.amount - amount1;
 
-  if (amount1 <= 0n || amount2 <= 0n) {
-    throw new Error("Both output amounts must be positive");
+  // Validate both output amounts
+  validateAmount(amount1, "splitNote (output1)");
+  validateAmount(amount2, "splitNote (output2)");
+
+  if (amount1 + amount2 !== inputNote.amount) {
+    throw new Error("splitNote: Output amounts must equal input amount");
   }
 
   // Generate output notes
