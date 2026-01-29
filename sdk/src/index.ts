@@ -319,13 +319,10 @@ export {
 } from "./pda";
 
 // ==========================================================================
-// Verify deposit helpers
+// Bitcoin SPV helpers
 // ==========================================================================
 
-export {
-  verifyDeposit,
-  buildMerkleProof,
-} from "./verify-deposit";
+export { buildMerkleProof } from "./chadbuffer";
 
 // ==========================================================================
 // Main SDK client types - Node.js only (requires proof generation)
@@ -509,22 +506,18 @@ export {
 
 export {
   // Instruction data builders
-  buildAddDemoNoteData,
   buildAddDemoStealthData,
-  buildAddDemoNoteDataFromParams,
   buildAddDemoStealthDataFromParams,
   // PDA seed helpers
   getPoolStatePDASeeds,
   getCommitmentTreePDASeeds,
   getStealthAnnouncementPDASeeds,
   // Account meta helpers
-  getDemoNoteAccountMetas,
   getDemoStealthAccountMetas,
   // Constants
   DEMO_INSTRUCTION,
   DEMO_SEEDS,
   // Types
-  type AddDemoNoteParams,
   type AddDemoStealthParams,
   type PDASeed,
 } from "./demo";

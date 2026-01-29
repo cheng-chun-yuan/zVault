@@ -1,9 +1,10 @@
 //! zVault - Privacy-Preserving BTC to Solana Bridge (Pinocchio)
 //!
-//! SHIELDED-ONLY ARCHITECTURE:
+//! SHIELDED-ONLY ARCHITECTURE (Unified Stealth Model):
 //! - zBTC exists only as commitments in Merkle tree
 //! - Users never hold public zBTC tokens
 //! - Amount revealed ONLY at BTC withdrawal
+//! - All deposits use stealth announcements for recipient discovery
 //!
 //! ## Privacy Guarantee
 //!
@@ -17,11 +18,11 @@
 //! ## Core Flow
 //!
 //! ```text
-//! BTC Deposit → Verify SPV → Mint to Pool → Commitment in Tree
-//!                                                    ↓
-//!                            Split/Transfer (private, ZK proof)
-//!                                                    ↓
-//!                    Withdraw → ZK Proof → Burn from Pool → BTC
+//! BTC Deposit → Verify SPV → Stealth Announcement → Mint to Pool → Commitment in Tree
+//!                                                                          ↓
+//!                                      Split/Transfer (private, ZK proof)
+//!                                                                          ↓
+//!                              Withdraw → ZK Proof → Burn from Pool → BTC
 //! ```
 
 use pinocchio::{
@@ -48,16 +49,14 @@ pub const ID: Pubkey = [
 
 /// Instruction discriminators
 pub mod instruction {
-    // Core operations (Unified Model)
+    // Core operations (Unified Stealth Model)
     pub const INITIALIZE: u8 = 0;
     pub const SPEND_SPLIT: u8 = 4;           // spend_split circuit (1→2)
     pub const REQUEST_REDEMPTION: u8 = 5;
     pub const COMPLETE_REDEMPTION: u8 = 6;
     pub const SET_PAUSED: u8 = 7;
-    pub const VERIFY_DEPOSIT: u8 = 8;
     pub const CLAIM: u8 = 9;                 // claim circuit (full public)
     pub const SPEND_PARTIAL_PUBLIC: u8 = 10; // spend_partial_public circuit
-    pub const ANNOUNCE_STEALTH: u8 = 16;
 
     // Name registry
     pub const REGISTER_NAME: u8 = 17;
@@ -65,16 +64,11 @@ pub mod instruction {
     pub const TRANSFER_NAME: u8 = 19;
 
     // Demo/testing (admin only) - DISABLED IN PRODUCTION
-    // SECURITY: These instructions are only available on devnet/testnet.
-    // Set ZVAULT_DEMO_MODE=1 environment variable to enable.
-    // DO NOT enable in production builds.
-    #[cfg(feature = "devnet")]
-    pub const ADD_DEMO_NOTE: u8 = 21;
     #[cfg(feature = "devnet")]
     pub const ADD_DEMO_STEALTH: u8 = 22;
 
-    // Backend-managed stealth deposit v2 (authority only)
-    pub const VERIFY_STEALTH_DEPOSIT_V2: u8 = 23;
+    // Unified stealth deposit (authority only) - THE deposit instruction
+    pub const VERIFY_STEALTH_DEPOSIT: u8 = 23;
 
     // Yield pool operations (zkEarn)
     pub const CREATE_YIELD_POOL: u8 = 30;
@@ -103,12 +97,12 @@ pub fn process_instruction(
         .ok_or(ProgramError::InvalidInstructionData)?;
 
     match *discriminator {
-        // Core operations
+        // Core operations (Unified Stealth Model)
         instruction::INITIALIZE => {
             instructions::process_initialize(program_id, accounts, data)
         }
-        instruction::VERIFY_DEPOSIT => {
-            instructions::process_verify_deposit(program_id, accounts, data)
+        instruction::VERIFY_STEALTH_DEPOSIT => {
+            instructions::process_verify_stealth_deposit_v2(program_id, accounts, data)
         }
         instruction::CLAIM => {
             instructions::process_claim(program_id, accounts, data)
@@ -128,9 +122,6 @@ pub fn process_instruction(
         instruction::SET_PAUSED => {
             process_set_paused(program_id, accounts, data)
         }
-        instruction::ANNOUNCE_STEALTH => {
-            instructions::process_announce_stealth(program_id, accounts, data)
-        }
         // Name registry
         instruction::REGISTER_NAME => {
             instructions::process_register_name(program_id, accounts, data)
@@ -143,16 +134,8 @@ pub fn process_instruction(
         }
         // Demo/testing - DISABLED IN PRODUCTION
         #[cfg(feature = "devnet")]
-        instruction::ADD_DEMO_NOTE => {
-            instructions::process_add_demo_note(program_id, accounts, data)
-        }
-        #[cfg(feature = "devnet")]
         instruction::ADD_DEMO_STEALTH => {
             instructions::process_add_demo_stealth(program_id, accounts, data)
-        }
-        // Backend-managed stealth deposit v2
-        instruction::VERIFY_STEALTH_DEPOSIT_V2 => {
-            instructions::process_verify_stealth_deposit_v2(program_id, accounts, data)
         }
         // Yield pool operations
         instruction::CREATE_YIELD_POOL => {
@@ -251,13 +234,11 @@ mod tests {
             instruction::REQUEST_REDEMPTION,
             instruction::COMPLETE_REDEMPTION,
             instruction::SET_PAUSED,
-            instruction::VERIFY_DEPOSIT,
             instruction::CLAIM,
-            instruction::ANNOUNCE_STEALTH,
             instruction::REGISTER_NAME,
             instruction::UPDATE_NAME,
             instruction::TRANSFER_NAME,
-            instruction::VERIFY_STEALTH_DEPOSIT_V2,
+            instruction::VERIFY_STEALTH_DEPOSIT,
             // Yield pool operations
             instruction::CREATE_YIELD_POOL,
             instruction::DEPOSIT_TO_POOL,
@@ -269,8 +250,6 @@ mod tests {
             instruction::INIT_VK_REGISTRY,
             instruction::UPDATE_VK_REGISTRY,
             // Demo instructions (only in devnet builds)
-            #[cfg(feature = "devnet")]
-            instruction::ADD_DEMO_NOTE,
             #[cfg(feature = "devnet")]
             instruction::ADD_DEMO_STEALTH,
         ];

@@ -198,14 +198,13 @@ export interface ApiClientConfig {
 /** Default program ID (Solana Devnet) - imported from pda.ts */
 export { ZVAULT_PROGRAM_ID as DEFAULT_PROGRAM_ID } from "./pda";
 
-/** Instruction discriminators (Unified Model) */
+/** Instruction discriminators (Unified Stealth Model) */
 const INSTRUCTION = {
   SPEND_SPLIT: 4,
   REQUEST_REDEMPTION: 5,
-  VERIFY_DEPOSIT: 8,
   CLAIM: 9,
   SPEND_PARTIAL_PUBLIC: 10,
-  ANNOUNCE_STEALTH: 16,
+  VERIFY_STEALTH_DEPOSIT: 23,
 } as const;
 
 // ============================================================================
@@ -1073,74 +1072,25 @@ export function createClaimLinkFromNote(note: Note, baseUrl?: string): string {
  * 4. Recipient scans announcements with view key
  * 5. Recipient prepares claim inputs with spending key
  *
+ * @deprecated Use backend-managed stealth deposits via verify_stealth_deposit instead.
+ * In the unified stealth model, announcements are created during BTC deposit verification.
+ *
  * @param config - Client configuration
  * @param recipientMeta - Recipient's stealth meta-address (spending + viewing public keys)
  * @param amountSats - Amount in satoshis
  * @param leafIndex - Leaf index in commitment tree
  * @returns Stealth result
- *
- * @example
- * ```typescript
- * // Send to Alice's stealth address
- * const result = await sendStealth(config, aliceMetaAddress, 100_000n);
- *
- * // Alice scans and claims
- * const found = await scanAnnouncements(aliceKeys, announcements);
- * const claimInputs = await prepareClaimInputs(aliceKeys, found[0], merkleProof);
- * ```
  */
 export async function sendStealth(
-  config: ApiClientConfig,
-  recipientMeta: StealthMetaAddress,
-  amountSats: bigint,
-  leafIndex: number = 0
+  _config: ApiClientConfig,
+  _recipientMeta: StealthMetaAddress,
+  _amountSats: bigint,
+  _leafIndex: number = 0
 ): Promise<StealthResult> {
-  if (!config.payer) {
-    throw new Error("Payer keypair required for stealth send");
-  }
-
-  // Create stealth deposit data using dual-key ECDH
-  const stealthDeposit = await createStealthDeposit(recipientMeta, amountSats);
-
-  // Build instruction data (73 bytes - single ephemeral key format)
-  // ephemeral_pub (33) + amount_sats (8) + commitment (32)
-  const data = new Uint8Array(1 + 73);
-  data[0] = INSTRUCTION.ANNOUNCE_STEALTH;
-
-  let offset = 1;
-  data.set(stealthDeposit.ephemeralPub, offset);
-  offset += 33;
-
-  const amountView = new DataView(data.buffer, offset, 8);
-  amountView.setBigUint64(0, amountSats, true);
-  offset += 8;
-
-  data.set(stealthDeposit.commitment, offset);
-
-  // Derive stealth announcement PDA
-  const [stealthAnnouncement] = await deriveStealthAnnouncementPDA(
-    config.programId,
-    stealthDeposit.ephemeralPub
+  throw new Error(
+    "sendStealth is deprecated. Use backend-managed stealth deposits via verify_stealth_deposit. " +
+    "In the unified stealth model, stealth announcements are created during BTC deposit verification."
   );
-
-  // Build instruction (v2 format)
-  const ix: Instruction = {
-    programAddress: config.programId,
-    accounts: [
-      { address: stealthAnnouncement, role: AccountRole.WRITABLE },
-      { address: config.payer.address, role: AccountRole.WRITABLE_SIGNER },
-      { address: SYSTEM_PROGRAM_ADDRESS, role: AccountRole.READONLY },
-    ],
-    data: new Uint8Array(data),
-  };
-
-  const signature = await sendInstruction(config, ix);
-
-  return {
-    signature,
-    ephemeralPubKey: stealthDeposit.ephemeralPub,
-    leafIndex,
-  };
 }
 
 // ============================================================================

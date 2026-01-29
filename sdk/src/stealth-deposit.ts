@@ -68,8 +68,8 @@ import {
   deriveBlockHeaderPDA,
   deriveCommitmentTreePDA,
   deriveDepositRecordPDA,
-  buildMerkleProof,
-} from "./verify-deposit";
+} from "./pda";
+import { buildMerkleProof } from "./chadbuffer";
 
 // ========== Constants ==========
 
@@ -344,9 +344,9 @@ export async function verifyStealthDeposit(
   // Step 3: Derive PDAs
   const [poolState] = await derivePoolStatePDA(programId);
   const [lightClient] = await deriveLightClientPDA(programId);
-  const [blockHeader] = await deriveBlockHeaderPDA(programId, blockHeight);
+  const [blockHeader] = await deriveBlockHeaderPDA(blockHeight, programId);
   const [commitmentTree] = await deriveCommitmentTreePDA(programId);
-  const [depositRecord] = await deriveDepositRecordPDA(programId, txidBytes);
+  const [depositRecord] = await deriveDepositRecordPDA(txidBytes, programId);
   const [stealthAnnouncement] = await deriveStealthAnnouncementPDA(
     programId,
     ephemeralPub
@@ -416,28 +416,18 @@ export async function verifyStealthDeposit(
  * Build instruction data for verify_stealth_deposit
  *
  * Includes ephemeralPub since OP_RETURN only contains commitment.
+ * merkleProof is pre-serialized bytes from buildMerkleProof().
  */
 function buildVerifyStealthDepositData(params: {
   txid: Uint8Array;
   blockHeight: bigint;
   expectedValue: bigint;
   transactionSize: number;
-  merkleProof: {
-    txid: number[];
-    siblings: number[][];
-    path: boolean[];
-    txIndex: number;
-  };
+  merkleProof: Uint8Array;
   ephemeralPub: Uint8Array;
 }): Uint8Array {
   // Calculate size: discriminator + txid + block_height + expected_value + tx_size + ephemeral_pub + merkle_proof
-  const proofSize =
-    32 +
-    4 +
-    params.merkleProof.siblings.length * 32 +
-    Math.ceil(params.merkleProof.path.length / 8);
-
-  const data = new Uint8Array(1 + 32 + 8 + 8 + 4 + 33 + proofSize);
+  const data = new Uint8Array(1 + 32 + 8 + 8 + 4 + 33 + params.merkleProof.length);
   let offset = 0;
 
   // Discriminator
@@ -473,37 +463,8 @@ function buildVerifyStealthDepositData(params: {
   data.set(params.ephemeralPub, offset);
   offset += 33;
 
-  // Merkle proof
-  // Txid (32 bytes)
-  data.set(new Uint8Array(params.merkleProof.txid), offset);
-  offset += 32;
-
-  // Siblings count (4 bytes, LE)
-  const siblingCountBytes = new Uint8Array(4);
-  new DataView(siblingCountBytes.buffer).setUint32(
-    0,
-    params.merkleProof.siblings.length,
-    true
-  );
-  data.set(siblingCountBytes, offset);
-  offset += 4;
-
-  // Siblings
-  for (const sibling of params.merkleProof.siblings) {
-    data.set(new Uint8Array(sibling), offset);
-    offset += 32;
-  }
-
-  // Path bits (packed)
-  const pathBytes = new Uint8Array(
-    Math.ceil(params.merkleProof.path.length / 8)
-  );
-  for (let i = 0; i < params.merkleProof.path.length; i++) {
-    if (params.merkleProof.path[i]) {
-      pathBytes[Math.floor(i / 8)] |= 1 << (i % 8);
-    }
-  }
-  data.set(pathBytes, offset);
+  // Merkle proof (pre-serialized bytes)
+  data.set(params.merkleProof, offset);
 
   return data;
 }

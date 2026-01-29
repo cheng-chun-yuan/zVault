@@ -385,6 +385,59 @@ export function bytesToHex(bytes: Uint8Array): string {
 }
 
 /**
+ * Build merkle proof data for on-chain verification
+ *
+ * Layout:
+ * - txid: [u8; 32]
+ * - num_siblings: u8
+ * - siblings: [[u8; 32]; num_siblings]
+ * - tx_index: u32 (little-endian)
+ *
+ * @param txidBytes - 32-byte txid (already reversed for internal byte order)
+ * @param merkleProof - Array of 32-byte sibling hashes
+ * @param txIndex - Transaction index in block
+ * @returns Merkle proof data as Uint8Array
+ */
+export function buildMerkleProof(
+  txidBytes: Uint8Array,
+  merkleProof: Uint8Array[],
+  txIndex: number
+): Uint8Array {
+  if (txidBytes.length !== 32) {
+    throw new Error("txid must be 32 bytes");
+  }
+
+  const numSiblings = merkleProof.length;
+  // txid (32) + num_siblings (1) + siblings (32 * n) + tx_index (4)
+  const totalSize = 32 + 1 + numSiblings * 32 + 4;
+  const data = new Uint8Array(totalSize);
+
+  let offset = 0;
+
+  // txid
+  data.set(txidBytes, offset);
+  offset += 32;
+
+  // num_siblings
+  data[offset++] = numSiblings;
+
+  // siblings
+  for (const sibling of merkleProof) {
+    if (sibling.length !== 32) {
+      throw new Error("Each sibling must be 32 bytes");
+    }
+    data.set(sibling, offset);
+    offset += 32;
+  }
+
+  // tx_index (u32 little-endian)
+  const indexView = new DataView(data.buffer, offset, 4);
+  indexView.setUint32(0, txIndex, true);
+
+  return data;
+}
+
+/**
  * Complete flow: Fetch tx, upload to buffer, return verification data
  */
 export async function prepareVerifyDeposit(

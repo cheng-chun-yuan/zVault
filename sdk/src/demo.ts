@@ -1,7 +1,7 @@
 /**
  * Demo Instruction Builders for zVault
  *
- * These allow adding mock commitments without real BTC deposits.
+ * These allow adding mock stealth commitments without real BTC deposits.
  * Useful for testing, demos, and development.
  *
  * Platform-agnostic builders that return instruction data as Uint8Array.
@@ -9,10 +9,10 @@
  *
  * @example
  * ```typescript
- * import { buildAddDemoNoteData, DEMO_INSTRUCTION } from '@zvault/sdk';
+ * import { buildAddDemoStealthData, DEMO_INSTRUCTION } from '@zvault/sdk';
  *
  * // Build instruction data
- * const data = buildAddDemoNoteData(secret);
+ * const data = buildAddDemoStealthData(ephemeralPub, commitment, encryptedAmount);
  *
  * // Use with @solana/web3.js
  * const instruction = new TransactionInstruction({
@@ -29,8 +29,6 @@ import { ZVAULT_PROGRAM_ID } from "./name-registry";
 
 /** Demo instruction discriminators */
 export const DEMO_INSTRUCTION = {
-  /** Add a demo note (self deposit) */
-  ADD_DEMO_NOTE: 21,
   /** Add a demo stealth deposit */
   ADD_DEMO_STEALTH: 22,
 } as const;
@@ -43,14 +41,6 @@ export const DEMO_SEEDS = {
 } as const;
 
 // ========== Types ==========
-
-/**
- * Parameters for ADD_DEMO_NOTE instruction
- */
-export interface AddDemoNoteParams {
-  /** 32-byte secret (contract derives nullifier and commitment) */
-  secret: Uint8Array;
-}
 
 /**
  * Parameters for ADD_DEMO_STEALTH instruction
@@ -119,28 +109,6 @@ export function getStealthAnnouncementPDASeeds(ephemeralPub: Uint8Array): PDASee
 // ========== Instruction Data Builders ==========
 
 /**
- * Build instruction data for ADD_DEMO_NOTE
- *
- * Layout (33 bytes):
- * - discriminator (1 byte) = 21
- * - secret (32 bytes)
- *
- * @param secret - 32-byte secret
- * @returns Instruction data as Uint8Array
- */
-export function buildAddDemoNoteData(secret: Uint8Array): Uint8Array {
-  if (secret.length !== 32) {
-    throw new Error("Secret must be 32 bytes");
-  }
-
-  const data = new Uint8Array(33);
-  data[0] = DEMO_INSTRUCTION.ADD_DEMO_NOTE;
-  data.set(secret, 1);
-
-  return data;
-}
-
-/**
  * Build instruction data for ADD_DEMO_STEALTH
  *
  * Layout (74 bytes):
@@ -190,13 +158,6 @@ export function buildAddDemoStealthData(
 }
 
 /**
- * Build instruction data from params object for ADD_DEMO_NOTE
- */
-export function buildAddDemoNoteDataFromParams(params: AddDemoNoteParams): Uint8Array {
-  return buildAddDemoNoteData(params.secret);
-}
-
-/**
  * Build instruction data from params object for ADD_DEMO_STEALTH
  */
 export function buildAddDemoStealthDataFromParams(params: AddDemoStealthParams): Uint8Array {
@@ -208,32 +169,6 @@ export function buildAddDemoStealthDataFromParams(params: AddDemoStealthParams):
 }
 
 // ========== Account Keys Helpers ==========
-
-/**
- * Get the list of account keys needed for ADD_DEMO_NOTE instruction
- *
- * Returns the account order for constructing the instruction:
- * 1. Pool State (writable)
- * 2. Commitment Tree (writable)
- * 3. Payer (signer)
- * 4. zBTC Mint (writable)
- * 5. Pool Vault (writable)
- * 6. Token-2022 Program
- */
-export function getDemoNoteAccountMetas(): {
-  name: string;
-  writable: boolean;
-  signer: boolean;
-}[] {
-  return [
-    { name: "poolState", writable: true, signer: false },
-    { name: "commitmentTree", writable: true, signer: false },
-    { name: "payer", writable: false, signer: true },
-    { name: "zbtcMint", writable: true, signer: false },
-    { name: "poolVault", writable: true, signer: false },
-    { name: "tokenProgram", writable: false, signer: false },
-  ];
-}
 
 /**
  * Get the list of account keys needed for ADD_DEMO_STEALTH instruction
