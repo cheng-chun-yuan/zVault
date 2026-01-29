@@ -87,12 +87,14 @@ export default function BridgePage() {
   const { copied, copy } = useCopyToClipboard();
   const {
     registeredName,
+    hasRegisteredName,
     isLoading: isLoadingName,
     isRegistering,
     isCheckingAvailability,
     isNameTaken,
     error: nameError,
     registerName,
+    verifyMyName,
     formatName,
     validateName,
     checkAvailability,
@@ -121,6 +123,19 @@ export default function BridgePage() {
 
   const handleRegisterName = async () => {
     if (!nameInput || nameValidationError) return;
+
+    // If user already has a registered name, try to verify instead of register
+    if (hasRegisteredName && !registeredName) {
+      const verified = await verifyMyName(nameInput);
+      if (verified) {
+        setShowNameInput(false);
+        setNameInput("");
+        return;
+      }
+      // If verification failed, the name might not be theirs
+      // Fall through to try registration (will fail if name is taken)
+    }
+
     const success = await registerName(nameInput);
     if (success) {
       setShowNameInput(false);
@@ -279,19 +294,25 @@ export default function BridgePage() {
                 </button>
               </div>
 
-              {/* Name registration - only show if no name and not loading */}
+              {/* Name registration/verification - only show if no name and not loading */}
               {!registeredName && !showNameInput && !isLoadingName && (
                 <button
                   onClick={() => setShowNameInput(true)}
                   className="flex items-center gap-2 text-caption text-privacy hover:text-privacy/80 transition-colors mt-2"
                 >
                   <Tag className="w-3 h-3" />
-                  Register a{" "}
-                  <TooltipText
-                    text=".zkey.sol name"
-                    tooltip="A human-readable name (like alice.zkey.sol) via Solana Name Service that makes it easy for others to send you private payments."
-                    className="text-privacy"
-                  />
+                  {hasRegisteredName ? (
+                    <>Verify your .zkey.sol name</>
+                  ) : (
+                    <>
+                      Register a{" "}
+                      <TooltipText
+                        text=".zkey.sol name"
+                        tooltip="A human-readable name (like alice.zkey.sol) that makes it easy for others to send you private payments."
+                        className="text-privacy"
+                      />
+                    </>
+                  )}
                 </button>
               )}
               {isLoadingName && (
@@ -337,7 +358,7 @@ export default function BridgePage() {
                   <div className="flex gap-2">
                     <button
                       onClick={handleRegisterName}
-                      disabled={isRegistering || isCheckingAvailability || isNameTaken || !nameInput || !!nameValidationError}
+                      disabled={isRegistering || isCheckingAvailability || (isNameTaken && !hasRegisteredName) || !nameInput || !!nameValidationError}
                       className={cn(
                         "flex-1 flex items-center justify-center gap-2 px-3 py-2 rounded-[8px]",
                         "bg-privacy hover:bg-privacy/80 text-background",
@@ -348,7 +369,7 @@ export default function BridgePage() {
                       {isRegistering ? (
                         <>
                           <Loader2 className="w-3 h-3 animate-spin" />
-                          Registering...
+                          {hasRegisteredName ? "Verifying..." : "Registering..."}
                         </>
                       ) : isCheckingAvailability ? (
                         <>
@@ -358,7 +379,7 @@ export default function BridgePage() {
                       ) : (
                         <>
                           <Tag className="w-3 h-3" />
-                          Register
+                          {hasRegisteredName && !registeredName ? "Verify" : "Register"}
                         </>
                       )}
                     </button>

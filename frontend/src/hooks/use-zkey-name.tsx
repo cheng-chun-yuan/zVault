@@ -181,6 +181,24 @@ export function useZkeyName(): UseZkeyNameReturn {
     setError(null);
 
     try {
+      // First, check if we have a cached name from this session and verify it
+      const cachedName = typeof window !== "undefined" ? sessionStorage.getItem(`zkey_name_${wallet.publicKey.toBase58()}`) : null;
+      if (cachedName) {
+        const entry = await lookupName(cachedName);
+        if (entry) {
+          const entrySpendingHex = Buffer.from(entry.spendingPubKey).toString("hex");
+          const ourSpendingHex = Buffer.from(stealthAddress.spendingPubKey).toString("hex");
+          if (entrySpendingHex === ourSpendingHex) {
+            setRegisteredName(cachedName);
+            setHasRegisteredName(true);
+            return;
+          }
+        }
+        // Cached name invalid, clear it
+        sessionStorage.removeItem(`zkey_name_${wallet.publicKey.toBase58()}`);
+      }
+
+      // Scan program accounts to check if user has any registered name
       const accounts = await connection.getProgramAccounts(PROGRAM_ID, {
         filters: [
           { dataSize: 180 },
@@ -194,6 +212,8 @@ export function useZkeyName(): UseZkeyNameReturn {
           const entrySpendingHex = Buffer.from(entry.spendingPubKey).toString("hex");
           const ourSpendingHex = Buffer.from(stealthAddress.spendingPubKey).toString("hex");
           if (entrySpendingHex === ourSpendingHex) {
+            // Found matching account but don't know the name (only hash stored)
+            // User will need to verify their name
             setHasRegisteredName(true);
             return;
           }
@@ -208,7 +228,7 @@ export function useZkeyName(): UseZkeyNameReturn {
     } finally {
       setIsLoading(false);
     }
-  }, [wallet.publicKey, stealthAddress, connection]);
+  }, [wallet.publicKey, stealthAddress, connection, lookupName]);
 
   // Verify ownership of a specific name
   const verifyMyName = useCallback(async (name: string): Promise<boolean> => {
@@ -227,6 +247,10 @@ export function useZkeyName(): UseZkeyNameReturn {
       if (entrySpendingHex === ourSpendingHex) {
         setRegisteredName(normalized);
         setHasRegisteredName(true);
+        // Cache verified name in sessionStorage
+        if (typeof window !== "undefined") {
+          sessionStorage.setItem(`zkey_name_${wallet.publicKey.toBase58()}`, normalized);
+        }
         return true;
       }
       return false;
@@ -301,6 +325,10 @@ export function useZkeyName(): UseZkeyNameReturn {
 
       setRegisteredName(normalized);
       setHasRegisteredName(true);
+      // Cache name in sessionStorage for page reload recovery
+      if (typeof window !== "undefined") {
+        sessionStorage.setItem(`zkey_name_${wallet.publicKey.toBase58()}`, normalized);
+      }
       console.log(`[zkey.sol] Registered: ${formatZkeyName(normalized)} (tx: ${txid})`);
       return true;
     } catch (err) {
