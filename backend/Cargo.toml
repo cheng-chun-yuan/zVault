@@ -51,6 +51,9 @@ dotenv = "0.15"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["json", "env-filter"] }
 
+# UUID for FROST sessions
+uuid = { version = "1", features = ["v4"] }
+
 # SQLite for persistent storage
 rusqlite = { version = "0.31", features = ["bundled"] }
 r2d2 = "0.8"

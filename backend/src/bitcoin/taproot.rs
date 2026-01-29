@@ -390,6 +390,158 @@ impl TaprootDepositDualPathRaw {
     }
 }
 
+// ============================================================================
+// FROST-based Dual-Path Address Generation
+// ============================================================================
+
+/// Generate a dual-path Taproot deposit address using FROST group public key
+///
+/// This function is used when the vault operates with FROST threshold signing.
+/// The address has two spending paths:
+/// - **Key Path (Vault Sweep)**: FROST signers can spend immediately
+/// - **Script Path (User Refund)**: User can refund after timelock with their signature
+///
+/// The commitment is embedded via a tweak to ensure each deposit gets a unique address
+/// while still being spendable by the FROST group.
+///
+/// # Arguments
+/// * `frost_group_pubkey` - The FROST group public key (x-only 32 bytes)
+/// * `user_pubkey` - User's x-only pubkey for the refund script
+/// * `commitment` - The commitment bytes (32 bytes, typically SHA256(nullifier || secret))
+/// * `timelock_blocks` - Number of blocks until user can refund (144 for ~24hr on mainnet)
+/// * `network` - Bitcoin network
+///
+/// # Returns
+/// A `TaprootDepositDualPathRaw` containing the address and metadata needed for spending
+pub fn generate_frost_deposit_address(
+    frost_group_pubkey: &XOnlyPublicKey,
+    user_pubkey: &XOnlyPublicKey,
+    commitment: &[u8; 32],
+    timelock_blocks: u16,
+    network: Network,
+) -> Result<TaprootDepositDualPathRaw, TaprootError> {
+    let secp = Secp256k1::new();
+
+    // Build the refund script (user can spend after timelock)
+    // Script: <user_pubkey> OP_CHECKSIGVERIFY <timelock_blocks> OP_CSV
+    let refund_script = build_timelock_script(user_pubkey, timelock_blocks);
+
+    // Build the taproot tree with the refund script as a leaf
+    let builder = TaprootBuilder::new()
+        .add_leaf(0, refund_script.clone())
+        .map_err(|_| TaprootError::TaprootBuildFailed)?;
+
+    // Compute the taproot spend info
+    // Internal key is the FROST group key - allows vault to spend via key path
+    let taproot_spend_info = builder
+        .finalize(&secp, *frost_group_pubkey)
+        .map_err(|_| TaprootError::TaprootBuildFailed)?;
+
+    // Get the tweaked output key (includes merkle root of script tree)
+    let output_key = taproot_spend_info.output_key();
+
+    // Now incorporate the commitment into the final address
+    // This ensures each commitment gets a unique address while
+    // the FROST group can still sign for it (with the commitment tweak)
+    let commitment_tweak = compute_commitment_tweak(&output_key.to_inner(), commitment);
+    let scalar = secp256k1::Scalar::from_be_bytes(commitment_tweak)
+        .map_err(|_| TaprootError::InvalidScalar)?;
+
+    let final_output_key = output_key
+        .to_inner()
+        .add_tweak(&secp, &scalar)
+        .map_err(|_| TaprootError::TweakFailed)?;
+
+    let (final_x_only, _parity) = final_output_key;
+
+    // Create the Taproot address
+    let address = Address::p2tr_tweaked(
+        TweakedPublicKey::dangerous_assume_tweaked(final_x_only),
+        network,
+    );
+
+    // Get script leaf hash for script path spending
+    let script_leaf_hash = compute_tapleaf_hash(&refund_script);
+
+    Ok(TaprootDepositDualPathRaw {
+        address: address.to_string(),
+        output_key: final_x_only,
+        commitment: *commitment,
+        user_pubkey: *user_pubkey,
+        timelock_blocks,
+        script_leaf_hash,
+        network,
+        refund_script,
+        taproot_spend_info,
+    })
+}
+
+/// Compute the total tweak needed for FROST signing
+///
+/// When spending via key path, the FROST signers need to apply the same tweak
+/// that was used to derive the address. This includes:
+/// 1. The taproot tweak (from merkle root of script tree)
+/// 2. The commitment tweak
+///
+/// # Arguments
+/// * `frost_group_pubkey` - The FROST group public key
+/// * `user_pubkey` - User's public key (for rebuilding script tree)
+/// * `commitment` - The commitment that was embedded
+/// * `timelock_blocks` - Timelock used in refund script
+///
+/// # Returns
+/// The 32-byte tweak that FROST signers must use for sign_tweaked()
+pub fn compute_frost_signing_tweak(
+    frost_group_pubkey: &XOnlyPublicKey,
+    user_pubkey: &XOnlyPublicKey,
+    commitment: &[u8; 32],
+    timelock_blocks: u16,
+) -> Result<[u8; 32], TaprootError> {
+    let secp = Secp256k1::new();
+
+    // Rebuild the script tree to get taproot merkle root
+    let refund_script = build_timelock_script(user_pubkey, timelock_blocks);
+    let builder = TaprootBuilder::new()
+        .add_leaf(0, refund_script)
+        .map_err(|_| TaprootError::TaprootBuildFailed)?;
+
+    let taproot_spend_info = builder
+        .finalize(&secp, *frost_group_pubkey)
+        .map_err(|_| TaprootError::TaprootBuildFailed)?;
+
+    // Get the intermediate tweaked key (before commitment tweak)
+    let output_key = taproot_spend_info.output_key();
+
+    // Compute the commitment tweak
+    let commitment_tweak = compute_commitment_tweak(&output_key.to_inner(), commitment);
+
+    // The total tweak for FROST is the commitment tweak
+    // Note: The taproot tweak is already handled by the TaprootSpendInfo
+    // FROST signers need to sign with the commitment_tweak on top
+    Ok(commitment_tweak)
+}
+
+/// Reconstruct a deposit address from its components
+///
+/// This is useful for verification - given the same inputs, we should
+/// get the same tb1p... address.
+pub fn reconstruct_frost_address(
+    frost_group_pubkey: &XOnlyPublicKey,
+    user_pubkey: &XOnlyPublicKey,
+    commitment: &[u8; 32],
+    timelock_blocks: u16,
+    network: Network,
+) -> Result<String, TaprootError> {
+    let result = generate_frost_deposit_address(
+        frost_group_pubkey,
+        user_pubkey,
+        commitment,
+        timelock_blocks,
+        network,
+    )?;
+    Ok(result.address)
+}
+
 /// Compute commitment tweak: H_commitment(output_key || commitment)
 fn compute_commitment_tweak(output_key: &XOnlyPublicKey, commitment: &[u8; 32]) -> [u8; 32] {
     // Use a tagged hash for domain separation
