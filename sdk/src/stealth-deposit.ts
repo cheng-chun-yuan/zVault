@@ -7,7 +7,7 @@
  * separate claim step needed.
  *
  * OP_RETURN Format (MINIMAL - 32 bytes):
- * - [0-31]    commitment (32 bytes, raw Poseidon2 hash)
+ * - [0-31]    commitment (32 bytes, raw Poseidon hash)
  *
  * NOTE: No magic/version header needed - program ID identifies the scheme.
  * Ephemeral key is stored on Solana StealthAnnouncement only.
@@ -54,7 +54,7 @@ import {
 import type { StealthMetaAddress } from "./keys";
 import { parseStealthMetaAddress } from "./keys";
 import { deriveTaprootAddress } from "./taproot";
-import { poseidon2Hash } from "./poseidon2";
+import { poseidonHashSync } from "./poseidon";
 import {
   prepareVerifyDeposit,
   bytesToHex,
@@ -162,7 +162,7 @@ export interface GrumpkinKeyPair {
  * Stealth derivation:
  * 1. sharedSecret = ECDH(ephemeral.priv, viewingPub)
  * 2. stealthPub = spendingPub + hash(sharedSecret) * G
- * 3. commitment = Poseidon2(stealthPub.x)  // amount-independent
+ * 3. commitment = Poseidon(stealthPub.x)  // amount-independent
  *
  * @param params - Deposit parameters
  * @param params.ephemeralKeyPair - Optional: provide your own ephemeral keypair.
@@ -208,9 +208,9 @@ export async function prepareStealthDeposit(params: {
   const scalarPoint = pointMul(stealthScalar, GRUMPKIN_GENERATOR);
   const stealthPub = pointAdd(spendingPubKey, scalarPoint);
 
-  // Compute commitment using Poseidon2 (amount-independent)
-  // commitment = Poseidon2(stealthPub.x)
-  const commitmentBigint = poseidon2Hash([stealthPub.x]);
+  // Compute commitment using Poseidon (amount-independent)
+  // commitment = Poseidon(stealthPub.x)
+  const commitmentBigint = poseidonHashSync([stealthPub.x]);
   const commitment = bigintToBytes(commitmentBigint);
 
   // Build OP_RETURN data (minimal format - commitment only)

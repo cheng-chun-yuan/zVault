@@ -6,7 +6,7 @@
  * - Viewing key can scan for positions (ECDH)
  * - Spending key required to claim/withdraw
  *
- * Position Commitment = Poseidon2(stealthPub.x, principal, depositEpoch)
+ * Position Commitment = Poseidon(stealthPub.x, principal, depositEpoch)
  *
  * Flow:
  * 1. Deposit: Generate ephemeral key, ECDH derive stealth key, create commitment
@@ -16,7 +16,7 @@
 
 import { sha256 } from "@noble/hashes/sha2.js";
 import { bigintToBytes, bytesToBigint } from "./crypto";
-import { poseidon2Hash } from "./poseidon2";
+import { poseidonHashSync } from "./poseidon";
 import {
   generateKeyPair as generateGrumpkinKeyPair,
   ecdh as grumpkinEcdh,
@@ -100,7 +100,7 @@ export interface StealthPoolPosition {
   /** Computed stealth public key point */
   stealthPub: GrumpkinPoint;
 
-  /** Pool commitment: Poseidon2(stealthPub.x, principal, depositEpoch) */
+  /** Pool commitment: Poseidon(stealthPub.x, principal, depositEpoch) */
   commitment: bigint;
 
   /** Leaf index in pool commitment tree */
@@ -167,7 +167,7 @@ export interface StealthPoolClaimInputs {
   /** Pool merkle root */
   merkleRoot: bigint;
 
-  /** Nullifier: Poseidon2(stealthPriv, leafIndex) */
+  /** Nullifier: Poseidon(stealthPriv, leafIndex) */
   nullifier: bigint;
 
   /** Nullifier hash for on-chain */
@@ -357,7 +357,7 @@ function deriveStealthPrivKey(
  * 1. Generate ephemeral Grumpkin keypair
  * 2. sharedSecret = ECDH(ephemeral.priv, recipientViewingPub)
  * 3. stealthPub = spendingPub + hash(sharedSecret) * G
- * 4. commitment = Poseidon2(stealthPub.x, principal, depositEpoch)
+ * 4. commitment = Poseidon(stealthPub.x, principal, depositEpoch)
  *
  * @param recipientMeta - Recipient's stealth meta-address (spending + viewing pubkeys)
  * @param principal - Amount to deposit in satoshis
@@ -383,8 +383,8 @@ export function createStealthPoolDeposit(
   // Derive stealth public key
   const stealthPub = deriveStealthPubKey(spendingPubKey, sharedSecret);
 
-  // Compute pool commitment: Poseidon2(stealthPub.x, principal, depositEpoch)
-  const commitment = poseidon2Hash([stealthPub.x, principal, depositEpoch]);
+  // Compute pool commitment: Poseidon(stealthPub.x, principal, depositEpoch)
+  const commitment = poseidonHashSync([stealthPub.x, principal, depositEpoch]);
 
   return {
     poolId,
@@ -419,7 +419,7 @@ export function createSelfStealthPoolDeposit(
   const stealthPub = deriveStealthPubKey(keys.spendingPubKey, sharedSecret);
 
   // Compute pool commitment
-  const commitment = poseidon2Hash([stealthPub.x, principal, depositEpoch]);
+  const commitment = poseidonHashSync([stealthPub.x, principal, depositEpoch]);
 
   return {
     poolId,
@@ -443,7 +443,7 @@ export function createSelfStealthPoolDeposit(
  * For each announcement:
  * 1. sharedSecret = ECDH(viewingPriv, ephemeralPub)
  * 2. stealthPub = spendingPub + hash(sharedSecret) * G
- * 3. Verify: commitment == Poseidon2(stealthPub.x, principal, depositEpoch)
+ * 3. Verify: commitment == Poseidon(stealthPub.x, principal, depositEpoch)
  *
  * This can DETECT positions but CANNOT derive stealthPriv for spending.
  *
@@ -469,7 +469,7 @@ export function scanPoolAnnouncements(
       const stealthPub = deriveStealthPubKey(keys.spendingPubKey, sharedSecret);
 
       // Compute expected commitment
-      const expectedCommitment = poseidon2Hash([
+      const expectedCommitment = poseidonHashSync([
         stealthPub.x,
         ann.principal,
         ann.depositEpoch,
@@ -535,9 +535,9 @@ export function prepareStealthPoolClaimInputs(
     throw new Error("Stealth key mismatch - position may not belong to you");
   }
 
-  // Compute nullifier: Poseidon2(stealthPriv, leafIndex)
-  const nullifier = poseidon2Hash([stealthPrivKey, BigInt(position.leafIndex)]);
-  const nullifierHash = poseidon2Hash([nullifier]);
+  // Compute nullifier: Poseidon(stealthPriv, leafIndex)
+  const nullifier = poseidonHashSync([stealthPrivKey, BigInt(position.leafIndex)]);
+  const nullifierHash = poseidonHashSync([nullifier]);
 
   return {
     stealthPrivKey,
@@ -1130,7 +1130,7 @@ export function preparePoolDepositInputs(
     input_merkle_root: bytesToBigint(new Uint8Array(inputMerkleProof.root)).toString(),
     input_nullifier_hash: inputNote.nullifierHash.toString(),
     stealth_pub_x: stealthPubX.toString(),
-    pool_commitment: poseidon2Hash([stealthPubX, principal, depositEpoch]).toString(),
+    pool_commitment: poseidonHashSync([stealthPubX, principal, depositEpoch]).toString(),
     deposit_epoch: depositEpoch.toString(),
   };
 }
@@ -1194,7 +1194,7 @@ export function preparePoolClaimYieldInputs(
     pool_merkle_root: claimInputs.merkleRoot.toString(),
     old_nullifier_hash: claimInputs.nullifierHash.toString(),
     new_stealth_pub_x: newStealthPubX.toString(),
-    new_pool_commitment: poseidon2Hash([newStealthPubX, newPrincipal, newDepositEpoch]).toString(),
+    new_pool_commitment: poseidonHashSync([newStealthPubX, newPrincipal, newDepositEpoch]).toString(),
     yield_commitment: yieldNote.commitment.toString(),
     current_epoch: currentEpoch.toString(),
     yield_rate_bps: yieldRateBps.toString(),

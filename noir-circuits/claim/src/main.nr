@@ -4,15 +4,18 @@
 // Input: Unified commitment (pub_key_x, amount)
 // Output: Public transfer to recipient's ATA
 //
-// Commitment = Poseidon2(pub_key_x, amount)
-// Nullifier = Poseidon2(priv_key, leaf_index)
+// Commitment = Poseidon(pub_key_x, amount)
+// Nullifier = Poseidon(priv_key, leaf_index)
+//
+// NOTE: Using Circom-compatible Poseidon (NOT Poseidon2) for compatibility with
+// Solana's sol_poseidon syscall and circomlibjs in SDK.
 //
 // This circuit works for both:
 // - Claim links (seed-derived keys encoded in URL)
 // - Stealth balances (ECDH-derived keys)
 
 use dep::zvault_utils;
-use dep::poseidon::poseidon2::Poseidon2;
+use std::hash::poseidon::bn254::hash_2;
 
 fn main(
     // Private inputs
@@ -68,7 +71,7 @@ fn test_claim_circuit() {
 
     let mut current = commitment;
     for _i in 0..20 {
-        current = Poseidon2::hash([current, zero], 2);
+        current = hash_2([current, zero]);
     }
     let merkle_root = current;
 
@@ -102,7 +105,7 @@ fn test_claim_wrong_amount() {
 
     let mut current = commitment;
     for _i in 0..20 {
-        current = Poseidon2::hash([current, zero], 2);
+        current = hash_2([current, zero]);
     }
     let merkle_root = current;
 

@@ -14,7 +14,7 @@
 // This circuit enables partial withdrawals while keeping change private.
 
 use dep::zvault_utils;
-use dep::poseidon::poseidon2::Poseidon2;
+use std::hash::poseidon::bn254::hash_2;
 
 fn main(
     // Private inputs - Input commitment
@@ -103,7 +103,7 @@ fn test_partial_claim_with_change() {
 
     let mut current = input_commitment;
     for _i in 0..20 {
-        current = Poseidon2::hash([current, zero], 2);
+        current = hash_2([current, zero]);
     }
     let merkle_root = current;
 
@@ -153,7 +153,7 @@ fn test_full_claim_no_change() {
 
     let mut current = input_commitment;
     for _i in 0..20 {
-        current = Poseidon2::hash([current, zero], 2);
+        current = hash_2([current, zero]);
     }
     let merkle_root = current;
 
@@ -203,7 +203,7 @@ fn test_amount_mismatch_should_fail() {
 
     let mut current = input_commitment;
     for _i in 0..20 {
-        current = Poseidon2::hash([current, zero], 2);
+        current = hash_2([current, zero]);
     }
     let merkle_root = current;
 
@@ -254,7 +254,7 @@ fn test_wrong_change_commitment_should_fail() {
 
     let mut current = input_commitment;
     for _i in 0..20 {
-        current = Poseidon2::hash([current, zero], 2);
+        current = hash_2([current, zero]);
     }
     let merkle_root = current;
 
@@ -307,7 +307,7 @@ fn test_wrong_nullifier_should_fail() {
 
     let mut current = input_commitment;
     for _i in 0..20 {
-        current = Poseidon2::hash([current, zero], 2);
+        current = hash_2([current, zero]);
     }
     let merkle_root = current;
 

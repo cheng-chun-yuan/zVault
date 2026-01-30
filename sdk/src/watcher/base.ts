@@ -171,7 +171,7 @@ export abstract class BaseDepositWatcher {
     const note = generateNote(amount);
 
     // For taproot derivation, use XOR of nullifier/secret as placeholder commitment
-    // In production, compute actual Poseidon2 hash via helper circuit or backend
+    // In production, compute actual Poseidon hash via helper circuit or backend
     const placeholderCommitment = bigintToBytes(
       (note.nullifier ^ note.secret) % (2n ** 256n)
     );

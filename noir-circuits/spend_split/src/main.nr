@@ -15,7 +15,7 @@
 // - Output public keys must be unique (different recipients)
 
 use dep::zvault_utils;
-use dep::poseidon::poseidon2::Poseidon2;
+use std::hash::poseidon::bn254::hash_2;
 
 fn main(
     // Private inputs - Input commitment
@@ -114,7 +114,7 @@ fn test_spend_split_basic() {
 
     let mut current = input_commitment;
     for _i in 0..20 {
-        current = Poseidon2::hash([current, zero], 2);
+        current = hash_2([current, zero]);
     }
     let merkle_root = current;
 
@@ -166,7 +166,7 @@ fn test_spend_split_amount_mismatch() {
 
     let mut current = input_commitment;
     for _i in 0..20 {
-        current = Poseidon2::hash([current, zero], 2);
+        current = hash_2([current, zero]);
     }
     let merkle_root = current;
 
@@ -218,7 +218,7 @@ fn test_spend_split_duplicate_output_keys() {
 
     let mut current = input_commitment;
     for _i in 0..20 {
-        current = Poseidon2::hash([current, zero], 2);
+        current = hash_2([current, zero]);
     }
     let merkle_root = current;
 
@@ -270,7 +270,7 @@ fn test_spend_split_unequal_amounts() {
 
     let mut current = input_commitment;
     for _i in 0..20 {
-        current = Poseidon2::hash([current, zero], 2);
+        current = hash_2([current, zero]);
     }
     let merkle_root = current;
 
@@ -321,7 +321,7 @@ fn test_spend_split_zero_amount() {
 
     let mut current = input_commitment;
     for _i in 0..20 {
-        current = Poseidon2::hash([current, zero], 2);
+        current = hash_2([current, zero]);
     }
     let merkle_root = current;
 

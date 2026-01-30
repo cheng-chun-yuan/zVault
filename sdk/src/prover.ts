@@ -5,17 +5,17 @@
  * Uses UltraHonk proofs via @aztec/bb.js with lazy loading.
  *
  * UNIFIED MODEL:
- * - Commitment = Poseidon2(pub_key_x, amount)
- * - Nullifier = Poseidon2(priv_key, leaf_index)
- * - Nullifier Hash = Poseidon2(nullifier)
+ * - Commitment = Poseidon(pub_key_x, amount)
+ * - Nullifier = Poseidon(priv_key, leaf_index)
+ * - Nullifier Hash = Poseidon(nullifier)
  */
 
 import {
-  hashNullifier,
-  computeUnifiedCommitment,
-  computeNullifier,
-  computePoolCommitment,
-} from "./poseidon2";
+  hashNullifierSync,
+  computeUnifiedCommitmentSync,
+  computeNullifierSync,
+  computePoolCommitmentSync,
+} from "./poseidon";
 
 export interface MerkleProofInput {
   siblings: bigint[];
@@ -340,8 +340,8 @@ export async function generateClaimProof(inputs: ClaimInputs): Promise<ProofData
   const pathIndices = inputs.merkleProof.indices;
 
   // Compute nullifier and nullifier hash
-  const nullifier = computeNullifier(inputs.privKey, inputs.leafIndex);
-  const nullifierHash = hashNullifier(nullifier);
+  const nullifier = computeNullifierSync(inputs.privKey, inputs.leafIndex);
+  const nullifierHash = hashNullifierSync(nullifier);
 
   const circuitInputs: InputMap = {
     priv_key: inputs.privKey.toString(),
@@ -405,12 +405,12 @@ export async function generateSpendSplitProof(inputs: SpendSplitInputs): Promise
   const pathIndices = inputs.merkleProof.indices;
 
   // Compute nullifier hash
-  const nullifier = computeNullifier(inputs.privKey, inputs.leafIndex);
-  const nullifierHash = hashNullifier(nullifier);
+  const nullifier = computeNullifierSync(inputs.privKey, inputs.leafIndex);
+  const nullifierHash = hashNullifierSync(nullifier);
 
   // Compute output commitments
-  const outputCommitment1 = computeUnifiedCommitment(inputs.output1PubKeyX, inputs.output1Amount);
-  const outputCommitment2 = computeUnifiedCommitment(inputs.output2PubKeyX, inputs.output2Amount);
+  const outputCommitment1 = computeUnifiedCommitmentSync(inputs.output1PubKeyX, inputs.output1Amount);
+  const outputCommitment2 = computeUnifiedCommitmentSync(inputs.output2PubKeyX, inputs.output2Amount);
 
   const circuitInputs: InputMap = {
     priv_key: inputs.privKey.toString(),
@@ -479,11 +479,11 @@ export async function generateSpendPartialPublicProof(inputs: SpendPartialPublic
   const pathIndices = inputs.merkleProof.indices;
 
   // Compute nullifier hash
-  const nullifier = computeNullifier(inputs.privKey, inputs.leafIndex);
-  const nullifierHash = hashNullifier(nullifier);
+  const nullifier = computeNullifierSync(inputs.privKey, inputs.leafIndex);
+  const nullifierHash = hashNullifierSync(nullifier);
 
   // Compute change commitment
-  const changeCommitment = computeUnifiedCommitment(inputs.changePubKeyX, inputs.changeAmount);
+  const changeCommitment = computeUnifiedCommitmentSync(inputs.changePubKeyX, inputs.changeAmount);
 
   const circuitInputs: InputMap = {
     priv_key: inputs.privKey.toString(),
@@ -511,8 +511,8 @@ export async function generateSpendPartialPublicProof(inputs: SpendPartialPublic
 /**
  * Pool deposit proof inputs (Unified Model)
  *
- * Input:  Unified Commitment = Poseidon2(pub_key_x, amount)
- * Output: Pool Position = Poseidon2(pool_pub_key_x, principal, deposit_epoch)
+ * Input:  Unified Commitment = Poseidon(pub_key_x, amount)
+ * Output: Pool Position = Poseidon(pool_pub_key_x, principal, deposit_epoch)
  */
 export interface PoolDepositInputs {
   /** Input commitment: Spending private key */
@@ -543,11 +543,11 @@ export async function generatePoolDepositProof(inputs: PoolDepositInputs): Promi
   const pathIndices = inputs.merkleProof.indices;
 
   // Compute nullifier hash for input
-  const nullifier = computeNullifier(inputs.privKey, inputs.leafIndex);
-  const nullifierHash = hashNullifier(nullifier);
+  const nullifier = computeNullifierSync(inputs.privKey, inputs.leafIndex);
+  const nullifierHash = hashNullifierSync(nullifier);
 
-  // Compute pool commitment = Poseidon2(pool_pub_key_x, principal, deposit_epoch)
-  const poolCommitment = computePoolCommitment(inputs.poolPubKeyX, inputs.amount, inputs.depositEpoch);
+  // Compute pool commitment = Poseidon(pool_pub_key_x, principal, deposit_epoch)
+  const poolCommitment = computePoolCommitmentSync(inputs.poolPubKeyX, inputs.amount, inputs.depositEpoch);
 
   const circuitInputs: InputMap = {
     // Private inputs
@@ -572,8 +572,8 @@ export async function generatePoolDepositProof(inputs: PoolDepositInputs): Promi
 /**
  * Pool withdraw proof inputs (Unified Model)
  *
- * Input:  Pool Position = Poseidon2(pub_key_x, principal, deposit_epoch)
- * Output: Unified Commitment = Poseidon2(output_pub_key_x, principal + yield)
+ * Input:  Pool Position = Poseidon(pub_key_x, principal, deposit_epoch)
+ * Output: Unified Commitment = Poseidon(output_pub_key_x, principal + yield)
  */
 export interface PoolWithdrawInputs {
   /** Pool position: Private key */
@@ -610,8 +610,8 @@ export async function generatePoolWithdrawProof(inputs: PoolWithdrawInputs): Pro
   const pathIndices = inputs.poolMerkleProof.indices;
 
   // Compute nullifier hash for pool position
-  const nullifier = computeNullifier(inputs.privKey, inputs.leafIndex);
-  const nullifierHash = hashNullifier(nullifier);
+  const nullifier = computeNullifierSync(inputs.privKey, inputs.leafIndex);
+  const nullifierHash = hashNullifierSync(nullifier);
 
   // Calculate yield: principal * rate * epochs / 10000
   const epochsStaked = inputs.currentEpoch - inputs.depositEpoch;
@@ -619,7 +619,7 @@ export async function generatePoolWithdrawProof(inputs: PoolWithdrawInputs): Pro
   const totalAmount = inputs.principal + yieldAmount;
 
   // Compute output unified commitment
-  const outputCommitment = computeUnifiedCommitment(inputs.outputPubKeyX, totalAmount);
+  const outputCommitment = computeUnifiedCommitmentSync(inputs.outputPubKeyX, totalAmount);
 
   const circuitInputs: InputMap = {
     // Private inputs
@@ -647,9 +647,9 @@ export async function generatePoolWithdrawProof(inputs: PoolWithdrawInputs): Pro
 /**
  * Pool claim yield proof inputs (Unified Model)
  *
- * Input:  Pool Position = Poseidon2(old_pub_key_x, principal, deposit_epoch)
- * Output: 1. New Pool Position = Poseidon2(new_pub_key_x, principal, current_epoch)
- *         2. Yield as Unified Commitment = Poseidon2(yield_pub_key_x, yield_amount)
+ * Input:  Pool Position = Poseidon(old_pub_key_x, principal, deposit_epoch)
+ * Output: 1. New Pool Position = Poseidon(new_pub_key_x, principal, current_epoch)
+ *         2. Yield as Unified Commitment = Poseidon(yield_pub_key_x, yield_amount)
  */
 export interface PoolClaimYieldInputs {
   /** Old position: Private key */
@@ -688,18 +688,18 @@ export async function generatePoolClaimYieldProof(inputs: PoolClaimYieldInputs):
   const pathIndices = inputs.poolMerkleProof.indices;
 
   // Compute old nullifier hash
-  const oldNullifier = computeNullifier(inputs.oldPrivKey, inputs.leafIndex);
-  const oldNullifierHash = hashNullifier(oldNullifier);
+  const oldNullifier = computeNullifierSync(inputs.oldPrivKey, inputs.leafIndex);
+  const oldNullifierHash = hashNullifierSync(oldNullifier);
 
   // Calculate yield: principal * rate * epochs / 10000
   const epochsStaked = inputs.currentEpoch - inputs.depositEpoch;
   const yieldAmount = (inputs.principal * inputs.yieldRateBps * epochsStaked) / 10000n;
 
   // Compute new pool commitment (principal stays, epoch resets to current)
-  const newPoolCommitment = computePoolCommitment(inputs.newPubKeyX, inputs.principal, inputs.currentEpoch);
+  const newPoolCommitment = computePoolCommitmentSync(inputs.newPubKeyX, inputs.principal, inputs.currentEpoch);
 
   // Compute yield commitment
-  const yieldCommitment = computeUnifiedCommitment(inputs.yieldPubKeyX, yieldAmount);
+  const yieldCommitment = computeUnifiedCommitmentSync(inputs.yieldPubKeyX, yieldAmount);
 
   const circuitInputs: InputMap = {
     // Private inputs

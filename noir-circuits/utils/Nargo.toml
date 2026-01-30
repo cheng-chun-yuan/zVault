@@ -4,4 +4,5 @@ type = "lib"
 authors = ["zVault Team"]
 
 [dependencies]
-poseidon = { tag = "v0.1.1", git = "https://github.com/noir-lang/poseidon" }
+# Using std::hash::poseidon::bn254 (Circom-compatible) from stdlib
+# No external poseidon dependency needed
