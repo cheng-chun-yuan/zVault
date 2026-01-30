@@ -16,6 +16,7 @@ import {
   initPoseidon,
   grumpkinEcdh,
   pubKeyFromBytes,
+  DEVNET_CONFIG,
   type StealthMetaAddress,
   type ScannedNote,
 } from "@zvault/sdk";
@@ -300,6 +301,13 @@ export function PayFlow({ initialMode, preselectedNote }: PayFlowProps) {
           TOKEN_2022_PROGRAM_ID
         );
 
+        // Get VK hash from config (convert hex to bytes)
+        const vkHashHex = DEVNET_CONFIG.vkHashes.spendPartialPublic;
+        const vkHash = new Uint8Array(32);
+        for (let i = 0; i < 32; i++) {
+          vkHash[i] = parseInt(vkHashHex.slice(i * 2, i * 2 + 2), 16);
+        }
+
         // Build transaction
         const tx = await buildSpendPartialPublicTransaction(connection, {
           userPubkey: publicKey,
@@ -310,6 +318,7 @@ export function PayFlow({ initialMode, preselectedNote }: PayFlowProps) {
           changeCommitment: bigintTo32Bytes(proofResult.changeCommitment),
           recipient: recipientPubkey,
           recipientTokenAccount,
+          vkHash,
         });
 
         setProofStatus("Sending transaction...");
@@ -354,6 +363,13 @@ export function PayFlow({ initialMode, preselectedNote }: PayFlowProps) {
 
         setProofStatus("Proof generated! Building transaction...");
 
+        // Get VK hash from config (convert hex to bytes)
+        const splitVkHashHex = DEVNET_CONFIG.vkHashes.split;
+        const splitVkHash = new Uint8Array(32);
+        for (let i = 0; i < 32; i++) {
+          splitVkHash[i] = parseInt(splitVkHashHex.slice(i * 2, i * 2 + 2), 16);
+        }
+
         // Build transaction
         const tx = await buildSplitTransaction(connection, {
           userPubkey: publicKey,
@@ -362,6 +378,7 @@ export function PayFlow({ initialMode, preselectedNote }: PayFlowProps) {
           outputCommitment1: bigintTo32Bytes(proofResult.outputCommitment1),
           outputCommitment2: bigintTo32Bytes(proofResult.outputCommitment2),
           merkleRoot: bigintTo32Bytes(proofResult.merkleRoot),
+          vkHash: splitVkHash,
         });
 
         setProofStatus("Sending transaction...");

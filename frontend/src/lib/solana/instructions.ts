@@ -14,7 +14,12 @@ import {
   Transaction,
   SystemProgram,
 } from "@solana/web3.js";
-import { DEVNET_CONFIG } from "@zvault/sdk";
+import {
+  DEVNET_CONFIG,
+  buildSplitInstructionData as sdkBuildSplitInstructionData,
+  buildSpendPartialPublicInstructionData as sdkBuildSpendPartialPublicInstructionData,
+} from "@zvault/sdk";
+import { address } from "@solana/kit";
 import { getPriorityFeeInstructions } from "@/lib/helius";
 
 // =============================================================================
@@ -196,59 +201,77 @@ export function buildClaimInstructionData(
 }
 
 /**
- * Build instruction data for SPLIT_COMMITMENT
+ * Build instruction data for SPLIT_COMMITMENT (UltraHonk format)
  *
- * @param zkProof - Groth16 proof bytes
+ * @param zkProof - UltraHonk proof bytes
  * @param inputNullifierHash - 32-byte input nullifier hash
  * @param outputCommitment1 - 32-byte first output commitment
  * @param outputCommitment2 - 32-byte second output commitment
  * @param merkleRoot - 32-byte merkle root
+ * @param vkHash - 32-byte verification key hash
  */
 export function buildSplitInstructionData(
   zkProof: Uint8Array,
   inputNullifierHash: Uint8Array,
   outputCommitment1: Uint8Array,
   outputCommitment2: Uint8Array,
-  merkleRoot: Uint8Array
+  merkleRoot: Uint8Array,
+  vkHash: Uint8Array
 ): Uint8Array {
   const proofLen = zkProof.length;
-  const totalLen = 1 + 4 + proofLen + 32 + 32 + 32 + 32;
+  // Layout: discriminator(1) + proof_source(1) + proof_len(4) + proof + root(32) + nullifier(32) + out1(32) + out2(32) + vk_hash(32)
+  const totalLen = 1 + 1 + 4 + proofLen + 32 + 32 + 32 + 32 + 32;
 
   const data = new Uint8Array(totalLen);
+  const view = new DataView(data.buffer);
   let offset = 0;
 
+  // Discriminator
   data[offset++] = INSTRUCTION_DISCRIMINATORS.SPLIT_COMMITMENT;
 
-  const lenView = new DataView(data.buffer, offset);
-  lenView.setUint32(0, proofLen, true);
+  // Proof source (inline = 0)
+  data[offset++] = 0;
+
+  // Proof length (4 bytes, LE)
+  view.setUint32(offset, proofLen, true);
   offset += 4;
 
+  // Proof bytes
   data.set(zkProof, offset);
   offset += proofLen;
 
+  // Merkle root (32 bytes)
+  data.set(merkleRoot, offset);
+  offset += 32;
+
+  // Nullifier hash (32 bytes)
   data.set(inputNullifierHash, offset);
   offset += 32;
 
+  // Output commitment 1 (32 bytes)
   data.set(outputCommitment1, offset);
   offset += 32;
 
+  // Output commitment 2 (32 bytes)
   data.set(outputCommitment2, offset);
   offset += 32;
 
-  data.set(merkleRoot, offset);
+  // VK hash (32 bytes)
+  data.set(vkHash, offset);
 
   return data;
 }
 
 /**
- * Build instruction data for SPEND_PARTIAL_PUBLIC
+ * Build instruction data for SPEND_PARTIAL_PUBLIC (UltraHonk format)
  *
- * @param zkProof - Groth16 proof bytes
+ * @param zkProof - UltraHonk proof bytes
  * @param merkleRoot - 32-byte merkle root
  * @param nullifierHash - 32-byte input nullifier hash
  * @param publicAmount - Amount to claim publicly (8 bytes)
  * @param changeCommitment - 32-byte change commitment
  * @param recipient - 32-byte recipient Solana address
+ * @param vkHash - 32-byte verification key hash
  */
 export function buildSpendPartialPublicInstructionData(
   zkProof: Uint8Array,
@@ -256,34 +279,53 @@ export function buildSpendPartialPublicInstructionData(
   nullifierHash: Uint8Array,
   publicAmount: bigint,
   changeCommitment: Uint8Array,
-  recipient: Uint8Array
+  recipient: Uint8Array,
+  vkHash: Uint8Array
 ): Uint8Array {
   const proofLen = zkProof.length;
-  // Layout: discriminator(1) + proof(N) + root(32) + nullifier_hash(32) + public_amount(8) + change_commitment(32) + recipient(32)
-  const totalLen = 1 + proofLen + 32 + 32 + 8 + 32 + 32;
+  // Layout: discriminator(1) + proof_source(1) + proof_len(4) + proof(N) + root(32) + nullifier_hash(32) + public_amount(8) + change_commitment(32) + recipient(32) + vk_hash(32)
+  const totalLen = 1 + 1 + 4 + proofLen + 32 + 32 + 8 + 32 + 32 + 32;
 
   const data = new Uint8Array(totalLen);
+  const view = new DataView(data.buffer);
   let offset = 0;
 
+  // Discriminator
   data[offset++] = INSTRUCTION_DISCRIMINATORS.SPEND_PARTIAL_PUBLIC;
 
+  // Proof source (inline = 0)
+  data[offset++] = 0;
+
+  // Proof length (4 bytes, LE)
+  view.setUint32(offset, proofLen, true);
+  offset += 4;
+
+  // Proof bytes
   data.set(zkProof, offset);
   offset += proofLen;
 
+  // Merkle root (32 bytes)
   data.set(merkleRoot, offset);
   offset += 32;
 
+  // Nullifier hash (32 bytes)
   data.set(nullifierHash, offset);
   offset += 32;
 
-  const amountView = new DataView(data.buffer, offset);
-  amountView.setBigUint64(0, publicAmount, true);
+  // Public amount (8 bytes, LE)
+  view.setBigUint64(offset, publicAmount, true);
   offset += 8;
 
+  // Change commitment (32 bytes)
   data.set(changeCommitment, offset);
   offset += 32;
 
+  // Recipient (32 bytes)
   data.set(recipient, offset);
+  offset += 32;
+
+  // VK hash (32 bytes)
+  data.set(vkHash, offset);
 
   return data;
 }
@@ -416,6 +458,7 @@ export interface SplitParams {
   outputCommitment1: Uint8Array;
   outputCommitment2: Uint8Array;
   merkleRoot: Uint8Array;
+  vkHash: Uint8Array;
 }
 
 /**
@@ -435,19 +478,26 @@ export async function buildSplitTransaction(
     outputCommitment1,
     outputCommitment2,
     merkleRoot,
+    vkHash,
   } = params;
 
   const [poolState] = derivePoolStatePDA();
   const [commitmentTree] = deriveCommitmentTreePDA();
   const [nullifierPDA] = deriveNullifierPDA(inputNullifierHash);
 
-  const instructionData = buildSplitInstructionData(
-    zkProof,
-    inputNullifierHash,
+  // Use SDK instruction data builder (properly formatted for UltraHonk)
+  const instructionData = sdkBuildSplitInstructionData({
+    proofSource: "inline",
+    proofBytes: zkProof,
+    root: merkleRoot,
+    nullifierHash: inputNullifierHash,
     outputCommitment1,
     outputCommitment2,
-    merkleRoot
-  );
+    vkHash,
+  });
+
+  // UltraHonk verifier program ID
+  const ultrahonkVerifierProgramId = new PublicKey(DEVNET_CONFIG.ultrahonkVerifierProgramId);
 
   const instruction = new TransactionInstruction({
     programId: ZVAULT_PROGRAM_ID,
@@ -457,6 +507,7 @@ export async function buildSplitTransaction(
       { pubkey: nullifierPDA, isSigner: false, isWritable: true },
       { pubkey: userPubkey, isSigner: true, isWritable: true },
       { pubkey: SystemProgram.programId, isSigner: false, isWritable: false },
+      { pubkey: ultrahonkVerifierProgramId, isSigner: false, isWritable: false },
     ],
     data: Buffer.from(instructionData),
   });
@@ -494,6 +545,8 @@ export interface SpendPartialPublicParams {
   recipient: PublicKey;
   /** Recipient's zBTC token account */
   recipientTokenAccount: PublicKey;
+  /** VK hash (32 bytes) - verification key hash for the circuit */
+  vkHash: Uint8Array;
 }
 
 /**
@@ -514,6 +567,7 @@ export async function buildSpendPartialPublicTransaction(
     changeCommitment,
     recipient,
     recipientTokenAccount,
+    vkHash,
   } = params;
 
   const [poolState] = derivePoolStatePDA();
@@ -530,14 +584,20 @@ export async function buildSpendPartialPublicTransaction(
     TOKEN_2022_PROGRAM_ID
   );
 
-  const instructionData = buildSpendPartialPublicInstructionData(
-    zkProof,
-    merkleRoot,
+  // Use SDK instruction data builder (properly formatted for UltraHonk)
+  const instructionData = sdkBuildSpendPartialPublicInstructionData({
+    proofSource: "inline",
+    proofBytes: zkProof,
+    root: merkleRoot,
     nullifierHash,
-    publicAmount,
+    publicAmountSats: publicAmount,
     changeCommitment,
-    recipient.toBytes()
-  );
+    recipient: address(recipient.toBase58()),
+    vkHash,
+  });
+
+  // UltraHonk verifier program ID
+  const ultrahonkVerifierProgramId = new PublicKey(DEVNET_CONFIG.ultrahonkVerifierProgramId);
 
   const instruction = new TransactionInstruction({
     programId: ZVAULT_PROGRAM_ID,
@@ -545,12 +605,13 @@ export async function buildSpendPartialPublicTransaction(
       { pubkey: poolState, isSigner: false, isWritable: true },
       { pubkey: commitmentTree, isSigner: false, isWritable: true },
       { pubkey: nullifierPDA, isSigner: false, isWritable: true },
-      { pubkey: zbtcMint, isSigner: false, isWritable: false },
+      { pubkey: zbtcMint, isSigner: false, isWritable: true },
       { pubkey: poolVault, isSigner: false, isWritable: true },
       { pubkey: recipientTokenAccount, isSigner: false, isWritable: true },
       { pubkey: userPubkey, isSigner: true, isWritable: true },
       { pubkey: TOKEN_2022_PROGRAM_ID, isSigner: false, isWritable: false },
       { pubkey: SystemProgram.programId, isSigner: false, isWritable: false },
+      { pubkey: ultrahonkVerifierProgramId, isSigner: false, isWritable: false },
     ],
     data: Buffer.from(instructionData),
   });
