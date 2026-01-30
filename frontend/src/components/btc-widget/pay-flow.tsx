@@ -15,6 +15,7 @@ import { useProver } from "@/hooks/use-prover";
 import {
   initPoseidon,
   grumpkinEcdh,
+  pubKeyFromBytes,
   type StealthMetaAddress,
   type ScannedNote,
 } from "@zvault/sdk";
@@ -336,8 +337,9 @@ export function PayFlow({ initialMode, preselectedNote }: PayFlowProps) {
           throw new Error("Please resolve stealth recipient first");
         }
 
-        // Recipient's stealth public key X coordinate
-        const recipientPubKeyX = resolvedMeta.spendingPubKey.x;
+        // Recipient's stealth public key X coordinate (convert from compressed bytes to point)
+        const recipientSpendingPoint = pubKeyFromBytes(resolvedMeta.spendingPubKey);
+        const recipientPubKeyX = recipientSpendingPoint.x;
 
         // Generate proof
         const proofResult = await prover.generateSplitProof({
