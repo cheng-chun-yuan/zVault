@@ -18,8 +18,8 @@ pub const MAX_YIELD_EPOCHS: u64 = 100_000;
 /// Required Bitcoin confirmations
 pub const REQUIRED_CONFIRMATIONS: u32 = 2;
 
-/// Groth16 proof size in bytes
-pub const PROOF_SIZE: usize = 256;
+/// Maximum UltraHonk proof size in bytes (8-20KB typical)
+pub const MAX_ULTRAHONK_PROOF_SIZE: usize = 20_000;
 
 /// Maximum BTC address length (bech32m)
 pub const MAX_BTC_ADDRESS_LEN: usize = 62;

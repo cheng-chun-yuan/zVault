@@ -1,4 +1,4 @@
-//! Compound yield instruction - Reinvest yield into principal
+//! Compound yield instruction - Reinvest yield into principal (UltraHonk)
 
 use pinocchio::{
     account_info::AccountInfo,
@@ -8,56 +8,65 @@ use pinocchio::{
     ProgramResult,
 };
 
-use crate::constants::PROOF_SIZE;
 use crate::error::ZVaultError;
 use crate::state::{
     PoolCommitmentTree, PoolNullifierRecord, PoolOperationType, YieldPool,
     POOL_NULLIFIER_RECORD_DISCRIMINATOR,
 };
-use crate::utils::{create_pda_account, get_test_verification_key, verify_pool_compound_proof, Groth16Proof, validate_program_owner, validate_account_writable};
+use crate::utils::{create_pda_account, verify_ultrahonk_pool_compound_proof, validate_program_owner, validate_account_writable, MAX_ULTRAHONK_PROOF_SIZE};
 
-/// Compound yield instruction data
-pub struct CompoundYieldData {
-    /// Groth16 proof for position ownership and yield calculation
-    pub proof: [u8; PROOF_SIZE],
-    /// Old position's nullifier hash
+/// Compound yield instruction data (UltraHonk proof)
+pub struct CompoundYieldData<'a> {
+    pub proof: &'a [u8],
     pub old_nullifier_hash: [u8; 32],
-    /// New pool position commitment (principal + yield, reset epoch)
     pub new_pool_commitment: [u8; 32],
-    /// Merkle root of pool commitment tree
     pub pool_merkle_root: [u8; 32],
-    /// Old principal amount
     pub old_principal: u64,
-    /// Original deposit epoch
     pub deposit_epoch: u64,
+    pub vk_hash: [u8; 32],
 }
 
-impl CompoundYieldData {
-    pub fn from_bytes(data: &[u8]) -> Result<Self, ProgramError> {
-        // proof (256) + old_nullifier_hash (32) + new_pool_commitment (32) + pool_merkle_root (32) + old_principal (8) + deposit_epoch (8) = 368 bytes
-        if data.len() < 368 {
+impl<'a> CompoundYieldData<'a> {
+    pub const MIN_SIZE: usize = 4 + 32 + 32 + 32 + 8 + 8 + 32; // 148 bytes + proof
+
+    pub fn from_bytes(data: &'a [u8]) -> Result<Self, ProgramError> {
+        if data.len() < Self::MIN_SIZE {
             return Err(ProgramError::InvalidInstructionData);
         }
 
-        let mut proof = [0u8; PROOF_SIZE];
-        proof.copy_from_slice(&data[0..256]);
+        let proof_len = u32::from_le_bytes([data[0], data[1], data[2], data[3]]) as usize;
+        if proof_len > MAX_ULTRAHONK_PROOF_SIZE {
+            return Err(ProgramError::InvalidInstructionData);
+        }
+
+        let expected_size = 4 + proof_len + 32 + 32 + 32 + 8 + 8 + 32;
+        if data.len() < expected_size {
+            return Err(ProgramError::InvalidInstructionData);
+        }
+
+        let proof = &data[4..4 + proof_len];
+        let mut offset = 4 + proof_len;
 
         let mut old_nullifier_hash = [0u8; 32];
-        old_nullifier_hash.copy_from_slice(&data[256..288]);
+        old_nullifier_hash.copy_from_slice(&data[offset..offset + 32]);
+        offset += 32;
 
         let mut new_pool_commitment = [0u8; 32];
-        new_pool_commitment.copy_from_slice(&data[288..320]);
+        new_pool_commitment.copy_from_slice(&data[offset..offset + 32]);
+        offset += 32;
 
         let mut pool_merkle_root = [0u8; 32];
-        pool_merkle_root.copy_from_slice(&data[320..352]);
+        pool_merkle_root.copy_from_slice(&data[offset..offset + 32]);
+        offset += 32;
 
-        let old_principal = u64::from_le_bytes([
-            data[352], data[353], data[354], data[355], data[356], data[357], data[358], data[359],
-        ]);
+        let old_principal = u64::from_le_bytes(data[offset..offset + 8].try_into().unwrap());
+        offset += 8;
 
-        let deposit_epoch = u64::from_le_bytes([
-            data[360], data[361], data[362], data[363], data[364], data[365], data[366], data[367],
-        ]);
+        let deposit_epoch = u64::from_le_bytes(data[offset..offset + 8].try_into().unwrap());
+        offset += 8;
+
+        let mut vk_hash = [0u8; 32];
+        vk_hash.copy_from_slice(&data[offset..offset + 32]);
 
         Ok(Self {
             proof,
@@ -66,6 +75,7 @@ impl CompoundYieldData {
             pool_merkle_root,
             old_principal,
             deposit_epoch,
+            vk_hash,
         })
     }
 }
@@ -77,36 +87,31 @@ pub struct CompoundYieldAccounts<'a> {
     pub pool_nullifier_record: &'a AccountInfo,
     pub compounder: &'a AccountInfo,
     pub system_program: &'a AccountInfo,
+    pub ultrahonk_verifier: &'a AccountInfo,
 }
 
 impl<'a> CompoundYieldAccounts<'a> {
     pub fn from_accounts(accounts: &'a [AccountInfo]) -> Result<Self, ProgramError> {
-        if accounts.len() < 5 {
+        if accounts.len() < 6 {
             return Err(ProgramError::NotEnoughAccountKeys);
         }
 
-        let yield_pool = &accounts[0];
-        let pool_commitment_tree = &accounts[1];
-        let pool_nullifier_record = &accounts[2];
-        let compounder = &accounts[3];
-        let system_program = &accounts[4];
-
-        // Validate compounder is signer
-        if !compounder.is_signer() {
+        if !accounts[3].is_signer() {
             return Err(ProgramError::MissingRequiredSignature);
         }
 
         Ok(Self {
-            yield_pool,
-            pool_commitment_tree,
-            pool_nullifier_record,
-            compounder,
-            system_program,
+            yield_pool: &accounts[0],
+            pool_commitment_tree: &accounts[1],
+            pool_nullifier_record: &accounts[2],
+            compounder: &accounts[3],
+            system_program: &accounts[4],
+            ultrahonk_verifier: &accounts[5],
         })
     }
 }
 
-/// Process compound yield instruction
+/// Process compound yield instruction (UltraHonk proof)
 pub fn process_compound_yield(
     program_id: &Pubkey,
     accounts: &[AccountInfo],
@@ -115,21 +120,17 @@ pub fn process_compound_yield(
     let accounts = CompoundYieldAccounts::from_accounts(accounts)?;
     let ix_data = CompoundYieldData::from_bytes(data)?;
 
-    // SECURITY: Validate non-zero principal
     if ix_data.old_principal == 0 {
         return Err(ZVaultError::ZeroAmount.into());
     }
 
-    // SECURITY: Validate account owners
     validate_program_owner(accounts.yield_pool, program_id)?;
     validate_program_owner(accounts.pool_commitment_tree, program_id)?;
 
-    // SECURITY: Validate writable accounts
     validate_account_writable(accounts.yield_pool)?;
     validate_account_writable(accounts.pool_commitment_tree)?;
     validate_account_writable(accounts.pool_nullifier_record)?;
 
-    // Load yield pool and get current state
     let pool_id: [u8; 8];
     let current_epoch: u64;
     let yield_rate_bps: u16;
@@ -146,28 +147,22 @@ pub fn process_compound_yield(
         current_epoch = pool.current_epoch();
         yield_rate_bps = pool.yield_rate_bps();
 
-        // Calculate yield with overflow protection
         let epochs_staked = current_epoch.saturating_sub(ix_data.deposit_epoch);
         yield_amount = pool.calculate_yield_checked(ix_data.old_principal, epochs_staked)?;
 
-        // Check yield reserve
         if yield_amount > pool.yield_reserve() {
             return Err(ZVaultError::InsufficientYieldReserve.into());
         }
 
-        // Ensure there's actually yield to compound
         if yield_amount == 0 {
             return Err(ZVaultError::ZeroAmount.into());
         }
 
-        // Validate new principal doesn't overflow (actual value verified in ZK proof)
-        ix_data
-            .old_principal
+        ix_data.old_principal
             .checked_add(yield_amount)
             .ok_or(ProgramError::ArithmeticOverflow)?;
     }
 
-    // Verify pool commitment tree belongs to this pool
     {
         let tree_data = accounts.pool_commitment_tree.try_borrow_data()?;
         let tree = PoolCommitmentTree::from_bytes(&tree_data)?;
@@ -180,13 +175,11 @@ pub fn process_compound_yield(
             return Err(ZVaultError::InvalidPoolRoot.into());
         }
 
-        // Need capacity for new position
         if !tree.has_capacity() {
             return Err(ZVaultError::PoolTreeFull.into());
         }
     }
 
-    // Verify pool nullifier PDA
     let nullifier_seeds: &[&[u8]] = &[
         PoolNullifierRecord::SEED,
         &pool_id,
@@ -200,7 +193,6 @@ pub fn process_compound_yield(
     let clock = Clock::get()?;
     let rent = Rent::get()?;
 
-    // SECURITY: Create pool nullifier PDA FIRST to prevent race conditions
     {
         let nullifier_data_len = accounts.pool_nullifier_record.data_len();
         if nullifier_data_len > 0 {
@@ -229,61 +221,51 @@ pub fn process_compound_yield(
         }
     }
 
-    // Verify Groth16 proof for compound (after nullifier claimed)
-    let groth16_proof = Groth16Proof::from_bytes(&ix_data.proof);
-    let vk = get_test_verification_key(5); // pool_compound has 5 public inputs
-
-    if !verify_pool_compound_proof(
-        &vk,
-        &groth16_proof,
+    // Verify UltraHonk proof via CPI
+    pinocchio::msg!("Verifying UltraHonk compound proof...");
+    verify_ultrahonk_pool_compound_proof(
+        accounts.ultrahonk_verifier,
+        ix_data.proof,
         &ix_data.pool_merkle_root,
         &ix_data.old_nullifier_hash,
         &ix_data.new_pool_commitment,
         current_epoch,
         yield_rate_bps,
-    ) {
-        return Err(ZVaultError::ZkVerificationFailed.into());
-    }
+        &ix_data.vk_hash,
+    ).map_err(|_| {
+        pinocchio::msg!("UltraHonk proof verification failed");
+        ZVaultError::ZkVerificationFailed
+    })?;
 
-    // Initialize pool nullifier record
     {
         let mut nullifier_data = accounts.pool_nullifier_record.try_borrow_mut_data()?;
         let nullifier = PoolNullifierRecord::init(&mut nullifier_data)?;
 
-        nullifier
-            .nullifier_hash
-            .copy_from_slice(&ix_data.old_nullifier_hash);
+        nullifier.nullifier_hash.copy_from_slice(&ix_data.old_nullifier_hash);
         nullifier.set_spent_at(clock.unix_timestamp);
         nullifier.pool_id.copy_from_slice(&pool_id);
         nullifier.set_epoch_at_operation(current_epoch);
-        nullifier
-            .spent_by
-            .copy_from_slice(accounts.compounder.key().as_ref());
+        nullifier.spent_by.copy_from_slice(accounts.compounder.key().as_ref());
         nullifier.set_operation_type(PoolOperationType::Compound);
     }
 
-    // Add new pool position to pool tree (principal + yield, reset epoch)
     {
         let mut tree_data = accounts.pool_commitment_tree.try_borrow_mut_data()?;
         let tree = PoolCommitmentTree::from_bytes_mut(&mut tree_data)?;
-
         tree.insert_leaf(&ix_data.new_pool_commitment)?;
     }
 
-    // Update yield pool stats
     {
         let mut pool_data = accounts.yield_pool.try_borrow_mut_data()?;
         let pool = YieldPool::from_bytes_mut(&mut pool_data)?;
 
-        // Principal increases by yield amount (compounding)
         pool.add_principal(yield_amount)?;
         pool.sub_yield_reserve(yield_amount)?;
         pool.add_yield_distributed(yield_amount)?;
         pool.set_last_update(clock.unix_timestamp);
-
-        // Try to advance epoch if needed
         pool.try_advance_epoch(clock.unix_timestamp);
     }
 
+    pinocchio::msg!("Pool compound completed (UltraHonk)");
     Ok(())
 }

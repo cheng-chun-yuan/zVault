@@ -1,12 +1,14 @@
-//! Claim instruction (Unified Model)
+//! Claim instruction (UltraHonk - Client-Side ZK)
 //!
 //! Claims a unified commitment to a public Solana wallet.
 //! Input:  Commitment = Poseidon2(pub_key_x, amount)
 //! Output: zkBTC transferred to recipient's ATA (amount revealed)
 //!
+//! ZK Proof: UltraHonk (generated in browser via bb.js or mobile via mopro)
+//!
 //! Flow:
-//! 1. User provides ZK proof of commitment ownership
-//! 2. Contract verifies proof on-chain
+//! 1. User generates UltraHonk proof client-side (no backend)
+//! 2. Contract verifies proof via CPI to ultrahonk-verifier
 //! 3. Nullifier is recorded (prevents double-spend)
 //! 4. zkBTC is transferred from pool vault to recipient's ATA
 
@@ -20,56 +22,79 @@ use pinocchio::{
 };
 use pinocchio_system::instructions::CreateAccount;
 
-use crate::constants::PROOF_SIZE;
 use crate::error::ZVaultError;
 use crate::state::{
     CommitmentTree, NullifierOperationType, NullifierRecord, PoolState,
     NULLIFIER_RECORD_DISCRIMINATOR,
 };
 use crate::utils::{
-    get_test_verification_key, transfer_zbtc, verify_claim_direct_proof, Groth16Proof,
+    transfer_zbtc, verify_ultrahonk_claim_proof,
     validate_account_writable, validate_program_owner, validate_token_2022_owner,
-    validate_token_program_key,
+    validate_token_program_key, MAX_ULTRAHONK_PROOF_SIZE,
 };
 
-/// Claim public instruction data
+/// Claim instruction data (UltraHonk proof - variable size)
 ///
 /// Layout:
-/// - proof: [u8; 256] - Groth16 proof
+/// - proof_len: u32 (4 bytes, LE) - Length of proof bytes
+/// - proof: [u8; proof_len] - UltraHonk proof (8-16KB typical)
 /// - root: [u8; 32] - Merkle tree root
 /// - nullifier_hash: [u8; 32] - Nullifier to prevent double-spend
 /// - amount_sats: u64 - Amount to claim (revealed)
 /// - recipient: [u8; 32] - Recipient Solana wallet address
-pub struct ClaimData {
-    pub proof: [u8; PROOF_SIZE],
+/// - vk_hash: [u8; 32] - Verification key hash
+pub struct ClaimData<'a> {
+    pub proof: &'a [u8],
     pub root: [u8; 32],
     pub nullifier_hash: [u8; 32],
     pub amount_sats: u64,
     pub recipient: [u8; 32],
+    pub vk_hash: [u8; 32],
 }
 
-impl ClaimData {
-    /// Data size: proof(256) + root(32) + nullifier_hash(32) + amount(8) + recipient(32) = 360 bytes
-    pub const SIZE: usize = PROOF_SIZE + 32 + 32 + 8 + 32;
+impl<'a> ClaimData<'a> {
+    /// Minimum data size: proof_len(4) + root(32) + nullifier(32) + amount(8) + recipient(32) + vk_hash(32) = 140 bytes + proof
+    pub const MIN_SIZE: usize = 4 + 32 + 32 + 8 + 32 + 32;
 
-    pub fn from_bytes(data: &[u8]) -> Result<Self, ProgramError> {
-        if data.len() < Self::SIZE {
+    pub fn from_bytes(data: &'a [u8]) -> Result<Self, ProgramError> {
+        if data.len() < Self::MIN_SIZE {
             return Err(ProgramError::InvalidInstructionData);
         }
 
-        let mut proof = [0u8; PROOF_SIZE];
-        proof.copy_from_slice(&data[0..256]);
+        // Parse proof length
+        let proof_len = u32::from_le_bytes([data[0], data[1], data[2], data[3]]) as usize;
+
+        if proof_len > MAX_ULTRAHONK_PROOF_SIZE {
+            pinocchio::msg!("Proof too large");
+            return Err(ProgramError::InvalidInstructionData);
+        }
+
+        let expected_size = 4 + proof_len + 32 + 32 + 8 + 32 + 32;
+        if data.len() < expected_size {
+            return Err(ProgramError::InvalidInstructionData);
+        }
+
+        let proof = &data[4..4 + proof_len];
+
+        let mut offset = 4 + proof_len;
 
         let mut root = [0u8; 32];
-        root.copy_from_slice(&data[256..288]);
+        root.copy_from_slice(&data[offset..offset + 32]);
+        offset += 32;
 
         let mut nullifier_hash = [0u8; 32];
-        nullifier_hash.copy_from_slice(&data[288..320]);
+        nullifier_hash.copy_from_slice(&data[offset..offset + 32]);
+        offset += 32;
 
-        let amount_sats = u64::from_le_bytes(data[320..328].try_into().unwrap());
+        let amount_sats = u64::from_le_bytes(data[offset..offset + 8].try_into().unwrap());
+        offset += 8;
 
         let mut recipient = [0u8; 32];
-        recipient.copy_from_slice(&data[328..360]);
+        recipient.copy_from_slice(&data[offset..offset + 32]);
+        offset += 32;
+
+        let mut vk_hash = [0u8; 32];
+        vk_hash.copy_from_slice(&data[offset..offset + 32]);
 
         Ok(Self {
             proof,
@@ -77,11 +102,12 @@ impl ClaimData {
             nullifier_hash,
             amount_sats,
             recipient,
+            vk_hash,
         })
     }
 }
 
-/// Claim public accounts
+/// Claim accounts
 ///
 /// 0. pool_state (writable) - Pool state PDA
 /// 1. commitment_tree (readonly) - Commitment tree for root validation
@@ -92,6 +118,7 @@ impl ClaimData {
 /// 6. user (signer) - Transaction fee payer
 /// 7. token_program - Token-2022 program
 /// 8. system_program - System program
+/// 9. ultrahonk_verifier - UltraHonk verifier program
 pub struct ClaimAccounts<'a> {
     pub pool_state: &'a AccountInfo,
     pub commitment_tree: &'a AccountInfo,
@@ -102,11 +129,12 @@ pub struct ClaimAccounts<'a> {
     pub user: &'a AccountInfo,
     pub token_program: &'a AccountInfo,
     pub system_program: &'a AccountInfo,
+    pub ultrahonk_verifier: &'a AccountInfo,
 }
 
 impl<'a> ClaimAccounts<'a> {
     pub fn from_accounts(accounts: &'a [AccountInfo]) -> Result<Self, ProgramError> {
-        if accounts.len() < 9 {
+        if accounts.len() < 10 {
             return Err(ProgramError::NotEnoughAccountKeys);
         }
 
@@ -119,6 +147,7 @@ impl<'a> ClaimAccounts<'a> {
         let user = &accounts[6];
         let token_program = &accounts[7];
         let system_program = &accounts[8];
+        let ultrahonk_verifier = &accounts[9];
 
         // Validate user is signer (fee payer)
         if !user.is_signer() {
@@ -135,14 +164,15 @@ impl<'a> ClaimAccounts<'a> {
             user,
             token_program,
             system_program,
+            ultrahonk_verifier,
         })
     }
 }
 
-/// Process claim public instruction
+/// Process claim instruction (UltraHonk proof)
 ///
 /// Claims zkBTC directly to a Solana wallet, revealing the amount.
-/// This is the "public mode" that enables interoperability with regular Solana DeFi.
+/// Proof is verified via CPI to ultrahonk-verifier program.
 pub fn process_claim(
     program_id: &Pubkey,
     accounts: &[AccountInfo],
@@ -238,21 +268,24 @@ pub fn process_claim(
     }
     .invoke_signed(&nullifier_signer)?;
 
-    // Verify Groth16 proof (after nullifier is claimed)
+    // Verify UltraHonk proof via CPI (after nullifier is claimed)
     // Public inputs: [root, nullifier_hash, amount, recipient]
-    let groth16_proof = Groth16Proof::from_bytes(&ix_data.proof);
-    let vk = get_test_verification_key(4); // 4 public inputs
+    pinocchio::msg!("Verifying UltraHonk proof via CPI...");
 
-    if !verify_claim_direct_proof(
-        &vk,
-        &groth16_proof,
+    verify_ultrahonk_claim_proof(
+        accounts.ultrahonk_verifier,
+        ix_data.proof,
         &ix_data.root,
         &ix_data.nullifier_hash,
         ix_data.amount_sats,
         &ix_data.recipient,
-    ) {
-        return Err(ZVaultError::ZkVerificationFailed.into());
-    }
+        &ix_data.vk_hash,
+    ).map_err(|_| {
+        pinocchio::msg!("UltraHonk proof verification failed");
+        ZVaultError::ZkVerificationFailed
+    })?;
+
+    pinocchio::msg!("UltraHonk proof verified successfully");
 
     // Initialize nullifier record
     {
@@ -290,7 +323,7 @@ pub fn process_claim(
         pool.set_last_update(clock.unix_timestamp);
     }
 
-    pinocchio::msg!("Claimed sats to public wallet");
+    pinocchio::msg!("Claimed sats to public wallet (UltraHonk)");
 
     Ok(())
 }

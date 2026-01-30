@@ -1,11 +1,9 @@
 //! Verification Key Registry state account
 //!
-//! Stores Groth16 verification keys on-chain for different circuit types.
-//! This enables secure, upgradeable verification without redeploying the program.
+//! Stores UltraHonk verification key hashes on-chain for different circuit types.
+//! Actual verification happens via CPI to the ultrahonk-verifier program.
 
 use pinocchio::program_error::ProgramError;
-use pinocchio::account_info::AccountInfo;
-use pinocchio::pubkey::Pubkey;
 
 /// Discriminator for VK Registry account
 pub const VK_REGISTRY_DISCRIMINATOR: u8 = 0x14;
@@ -14,92 +12,80 @@ pub const VK_REGISTRY_DISCRIMINATOR: u8 = 0x14;
 #[repr(u8)]
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub enum CircuitType {
+    /// Claim to public (4 public inputs)
+    Claim = 0,
     /// Split commitment (4 public inputs)
-    Split = 0,
-    /// Private transfer (3 public inputs)
-    Transfer = 1,
+    Split = 1,
+    /// Spend partial public (5 public inputs)
+    SpendPartialPublic = 2,
     /// Pool deposit (4 public inputs)
-    PoolDeposit = 2,
-    /// Pool withdraw (6 public inputs)
-    PoolWithdraw = 3,
+    PoolDeposit = 3,
+    /// Pool withdraw (5 public inputs)
+    PoolWithdraw = 4,
     /// Pool compound yield (5 public inputs)
-    PoolCompound = 4,
-    /// Pool claim yield (7 public inputs)
-    PoolClaimYield = 5,
-    /// Request redemption (3 public inputs)
-    Redemption = 6,
+    PoolCompound = 5,
+    /// Pool claim yield (6 public inputs)
+    PoolClaimYield = 6,
 }
 
 impl CircuitType {
     /// Number of public inputs for this circuit type
     pub fn num_public_inputs(&self) -> usize {
         match self {
+            CircuitType::Claim => 4,
             CircuitType::Split => 4,
-            CircuitType::Transfer => 3,
+            CircuitType::SpendPartialPublic => 5,
             CircuitType::PoolDeposit => 4,
-            CircuitType::PoolWithdraw => 6,
+            CircuitType::PoolWithdraw => 5,
             CircuitType::PoolCompound => 5,
-            CircuitType::PoolClaimYield => 7,
-            CircuitType::Redemption => 3,
+            CircuitType::PoolClaimYield => 6,
         }
     }
 
     pub fn from_u8(value: u8) -> Option<Self> {
         match value {
-            0 => Some(CircuitType::Split),
-            1 => Some(CircuitType::Transfer),
-            2 => Some(CircuitType::PoolDeposit),
-            3 => Some(CircuitType::PoolWithdraw),
-            4 => Some(CircuitType::PoolCompound),
-            5 => Some(CircuitType::PoolClaimYield),
-            6 => Some(CircuitType::Redemption),
+            0 => Some(CircuitType::Claim),
+            1 => Some(CircuitType::Split),
+            2 => Some(CircuitType::SpendPartialPublic),
+            3 => Some(CircuitType::PoolDeposit),
+            4 => Some(CircuitType::PoolWithdraw),
+            5 => Some(CircuitType::PoolCompound),
+            6 => Some(CircuitType::PoolClaimYield),
             _ => None,
         }
     }
 }
 
-/// On-chain verification key storage
+/// On-chain verification key hash storage (UltraHonk)
 ///
-/// Layout (1024 bytes total):
+/// For UltraHonk, we store the VK hash which is used to lookup
+/// the full VK in the ultrahonk-verifier program.
+///
+/// Layout (256 bytes total):
 /// - discriminator: 1 byte
 /// - circuit_type: 1 byte
 /// - version: 2 bytes (for upgrades)
 /// - authority: 32 bytes (who can update)
-/// - alpha: 64 bytes (G1)
-/// - beta: 128 bytes (G2)
-/// - gamma: 128 bytes (G2)
-/// - delta: 128 bytes (G2)
-/// - ic_length: 1 byte
-/// - ic: 512 bytes (8 x 64 bytes for G1 points)
-/// - reserved: 27 bytes
+/// - vk_hash: 32 bytes (hash of the UltraHonk verification key)
+/// - reserved: 188 bytes
 #[repr(C)]
 pub struct VkRegistry {
     /// Account discriminator
     pub discriminator: u8,
-    /// Circuit type this VK is for
+    /// Circuit type this VK hash is for
     pub circuit_type: u8,
     /// Version number for VK upgrades
     version: [u8; 2],
-    /// Authority that can update this VK
+    /// Authority that can update this VK hash
     pub authority: [u8; 32],
-    /// Alpha point (G1)
-    pub alpha: [u8; 64],
-    /// Beta point (G2)
-    pub beta: [u8; 128],
-    /// Gamma point (G2)
-    pub gamma: [u8; 128],
-    /// Delta point (G2)
-    pub delta: [u8; 128],
-    /// Number of IC points (public inputs + 1)
-    pub ic_length: u8,
-    /// IC points (G1) - max 8 for 7 public inputs
-    pub ic: [[u8; 64]; 8],
+    /// UltraHonk verification key hash
+    pub vk_hash: [u8; 32],
     /// Reserved for future use
-    _reserved: [u8; 27],
+    _reserved: [u8; 188],
 }
 
 impl VkRegistry {
-    pub const SIZE: usize = 1024;
+    pub const SIZE: usize = 256;
     pub const SEED: &'static [u8] = b"vk_registry";
 
     /// Parse from account data
@@ -153,44 +139,11 @@ impl VkRegistry {
     pub fn get_circuit_type(&self) -> Option<CircuitType> {
         CircuitType::from_u8(self.circuit_type)
     }
-}
 
-/// Load verification key from on-chain VK registry account
-///
-/// # Arguments
-/// * `vk_account` - The VK registry account
-/// * `expected_circuit` - The circuit type we need the VK for
-/// * `program_id` - The program ID (to verify ownership)
-///
-/// # Returns
-/// A VerificationKey struct loaded from the account
-pub fn load_verification_key(
-    vk_account: &AccountInfo,
-    expected_circuit: CircuitType,
-    program_id: &Pubkey,
-) -> Result<crate::utils::groth16::VerificationKey, ProgramError> {
-    // Verify account owner
-    if vk_account.owner() != program_id {
-        return Err(ProgramError::InvalidAccountOwner);
+    /// Get VK hash for CPI to ultrahonk-verifier
+    pub fn get_vk_hash(&self) -> &[u8; 32] {
+        &self.vk_hash
     }
-
-    let data = vk_account.try_borrow_data()?;
-    let registry = VkRegistry::from_bytes(&data)?;
-
-    // Verify circuit type matches
-    if registry.circuit_type != expected_circuit as u8 {
-        return Err(ProgramError::InvalidArgument);
-    }
-
-    // Convert to VerificationKey
-    Ok(crate::utils::groth16::VerificationKey {
-        alpha: registry.alpha,
-        beta: registry.beta,
-        gamma: registry.gamma,
-        delta: registry.delta,
-        ic_length: registry.ic_length,
-        ic: registry.ic,
-    })
 }
 
 #[cfg(test)]
@@ -200,12 +153,12 @@ mod tests {
     #[test]
     fn test_circuit_type_public_inputs() {
         assert_eq!(CircuitType::Split.num_public_inputs(), 4);
-        assert_eq!(CircuitType::Transfer.num_public_inputs(), 3);
-        assert_eq!(CircuitType::PoolClaimYield.num_public_inputs(), 7);
+        assert_eq!(CircuitType::Claim.num_public_inputs(), 4);
+        assert_eq!(CircuitType::PoolClaimYield.num_public_inputs(), 6);
     }
 
     #[test]
     fn test_vk_registry_size() {
-        assert_eq!(VkRegistry::SIZE, 1024);
+        assert_eq!(VkRegistry::SIZE, 256);
     }
 }

@@ -1,16 +1,11 @@
-//! Spend Partial Public instruction (Unified Model)
+//! Spend Partial Public instruction (UltraHonk - Client-Side ZK)
 //!
 //! Claims part of a commitment to a public wallet, with change returned as a new commitment.
 //!
 //! Input:  Unified Commitment = Poseidon2(pub_key_x, amount)
 //! Output: Public transfer + Change Commitment = Poseidon2(change_pub_key_x, change_amount)
 //!
-//! Flow:
-//! 1. User provides ZK proof of commitment ownership
-//! 2. Contract verifies proof on-chain
-//! 3. Nullifier is recorded (prevents double-spend)
-//! 4. Public amount is transferred to recipient's ATA
-//! 5. Change commitment is added to the tree
+//! ZK Proof: UltraHonk (generated in browser via bb.js or mobile via mopro)
 
 use pinocchio::{
     account_info::AccountInfo,
@@ -22,61 +17,83 @@ use pinocchio::{
 };
 use pinocchio_system::instructions::CreateAccount;
 
-use crate::constants::PROOF_SIZE;
 use crate::error::ZVaultError;
 use crate::state::{
     CommitmentTree, NullifierOperationType, NullifierRecord, PoolState,
     NULLIFIER_RECORD_DISCRIMINATOR,
 };
 use crate::utils::{
-    get_test_verification_key, transfer_zbtc, verify_spend_partial_public_proof, Groth16Proof,
+    transfer_zbtc, verify_ultrahonk_spend_partial_public_proof,
     validate_account_writable, validate_program_owner, validate_token_2022_owner,
-    validate_token_program_key,
+    validate_token_program_key, MAX_ULTRAHONK_PROOF_SIZE,
 };
 
-/// Spend partial public instruction data
+/// Spend partial public instruction data (UltraHonk proof - variable size)
 ///
 /// Layout:
-/// - proof: [u8; 256] - Groth16 proof
-/// - root: [u8; 32] - Merkle tree root
-/// - nullifier_hash: [u8; 32] - Nullifier to prevent double-spend
-/// - public_amount: u64 - Amount to claim publicly (revealed)
-/// - change_commitment: [u8; 32] - New commitment for change
-/// - recipient: [u8; 32] - Recipient Solana wallet address
-pub struct SpendPartialPublicData {
-    pub proof: [u8; PROOF_SIZE],
+/// - proof_len: u32 (4 bytes, LE)
+/// - proof: [u8; proof_len] - UltraHonk proof
+/// - root: [u8; 32]
+/// - nullifier_hash: [u8; 32]
+/// - public_amount: u64
+/// - change_commitment: [u8; 32]
+/// - recipient: [u8; 32]
+/// - vk_hash: [u8; 32]
+pub struct SpendPartialPublicData<'a> {
+    pub proof: &'a [u8],
     pub root: [u8; 32],
     pub nullifier_hash: [u8; 32],
     pub public_amount: u64,
     pub change_commitment: [u8; 32],
     pub recipient: [u8; 32],
+    pub vk_hash: [u8; 32],
 }
 
-impl SpendPartialPublicData {
-    /// Data size: proof(256) + root(32) + nullifier_hash(32) + public_amount(8) + change_commitment(32) + recipient(32) = 392 bytes
-    pub const SIZE: usize = PROOF_SIZE + 32 + 32 + 8 + 32 + 32;
+impl<'a> SpendPartialPublicData<'a> {
+    /// Minimum size: proof_len(4) + root(32) + nullifier(32) + amount(8) + change(32) + recipient(32) + vk_hash(32) = 172 bytes + proof
+    pub const MIN_SIZE: usize = 4 + 32 + 32 + 8 + 32 + 32 + 32;
 
-    pub fn from_bytes(data: &[u8]) -> Result<Self, ProgramError> {
-        if data.len() < Self::SIZE {
+    pub fn from_bytes(data: &'a [u8]) -> Result<Self, ProgramError> {
+        if data.len() < Self::MIN_SIZE {
             return Err(ProgramError::InvalidInstructionData);
         }
 
-        let mut proof = [0u8; PROOF_SIZE];
-        proof.copy_from_slice(&data[0..256]);
+        // Parse proof length
+        let proof_len = u32::from_le_bytes([data[0], data[1], data[2], data[3]]) as usize;
+
+        if proof_len > MAX_ULTRAHONK_PROOF_SIZE {
+            return Err(ProgramError::InvalidInstructionData);
+        }
+
+        let expected_size = 4 + proof_len + 32 + 32 + 8 + 32 + 32 + 32;
+        if data.len() < expected_size {
+            return Err(ProgramError::InvalidInstructionData);
+        }
+
+        let proof = &data[4..4 + proof_len];
+        let mut offset = 4 + proof_len;
 
         let mut root = [0u8; 32];
-        root.copy_from_slice(&data[256..288]);
+        root.copy_from_slice(&data[offset..offset + 32]);
+        offset += 32;
 
         let mut nullifier_hash = [0u8; 32];
-        nullifier_hash.copy_from_slice(&data[288..320]);
+        nullifier_hash.copy_from_slice(&data[offset..offset + 32]);
+        offset += 32;
 
-        let public_amount = u64::from_le_bytes(data[320..328].try_into().unwrap());
+        let public_amount = u64::from_le_bytes(data[offset..offset + 8].try_into().unwrap());
+        offset += 8;
 
         let mut change_commitment = [0u8; 32];
-        change_commitment.copy_from_slice(&data[328..360]);
+        change_commitment.copy_from_slice(&data[offset..offset + 32]);
+        offset += 32;
 
         let mut recipient = [0u8; 32];
-        recipient.copy_from_slice(&data[360..392]);
+        recipient.copy_from_slice(&data[offset..offset + 32]);
+        offset += 32;
+
+        let mut vk_hash = [0u8; 32];
+        vk_hash.copy_from_slice(&data[offset..offset + 32]);
 
         Ok(Self {
             proof,
@@ -85,21 +102,23 @@ impl SpendPartialPublicData {
             public_amount,
             change_commitment,
             recipient,
+            vk_hash,
         })
     }
 }
 
 /// Spend partial public accounts
 ///
-/// 0. pool_state (writable) - Pool state PDA
-/// 1. commitment_tree (writable) - Commitment tree (for root validation and change commitment)
-/// 2. nullifier_record (writable) - Nullifier PDA (created)
-/// 3. zbtc_mint (readonly) - zBTC Token-2022 mint
-/// 4. pool_vault (writable) - Pool vault holding zBTC
-/// 5. recipient_ata (writable) - Recipient's associated token account
-/// 6. user (signer) - Transaction fee payer
-/// 7. token_program - Token-2022 program
-/// 8. system_program - System program
+/// 0. pool_state (writable)
+/// 1. commitment_tree (writable)
+/// 2. nullifier_record (writable)
+/// 3. zbtc_mint (readonly)
+/// 4. pool_vault (writable)
+/// 5. recipient_ata (writable)
+/// 6. user (signer)
+/// 7. token_program
+/// 8. system_program
+/// 9. ultrahonk_verifier - UltraHonk verifier program
 pub struct SpendPartialPublicAccounts<'a> {
     pub pool_state: &'a AccountInfo,
     pub commitment_tree: &'a AccountInfo,
@@ -110,11 +129,12 @@ pub struct SpendPartialPublicAccounts<'a> {
     pub user: &'a AccountInfo,
     pub token_program: &'a AccountInfo,
     pub system_program: &'a AccountInfo,
+    pub ultrahonk_verifier: &'a AccountInfo,
 }
 
 impl<'a> SpendPartialPublicAccounts<'a> {
     pub fn from_accounts(accounts: &'a [AccountInfo]) -> Result<Self, ProgramError> {
-        if accounts.len() < 9 {
+        if accounts.len() < 10 {
             return Err(ProgramError::NotEnoughAccountKeys);
         }
 
@@ -127,6 +147,7 @@ impl<'a> SpendPartialPublicAccounts<'a> {
         let user = &accounts[6];
         let token_program = &accounts[7];
         let system_program = &accounts[8];
+        let ultrahonk_verifier = &accounts[9];
 
         // Validate user is signer (fee payer)
         if !user.is_signer() {
@@ -143,11 +164,12 @@ impl<'a> SpendPartialPublicAccounts<'a> {
             user,
             token_program,
             system_program,
+            ultrahonk_verifier,
         })
     }
 }
 
-/// Process spend partial public instruction (Unified Model)
+/// Process spend partial public instruction (UltraHonk proof)
 ///
 /// Claims part of a commitment to a public wallet, with change returned as a new commitment.
 /// Amount conservation: input_amount == public_amount + change_amount (enforced by ZK proof)
@@ -245,22 +267,22 @@ pub fn process_spend_partial_public(
     }
     .invoke_signed(&nullifier_signer)?;
 
-    // Verify Groth16 proof (after nullifier is claimed)
-    // Public inputs: [root, nullifier_hash, public_amount, change_commitment, recipient]
-    let groth16_proof = Groth16Proof::from_bytes(&ix_data.proof);
-    let vk = get_test_verification_key(5); // 5 public inputs
+    // Verify UltraHonk proof via CPI (after nullifier is claimed)
+    pinocchio::msg!("Verifying UltraHonk partial public proof via CPI...");
 
-    if !verify_spend_partial_public_proof(
-        &vk,
-        &groth16_proof,
+    verify_ultrahonk_spend_partial_public_proof(
+        accounts.ultrahonk_verifier,
+        ix_data.proof,
         &ix_data.root,
         &ix_data.nullifier_hash,
         ix_data.public_amount,
         &ix_data.change_commitment,
         &ix_data.recipient,
-    ) {
-        return Err(ZVaultError::ZkVerificationFailed.into());
-    }
+        &ix_data.vk_hash,
+    ).map_err(|_| {
+        pinocchio::msg!("UltraHonk proof verification failed");
+        ZVaultError::ZkVerificationFailed
+    })?;
 
     // Initialize nullifier record
     {
@@ -303,12 +325,11 @@ pub fn process_spend_partial_public(
         let mut pool_data = accounts.pool_state.try_borrow_mut_data()?;
         let pool = PoolState::from_bytes_mut(&mut pool_data)?;
 
-        // Only subtract public amount (change stays shielded)
         pool.sub_shielded(ix_data.public_amount)?;
         pool.set_last_update(clock.unix_timestamp);
     }
 
-    pinocchio::msg!("Spent partial to public with change");
+    pinocchio::msg!("Spent partial to public with change (UltraHonk)");
 
     Ok(())
 }

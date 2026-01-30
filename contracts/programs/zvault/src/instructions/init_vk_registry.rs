@@ -1,13 +1,12 @@
-//! Initialize VK Registry instruction
+//! Initialize VK Registry instruction (UltraHonk)
 //!
-//! Creates and initializes a verification key registry account for a specific circuit type.
-//! This is called during deployment to set up the VK accounts that will hold
-//! the Groth16 verification keys.
+//! Creates and initializes a verification key hash registry for a specific circuit type.
+//! The VK hash is used for CPI to the ultrahonk-verifier program.
 //!
 //! # Security
 //! - Only the pool authority can initialize VK registries
 //! - Each circuit type has its own VK registry PDA
-//! - VKs can be updated by authority (for circuit upgrades)
+//! - VK hashes can be updated by authority (for circuit upgrades)
 
 use pinocchio::{
     account_info::AccountInfo,
@@ -21,31 +20,21 @@ use crate::error::ZVaultError;
 use crate::state::{CircuitType, PoolState, VkRegistry, VK_REGISTRY_DISCRIMINATOR};
 use crate::utils::{create_pda_account, validate_program_owner};
 
-/// Initialize VK Registry instruction data
+/// Initialize VK Registry instruction data (UltraHonk)
 ///
 /// Layout:
-/// - circuit_type: u8 (which circuit this VK is for)
-/// - alpha: [u8; 64] (G1 point)
-/// - beta: [u8; 128] (G2 point)
-/// - gamma: [u8; 128] (G2 point)
-/// - delta: [u8; 128] (G2 point)
-/// - ic_length: u8
-/// - ic: [[u8; 64]; N] (G1 points, N = ic_length)
+/// - circuit_type: u8 (which circuit this VK hash is for)
+/// - vk_hash: [u8; 32] (UltraHonk verification key hash)
 pub struct InitVkRegistryData {
     pub circuit_type: u8,
-    pub alpha: [u8; 64],
-    pub beta: [u8; 128],
-    pub gamma: [u8; 128],
-    pub delta: [u8; 128],
-    pub ic_length: u8,
-    pub ic: [[u8; 64]; 8], // Max 8 IC points
+    pub vk_hash: [u8; 32],
 }
 
 impl InitVkRegistryData {
-    pub const MIN_SIZE: usize = 1 + 64 + 128 + 128 + 128 + 1; // 450 bytes minimum
+    pub const SIZE: usize = 1 + 32; // 33 bytes
 
     pub fn from_bytes(data: &[u8]) -> Result<Self, ProgramError> {
-        if data.len() < Self::MIN_SIZE {
+        if data.len() < Self::SIZE {
             return Err(ProgramError::InvalidInstructionData);
         }
 
@@ -56,45 +45,12 @@ impl InitVkRegistryData {
             return Err(ProgramError::InvalidArgument);
         }
 
-        let mut alpha = [0u8; 64];
-        alpha.copy_from_slice(&data[1..65]);
-
-        let mut beta = [0u8; 128];
-        beta.copy_from_slice(&data[65..193]);
-
-        let mut gamma = [0u8; 128];
-        gamma.copy_from_slice(&data[193..321]);
-
-        let mut delta = [0u8; 128];
-        delta.copy_from_slice(&data[321..449]);
-
-        let ic_length = data[449];
-        if ic_length > 8 {
-            return Err(ProgramError::InvalidArgument);
-        }
-
-        // Parse IC points
-        let mut ic = [[0u8; 64]; 8];
-        let ic_data_start = 450;
-        let required_len = ic_data_start + (ic_length as usize * 64);
-
-        if data.len() < required_len {
-            return Err(ProgramError::InvalidInstructionData);
-        }
-
-        for (i, ic_point) in ic.iter_mut().enumerate().take(ic_length as usize) {
-            let start = ic_data_start + i * 64;
-            ic_point.copy_from_slice(&data[start..start + 64]);
-        }
+        let mut vk_hash = [0u8; 32];
+        vk_hash.copy_from_slice(&data[1..33]);
 
         Ok(Self {
             circuit_type,
-            alpha,
-            beta,
-            gamma,
-            delta,
-            ic_length,
-            ic,
+            vk_hash,
         })
     }
 }
@@ -182,15 +138,10 @@ pub fn process_init_vk_registry(
         registry.circuit_type = ix_data.circuit_type;
         registry.set_version(1);
         registry.authority.copy_from_slice(authority.key().as_ref());
-        registry.alpha = ix_data.alpha;
-        registry.beta = ix_data.beta;
-        registry.gamma = ix_data.gamma;
-        registry.delta = ix_data.delta;
-        registry.ic_length = ix_data.ic_length;
-        registry.ic = ix_data.ic;
+        registry.vk_hash.copy_from_slice(&ix_data.vk_hash);
     }
 
-    pinocchio::msg!("VK registry initialized");
+    pinocchio::msg!("VK registry initialized (UltraHonk)");
 
     Ok(())
 }
@@ -237,18 +188,13 @@ pub fn process_update_vk_registry(
             return Err(ProgramError::InvalidArgument);
         }
 
-        // Update VK data
+        // Update VK hash
         let new_version = registry.version().saturating_add(1);
         registry.set_version(new_version);
-        registry.alpha = ix_data.alpha;
-        registry.beta = ix_data.beta;
-        registry.gamma = ix_data.gamma;
-        registry.delta = ix_data.delta;
-        registry.ic_length = ix_data.ic_length;
-        registry.ic = ix_data.ic;
+        registry.vk_hash.copy_from_slice(&ix_data.vk_hash);
     }
 
-    pinocchio::msg!("VK registry updated successfully");
+    pinocchio::msg!("VK registry updated (UltraHonk)");
 
     Ok(())
 }

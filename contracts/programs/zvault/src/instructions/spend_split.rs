@@ -1,8 +1,10 @@
-//! Spend Split instruction (Unified Model)
+//! Spend Split instruction (UltraHonk - Client-Side ZK)
 //!
 //! Splits one unified commitment into two new commitments.
 //! Input:  Commitment = Poseidon2(pub_key_x, amount)
 //! Output: Commitment1 + Commitment2 (amount conservation enforced by ZK proof)
+//!
+//! ZK Proof: UltraHonk (generated in browser via bb.js or mobile via mopro)
 
 use pinocchio::{
     account_info::AccountInfo,
@@ -12,47 +14,77 @@ use pinocchio::{
     ProgramResult,
 };
 
-use crate::constants::PROOF_SIZE;
 use crate::error::ZVaultError;
 use crate::state::{
     CommitmentTree, NullifierOperationType, NullifierRecord, PoolState,
     NULLIFIER_RECORD_DISCRIMINATOR,
 };
 use crate::utils::{
-    create_pda_account, get_test_verification_key, verify_split_proof, Groth16Proof,
-    validate_program_owner, validate_account_writable,
+    create_pda_account, verify_ultrahonk_split_proof,
+    validate_program_owner, validate_account_writable, MAX_ULTRAHONK_PROOF_SIZE,
 };
 
-/// Split commitment instruction data
-pub struct SpendSplitData {
-    pub proof: [u8; PROOF_SIZE],
+/// Split commitment instruction data (UltraHonk proof - variable size)
+///
+/// Layout:
+/// - proof_len: u32 (4 bytes, LE)
+/// - proof: [u8; proof_len] - UltraHonk proof
+/// - root: [u8; 32]
+/// - nullifier_hash: [u8; 32]
+/// - output_commitment_1: [u8; 32]
+/// - output_commitment_2: [u8; 32]
+/// - vk_hash: [u8; 32]
+pub struct SpendSplitData<'a> {
+    pub proof: &'a [u8],
     pub root: [u8; 32],
     pub nullifier_hash: [u8; 32],
     pub output_commitment_1: [u8; 32],
     pub output_commitment_2: [u8; 32],
+    pub vk_hash: [u8; 32],
 }
 
-impl SpendSplitData {
-    pub fn from_bytes(data: &[u8]) -> Result<Self, ProgramError> {
-        // proof (256) + root (32) + nullifier_hash (32) + output_1 (32) + output_2 (32) = 384 bytes
-        if data.len() < 384 {
+impl<'a> SpendSplitData<'a> {
+    /// Minimum size: proof_len(4) + root(32) + nullifier(32) + out1(32) + out2(32) + vk_hash(32) = 164 bytes + proof
+    pub const MIN_SIZE: usize = 4 + 32 + 32 + 32 + 32 + 32;
+
+    pub fn from_bytes(data: &'a [u8]) -> Result<Self, ProgramError> {
+        if data.len() < Self::MIN_SIZE {
             return Err(ProgramError::InvalidInstructionData);
         }
 
-        let mut proof = [0u8; PROOF_SIZE];
-        proof.copy_from_slice(&data[0..256]);
+        // Parse proof length
+        let proof_len = u32::from_le_bytes([data[0], data[1], data[2], data[3]]) as usize;
+
+        if proof_len > MAX_ULTRAHONK_PROOF_SIZE {
+            return Err(ProgramError::InvalidInstructionData);
+        }
+
+        let expected_size = 4 + proof_len + 32 + 32 + 32 + 32 + 32;
+        if data.len() < expected_size {
+            return Err(ProgramError::InvalidInstructionData);
+        }
+
+        let proof = &data[4..4 + proof_len];
+        let mut offset = 4 + proof_len;
 
         let mut root = [0u8; 32];
-        root.copy_from_slice(&data[256..288]);
+        root.copy_from_slice(&data[offset..offset + 32]);
+        offset += 32;
 
         let mut nullifier_hash = [0u8; 32];
-        nullifier_hash.copy_from_slice(&data[288..320]);
+        nullifier_hash.copy_from_slice(&data[offset..offset + 32]);
+        offset += 32;
 
         let mut output_commitment_1 = [0u8; 32];
-        output_commitment_1.copy_from_slice(&data[320..352]);
+        output_commitment_1.copy_from_slice(&data[offset..offset + 32]);
+        offset += 32;
 
         let mut output_commitment_2 = [0u8; 32];
-        output_commitment_2.copy_from_slice(&data[352..384]);
+        output_commitment_2.copy_from_slice(&data[offset..offset + 32]);
+        offset += 32;
+
+        let mut vk_hash = [0u8; 32];
+        vk_hash.copy_from_slice(&data[offset..offset + 32]);
 
         Ok(Self {
             proof,
@@ -60,22 +92,31 @@ impl SpendSplitData {
             nullifier_hash,
             output_commitment_1,
             output_commitment_2,
+            vk_hash,
         })
     }
 }
 
 /// Split commitment accounts
+///
+/// 0. pool_state (writable)
+/// 1. commitment_tree (writable)
+/// 2. nullifier_record (writable)
+/// 3. user (signer)
+/// 4. system_program
+/// 5. ultrahonk_verifier - UltraHonk verifier program
 pub struct SpendSplitAccounts<'a> {
     pub pool_state: &'a AccountInfo,
     pub commitment_tree: &'a AccountInfo,
     pub nullifier_record: &'a AccountInfo,
     pub user: &'a AccountInfo,
     pub system_program: &'a AccountInfo,
+    pub ultrahonk_verifier: &'a AccountInfo,
 }
 
 impl<'a> SpendSplitAccounts<'a> {
     pub fn from_accounts(accounts: &'a [AccountInfo]) -> Result<Self, ProgramError> {
-        if accounts.len() < 5 {
+        if accounts.len() < 6 {
             return Err(ProgramError::NotEnoughAccountKeys);
         }
 
@@ -84,6 +125,7 @@ impl<'a> SpendSplitAccounts<'a> {
         let nullifier_record = &accounts[2];
         let user = &accounts[3];
         let system_program = &accounts[4];
+        let ultrahonk_verifier = &accounts[5];
 
         // Validate user is signer
         if !user.is_signer() {
@@ -96,11 +138,12 @@ impl<'a> SpendSplitAccounts<'a> {
             nullifier_record,
             user,
             system_program,
+            ultrahonk_verifier,
         })
     }
 }
 
-/// Process split commitment (1-in-2-out)
+/// Process split commitment (1-in-2-out) with UltraHonk proof
 pub fn process_spend_split(
     program_id: &Pubkey,
     accounts: &[AccountInfo],
@@ -112,7 +155,6 @@ pub fn process_spend_split(
     // SECURITY: Validate account owners BEFORE deserializing any data
     validate_program_owner(accounts.pool_state, program_id)?;
     validate_program_owner(accounts.commitment_tree, program_id)?;
-    // Note: nullifier_record may not exist yet (will be created), skip owner check
 
     // SECURITY: Validate writable accounts
     validate_account_writable(accounts.pool_state)?;
@@ -151,8 +193,6 @@ pub fn process_spend_split(
     let rent = Rent::get()?;
 
     // SECURITY: Create nullifier PDA FIRST to prevent race conditions
-    // If account already exists, create_pda_account will fail (double-spend prevented)
-    // This is defense-in-depth: even if ZK proof fails later, nullifier is marked spent
     {
         let nullifier_data_len = accounts.nullifier_record.data_len();
         if nullifier_data_len > 0 {
@@ -161,7 +201,6 @@ pub fn process_spend_split(
                 return Err(ZVaultError::NullifierAlreadyUsed.into());
             }
         } else {
-            // Account doesn't exist - create it atomically
             let lamports = rent.minimum_balance(NullifierRecord::LEN);
             let bump_bytes = [nullifier_bump];
             let signer_seeds: &[&[u8]] = &[
@@ -181,20 +220,21 @@ pub fn process_spend_split(
         }
     }
 
-    // Verify Groth16 proof (after nullifier is claimed)
-    let groth16_proof = Groth16Proof::from_bytes(&ix_data.proof);
-    let vk = get_test_verification_key(4); // 4 public inputs
+    // Verify UltraHonk proof via CPI (after nullifier is claimed)
+    pinocchio::msg!("Verifying UltraHonk split proof via CPI...");
 
-    if !verify_split_proof(
-        &vk,
-        &groth16_proof,
+    verify_ultrahonk_split_proof(
+        accounts.ultrahonk_verifier,
+        ix_data.proof,
         &ix_data.root,
         &ix_data.nullifier_hash,
         &ix_data.output_commitment_1,
         &ix_data.output_commitment_2,
-    ) {
-        return Err(ZVaultError::ZkVerificationFailed.into());
-    }
+        &ix_data.vk_hash,
+    ).map_err(|_| {
+        pinocchio::msg!("UltraHonk split proof verification failed");
+        ZVaultError::ZkVerificationFailed
+    })?;
 
     // Initialize nullifier record
     {
@@ -212,12 +252,10 @@ pub fn process_spend_split(
         let mut tree_data = accounts.commitment_tree.try_borrow_mut_data()?;
         let tree = CommitmentTree::from_bytes_mut(&mut tree_data)?;
 
-        // Need capacity for 2 new leaves
         if tree.next_index() + 2 > (1u64 << 20) {
             return Err(ZVaultError::TreeFull.into());
         }
 
-        // Insert both output commitments using Poseidon2 hashing
         tree.insert_leaf(&ix_data.output_commitment_1)?;
         tree.insert_leaf(&ix_data.output_commitment_2)?;
     }
@@ -231,6 +269,8 @@ pub fn process_spend_split(
         pool.set_split_count(split_count.saturating_add(1));
         pool.set_last_update(clock.unix_timestamp);
     }
+
+    pinocchio::msg!("Split completed (UltraHonk)");
 
     Ok(())
 }
