@@ -85,6 +85,13 @@ export interface NetworkConfig {
 
   /** Base URL for circuit artifacts */
   circuitCdnUrl: string;
+
+  // -------------------------------------------------------------------------
+  // UltraHonk Verifier (Client-side ZK)
+  // -------------------------------------------------------------------------
+
+  /** UltraHonk verifier program ID (browser proof generation via bb.js) */
+  ultrahonkVerifierProgramId: Address;
 }
 
 // =============================================================================
@@ -141,8 +148,11 @@ export const DEVNET_CONFIG: NetworkConfig = {
   bitcoinNetwork: "testnet",
   esploraUrl: "https://blockstream.info/testnet/api",
 
-  // Circuit CDN
-  circuitCdnUrl: "https://cdn.jsdelivr.net/npm/@zvault/sdk@latest/circuits",
+  // Circuit CDN (UltraHonk artifacts: .json, .vk files)
+  circuitCdnUrl: "https://circuits.amidoggy.xyz",
+
+  // UltraHonk Verifier (browser proof generation via bb.js)
+  ultrahonkVerifierProgramId: address("5uAoTLSexeKKLU3ZXniWFE2CsCWGPzMiYPpKiywCGqsd"),
 };
 
 /**
@@ -174,6 +184,9 @@ export const MAINNET_CONFIG: NetworkConfig = {
 
   // Circuit CDN
   circuitCdnUrl: "https://cdn.jsdelivr.net/npm/@zvault/sdk@latest/circuits",
+
+  // UltraHonk Verifier (placeholder)
+  ultrahonkVerifierProgramId: address("11111111111111111111111111111111"),
 };
 
 /**
@@ -205,6 +218,9 @@ export const LOCALNET_CONFIG: NetworkConfig = {
 
   // Circuit CDN (use local files for development)
   circuitCdnUrl: "/circuits",
+
+  // UltraHonk Verifier (use devnet for local testing)
+  ultrahonkVerifierProgramId: address("5uAoTLSexeKKLU3ZXniWFE2CsCWGPzMiYPpKiywCGqsd"),
 };
 
 // =============================================================================
@@ -284,12 +300,18 @@ export const BTC_LIGHT_CLIENT_PROGRAM_ID: Address = DEVNET_CONFIG.btcLightClient
 // Version Info
 // =============================================================================
 
-export const SDK_VERSION = "1.4.0";
+export const SDK_VERSION = "1.6.0";
 
 export const DEPLOYMENT_INFO = {
   version: SDK_VERSION,
   deployedAt: "2025-01-30",
   network: "devnet" as NetworkType,
-  features: ["demo-stealth", "name-registry", "stealth-addresses", "reverse-lookup"],
-  notes: "Clean fresh deployment for demo",
+  features: [
+    "demo-stealth",
+    "name-registry",
+    "stealth-addresses",
+    "reverse-lookup",
+    "ultrahonk-browser-proving",
+  ],
+  notes: "Client-side UltraHonk proof generation via bb.js",
 };

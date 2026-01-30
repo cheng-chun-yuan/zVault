@@ -620,3 +620,50 @@ export {
   type PoolOperationProgressCallback,
 } from "./yield-pool";
 
+// ==========================================================================
+// UltraHonk Browser Proof Generation (Client-Side Only)
+// ==========================================================================
+
+export {
+  // Core proof generation
+  generateUltraHonkProof,
+  verifyUltraHonkProofLocal,
+  // Initialization
+  initBbJs,
+  isUltraHonkAvailable,
+  // Circuit loading
+  loadCircuitArtifacts,
+  // Solana instructions
+  getUltraHonkVerifierProgramId,
+  buildVerifyInstructionData,
+  createVerifyInstruction,
+  // High-level API
+  proveAndBuildTransaction,
+  // Types
+  type UltraHonkProofResult,
+  type CircuitArtifacts,
+  type UltraHonkCircuit,
+} from "./ultrahonk";
+
+// ==========================================================================
+// snarkjs Browser Proof Generation (Circom + Groth16)
+// ==========================================================================
+
+export {
+  // Core proof generation
+  generateGroth16ProofBrowser,
+  verifyGroth16ProofLocal,
+  // Solana conversion (negates proof.A.y)
+  buildSolanaProofData,
+  buildSolanaProofBytes,
+  buildSolanaPublicInputsBytes,
+  // High-level API
+  proveAndPrepareSolana,
+  // Availability check
+  isSnarkjsAvailable,
+  // Types
+  type Groth16Proof,
+  type SnarkjsProofResult,
+  type SolanaGroth16Proof,
+} from "./snarkjs-browser";
+

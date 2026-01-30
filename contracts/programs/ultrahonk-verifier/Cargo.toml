@@ -1,0 +1,25 @@
+[package]
+name = "ultrahonk-verifier"
+version = "0.1.0"
+edition = "2021"
+description = "UltraHonk ZK-SNARK verifier for Solana - enables browser-based proof generation"
+license = "MIT OR Apache-2.0"
+
+[lib]
+crate-type = ["cdylib", "lib"]
+
+[features]
+default = []
+no-entrypoint = []
+cpi = ["no-entrypoint"]
+devnet = []
+
+[dependencies]
+pinocchio = "0.9"
+solana-bn254 = "~2.1"
+
+[dev-dependencies]
+solana-sdk = "2.1"
+
+[lints.rust]
+unexpected_cfgs = { level = "allow", check-cfg = ["cfg(target_os, values(\"solana\"))"] }
