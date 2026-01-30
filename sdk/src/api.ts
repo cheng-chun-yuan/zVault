@@ -56,7 +56,7 @@ import {
 } from "./stealth";
 import { type StealthMetaAddress, type ZVaultKeys } from "./keys";
 import { type MerkleProof, TREE_DEPTH, ZERO_VALUE } from "./merkle";
-import { bigintToBytes, bytesToBigint } from "./crypto";
+import { bigintToBytes, bytesToBigint, hexToBytes } from "./crypto";
 import { hashNullifier } from "./poseidon2";
 
 /** System program address */
@@ -751,13 +751,17 @@ export async function claimPublic(
     networkConfig.zbtcMint
   );
 
+  // Get VK hash for claim circuit
+  const vkHash = hexToBytes(networkConfig.vkHashes.claim);
+
   // Build instruction data
   const data = buildClaimPublicData(
     proof,
     mp.root,
     note.nullifierHashBytes,
     note.amount,
-    recipientAddress
+    recipientAddress,
+    vkHash
   );
 
   // Derive PDAs
@@ -768,7 +772,7 @@ export async function claimPublic(
     note.nullifierHashBytes
   );
 
-  // Build instruction (v2 format)
+  // Build instruction (v2 format with UltraHonk verifier)
   const ix: Instruction = {
     programAddress: config.programId,
     accounts: [
@@ -781,6 +785,7 @@ export async function claimPublic(
       { address: config.payer.address, role: AccountRole.WRITABLE_SIGNER },
       { address: networkConfig.token2022ProgramId, role: AccountRole.READONLY },
       { address: SYSTEM_PROGRAM_ADDRESS, role: AccountRole.READONLY },
+      { address: networkConfig.ultrahonkVerifierProgramId, role: AccountRole.READONLY },
     ],
     data: new Uint8Array(data),
   };
@@ -880,13 +885,17 @@ export async function claimPublicStealth(
     networkConfig.zbtcMint
   );
 
+  // Get VK hash for claim circuit
+  const vkHash = hexToBytes(networkConfig.vkHashes.claim);
+
   // Build instruction data (same format as claimPublic)
   const data = buildClaimPublicData(
     proof,
     mp.root,
     nullifierHashBytes,
     scannedNote.amount,
-    recipientAddress
+    recipientAddress,
+    vkHash
   );
 
   // Derive PDAs
@@ -897,7 +906,7 @@ export async function claimPublicStealth(
     nullifierHashBytes
   );
 
-  // Build instruction (v2 format)
+  // Build instruction (v2 format with UltraHonk verifier)
   const ix: Instruction = {
     programAddress: config.programId,
     accounts: [
@@ -910,6 +919,7 @@ export async function claimPublicStealth(
       { address: config.payer.address, role: AccountRole.WRITABLE_SIGNER },
       { address: networkConfig.token2022ProgramId, role: AccountRole.READONLY },
       { address: SYSTEM_PROGRAM_ADDRESS, role: AccountRole.READONLY },
+      { address: networkConfig.ultrahonkVerifierProgramId, role: AccountRole.READONLY },
     ],
     data: new Uint8Array(data),
   };
@@ -1093,31 +1103,32 @@ function buildClaimData(proof: NoirProof, amount: bigint): Uint8Array {
 }
 
 /**
- * Build claim public instruction data
+ * Build claim instruction data (UltraHonk - variable-length proof)
  *
- * Format (360 bytes total):
- * - discriminator: 1 byte (9 = CLAIM_PUBLIC)
- * - proof: 256 bytes (Groth16)
+ * Format:
+ * - discriminator: 1 byte (9 = CLAIM)
+ * - proof_len: 4 bytes (little-endian)
+ * - proof: N bytes (UltraHonk)
  * - root: 32 bytes (Merkle tree root)
  * - nullifier_hash: 32 bytes
  * - amount_sats: 8 bytes (little-endian)
  * - recipient: 32 bytes (Solana wallet address)
+ * - vk_hash: 32 bytes (verification key hash)
  */
 function buildClaimPublicData(
   proof: NoirProof,
   merkleRoot: Uint8Array,
   nullifierHash: Uint8Array,
   amountSats: bigint,
-  recipient: Address
+  recipient: Address,
+  vkHash: Uint8Array
 ): Uint8Array {
   const proofBytes = proof.proof;
+  const proofLen = proofBytes.length;
 
-  // Ensure proof is exactly 256 bytes (pad or truncate if needed)
-  const proof256 = new Uint8Array(256);
-  proof256.set(proofBytes.slice(0, Math.min(256, proofBytes.length)));
-
-  // Total: 1 + 256 + 32 + 32 + 8 + 32 = 361 bytes
-  const data = new Uint8Array(361);
+  // Total: 1 + 4 + proofLen + 32 + 32 + 8 + 32 + 32
+  const totalSize = 1 + 4 + proofLen + 32 + 32 + 8 + 32 + 32;
+  const data = new Uint8Array(totalSize);
   const view = new DataView(data.buffer);
 
   let offset = 0;
@@ -1125,9 +1136,13 @@ function buildClaimPublicData(
   // Discriminator
   data[offset++] = INSTRUCTION.CLAIM;
 
-  // Proof (256 bytes)
-  data.set(proof256, offset);
-  offset += 256;
+  // Proof length (4 bytes, little-endian)
+  view.setUint32(offset, proofLen, true);
+  offset += 4;
+
+  // Proof (variable length)
+  data.set(proofBytes, offset);
+  offset += proofLen;
 
   // Merkle root (32 bytes)
   data.set(merkleRoot, offset);
@@ -1143,6 +1158,10 @@ function buildClaimPublicData(
 
   // Recipient address (32 bytes)
   data.set(addressToBytes(recipient), offset);
+  offset += 32;
+
+  // VK hash (32 bytes)
+  data.set(vkHash, offset);
 
   return data;
 }

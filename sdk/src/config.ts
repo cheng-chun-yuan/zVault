@@ -92,6 +92,21 @@ export interface NetworkConfig {
 
   /** UltraHonk verifier program ID (browser proof generation via bb.js) */
   ultrahonkVerifierProgramId: Address;
+
+  // -------------------------------------------------------------------------
+  // VK Hashes (for CPI verification)
+  // -------------------------------------------------------------------------
+
+  /** VK hashes for each circuit type (32 bytes each, hex-encoded) */
+  vkHashes: {
+    claim: string;
+    split: string;
+    spendPartialPublic: string;
+    poolDeposit: string;
+    poolWithdraw: string;
+    poolClaimYield: string;
+    poolCompound: string;
+  };
 }
 
 // =============================================================================
@@ -153,6 +168,17 @@ export const DEVNET_CONFIG: NetworkConfig = {
 
   // UltraHonk Verifier (browser proof generation via bb.js)
   ultrahonkVerifierProgramId: address("5uAoTLSexeKKLU3ZXniWFE2CsCWGPzMiYPpKiywCGqsd"),
+
+  // VK Hashes (to be updated with actual hashes from compiled circuits)
+  vkHashes: {
+    claim: "0000000000000000000000000000000000000000000000000000000000000000",
+    split: "0000000000000000000000000000000000000000000000000000000000000000",
+    spendPartialPublic: "0000000000000000000000000000000000000000000000000000000000000000",
+    poolDeposit: "0000000000000000000000000000000000000000000000000000000000000000",
+    poolWithdraw: "0000000000000000000000000000000000000000000000000000000000000000",
+    poolClaimYield: "0000000000000000000000000000000000000000000000000000000000000000",
+    poolCompound: "0000000000000000000000000000000000000000000000000000000000000000",
+  },
 };
 
 /**
@@ -187,6 +213,17 @@ export const MAINNET_CONFIG: NetworkConfig = {
 
   // UltraHonk Verifier (placeholder)
   ultrahonkVerifierProgramId: address("11111111111111111111111111111111"),
+
+  // VK Hashes (placeholder - update when deployed)
+  vkHashes: {
+    claim: "0000000000000000000000000000000000000000000000000000000000000000",
+    split: "0000000000000000000000000000000000000000000000000000000000000000",
+    spendPartialPublic: "0000000000000000000000000000000000000000000000000000000000000000",
+    poolDeposit: "0000000000000000000000000000000000000000000000000000000000000000",
+    poolWithdraw: "0000000000000000000000000000000000000000000000000000000000000000",
+    poolClaimYield: "0000000000000000000000000000000000000000000000000000000000000000",
+    poolCompound: "0000000000000000000000000000000000000000000000000000000000000000",
+  },
 };
 
 /**
@@ -221,6 +258,17 @@ export const LOCALNET_CONFIG: NetworkConfig = {
 
   // UltraHonk Verifier (use devnet for local testing)
   ultrahonkVerifierProgramId: address("5uAoTLSexeKKLU3ZXniWFE2CsCWGPzMiYPpKiywCGqsd"),
+
+  // VK Hashes (use devnet hashes for local testing)
+  vkHashes: {
+    claim: "0000000000000000000000000000000000000000000000000000000000000000",
+    split: "0000000000000000000000000000000000000000000000000000000000000000",
+    spendPartialPublic: "0000000000000000000000000000000000000000000000000000000000000000",
+    poolDeposit: "0000000000000000000000000000000000000000000000000000000000000000",
+    poolWithdraw: "0000000000000000000000000000000000000000000000000000000000000000",
+    poolClaimYield: "0000000000000000000000000000000000000000000000000000000000000000",
+    poolCompound: "0000000000000000000000000000000000000000000000000000000000000000",
+  },
 };
 
 // =============================================================================
