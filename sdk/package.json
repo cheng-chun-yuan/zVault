@@ -1,6 +1,6 @@
 {
   "name": "@zvault/sdk",
-  "version": "1.3.0",
+  "version": "1.4.0",
   "description": "ZVault SDK - Privacy-preserving Bitcoin to Solana bridge",
   "type": "module",
   "main": "dist/index.js",
@@ -28,7 +28,11 @@
     "clean": "rm -rf dist",
     "prepublishOnly": "bun run build",
     "test": "bun test",
-    "copy-circuits": "mkdir -p circuits && cp ../noir-circuits/target/zvault_*.json circuits/"
+    "copy-circuits": "mkdir -p circuits && cp ../noir-circuits/target/zvault_*.json circuits/",
+    "e2e": "bun run scripts/localnet-e2e.ts",
+    "e2e:localnet": "NETWORK=localnet bun run scripts/localnet-e2e.ts",
+    "e2e:devnet": "NETWORK=devnet bun run scripts/localnet-e2e.ts",
+    "test:buffer": "bun run scripts/test-buffer-claim.ts"
   },
   "dependencies": {
     "@aztec/bb.js": "3.0.0-nightly.20251104",

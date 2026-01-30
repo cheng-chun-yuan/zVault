@@ -6,11 +6,16 @@
 //!
 //! ZK Proof: UltraHonk (generated in browser via bb.js or mobile via mopro)
 //!
+//! ## Proof Sources
+//! - **Inline (proof_source=0)**: Proof data included directly in instruction data
+//! - **Buffer (proof_source=1)**: Proof read from ChadBuffer account (for large proofs)
+//!
 //! Flow:
 //! 1. User generates UltraHonk proof client-side (no backend)
-//! 2. Contract verifies proof via CPI to ultrahonk-verifier
-//! 3. Nullifier is recorded (prevents double-spend)
-//! 4. zkBTC is transferred from pool vault to recipient's ATA
+//! 2. For large proofs: Upload via ChadBuffer (external program)
+//! 3. Contract verifies proof via CPI to ultrahonk-verifier
+//! 4. Nullifier is recorded (prevents double-spend)
+//! 5. zkBTC is transferred from pool vault to recipient's ATA
 
 use pinocchio::{
     account_info::AccountInfo,
@@ -28,14 +33,38 @@ use crate::state::{
     NULLIFIER_RECORD_DISCRIMINATOR,
 };
 use crate::utils::{
-    transfer_zbtc, verify_ultrahonk_claim_proof,
-    validate_account_writable, validate_program_owner, validate_token_2022_owner,
-    validate_token_program_key, MAX_ULTRAHONK_PROOF_SIZE,
+    transfer_zbtc, validate_account_writable, validate_program_owner, validate_token_2022_owner,
+    validate_token_program_key, verify_ultrahonk_claim_proof, MAX_ULTRAHONK_PROOF_SIZE,
 };
+
+/// ChadBuffer authority size (first 32 bytes of account data)
+const CHADBUFFER_AUTHORITY_SIZE: usize = 32;
+
+/// Proof source indicator
+#[repr(u8)]
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub enum ProofSource {
+    /// Proof data is included inline in instruction data
+    Inline = 0,
+    /// Proof data is read from a ChadBuffer account
+    Buffer = 1,
+}
+
+impl ProofSource {
+    pub fn from_u8(value: u8) -> Option<Self> {
+        match value {
+            0 => Some(ProofSource::Inline),
+            1 => Some(ProofSource::Buffer),
+            _ => None,
+        }
+    }
+}
 
 /// Claim instruction data (UltraHonk proof - variable size)
 ///
+/// ## Inline Mode (proof_source=0)
 /// Layout:
+/// - proof_source: u8 (0)
 /// - proof_len: u32 (4 bytes, LE) - Length of proof bytes
 /// - proof: [u8; proof_len] - UltraHonk proof (8-16KB typical)
 /// - root: [u8; 32] - Merkle tree root
@@ -43,8 +72,19 @@ use crate::utils::{
 /// - amount_sats: u64 - Amount to claim (revealed)
 /// - recipient: [u8; 32] - Recipient Solana wallet address
 /// - vk_hash: [u8; 32] - Verification key hash
+///
+/// ## Buffer Mode (proof_source=1)
+/// Layout:
+/// - proof_source: u8 (1)
+/// - root: [u8; 32] - Merkle tree root
+/// - nullifier_hash: [u8; 32] - Nullifier to prevent double-spend
+/// - amount_sats: u64 - Amount to claim (revealed)
+/// - recipient: [u8; 32] - Recipient Solana wallet address
+/// - vk_hash: [u8; 32] - Verification key hash
+/// (proof is read from ChadBuffer account passed as additional account)
 pub struct ClaimData<'a> {
-    pub proof: &'a [u8],
+    pub proof_source: ProofSource,
+    pub proof: Option<&'a [u8]>,
     pub root: [u8; 32],
     pub nullifier_hash: [u8; 32],
     pub amount_sats: u64,
@@ -53,30 +93,48 @@ pub struct ClaimData<'a> {
 }
 
 impl<'a> ClaimData<'a> {
-    /// Minimum data size: proof_len(4) + root(32) + nullifier(32) + amount(8) + recipient(32) + vk_hash(32) = 140 bytes + proof
-    pub const MIN_SIZE: usize = 4 + 32 + 32 + 8 + 32 + 32;
+    /// Minimum data size for inline mode: proof_source(1) + proof_len(4) + root(32) + nullifier(32) + amount(8) + recipient(32) + vk_hash(32) = 141 bytes + proof
+    pub const MIN_SIZE_INLINE: usize = 1 + 4 + 32 + 32 + 8 + 32 + 32;
+
+    /// Minimum data size for buffer mode: proof_source(1) + root(32) + nullifier(32) + amount(8) + recipient(32) + vk_hash(32) = 137 bytes
+    pub const MIN_SIZE_BUFFER: usize = 1 + 32 + 32 + 8 + 32 + 32;
 
     pub fn from_bytes(data: &'a [u8]) -> Result<Self, ProgramError> {
-        if data.len() < Self::MIN_SIZE {
+        if data.is_empty() {
             return Err(ProgramError::InvalidInstructionData);
         }
 
-        // Parse proof length
-        let proof_len = u32::from_le_bytes([data[0], data[1], data[2], data[3]]) as usize;
+        let proof_source = ProofSource::from_u8(data[0]).ok_or_else(|| {
+            pinocchio::msg!("Invalid proof source");
+            ProgramError::InvalidInstructionData
+        })?;
+
+        match proof_source {
+            ProofSource::Inline => Self::parse_inline(data),
+            ProofSource::Buffer => Self::parse_buffer(data),
+        }
+    }
+
+    fn parse_inline(data: &'a [u8]) -> Result<Self, ProgramError> {
+        if data.len() < Self::MIN_SIZE_INLINE {
+            return Err(ProgramError::InvalidInstructionData);
+        }
+
+        // Parse proof length (after proof_source byte)
+        let proof_len = u32::from_le_bytes([data[1], data[2], data[3], data[4]]) as usize;
 
         if proof_len > MAX_ULTRAHONK_PROOF_SIZE {
             pinocchio::msg!("Proof too large");
             return Err(ProgramError::InvalidInstructionData);
         }
 
-        let expected_size = 4 + proof_len + 32 + 32 + 8 + 32 + 32;
+        let expected_size = 1 + 4 + proof_len + 32 + 32 + 8 + 32 + 32;
         if data.len() < expected_size {
             return Err(ProgramError::InvalidInstructionData);
         }
 
-        let proof = &data[4..4 + proof_len];
-
-        let mut offset = 4 + proof_len;
+        let proof = &data[5..5 + proof_len];
+        let mut offset = 5 + proof_len;
 
         let mut root = [0u8; 32];
         root.copy_from_slice(&data[offset..offset + 32]);
@@ -97,7 +155,44 @@ impl<'a> ClaimData<'a> {
         vk_hash.copy_from_slice(&data[offset..offset + 32]);
 
         Ok(Self {
-            proof,
+            proof_source: ProofSource::Inline,
+            proof: Some(proof),
+            root,
+            nullifier_hash,
+            amount_sats,
+            recipient,
+            vk_hash,
+        })
+    }
+
+    fn parse_buffer(data: &'a [u8]) -> Result<Self, ProgramError> {
+        if data.len() < Self::MIN_SIZE_BUFFER {
+            return Err(ProgramError::InvalidInstructionData);
+        }
+
+        let mut offset = 1; // Skip proof_source byte
+
+        let mut root = [0u8; 32];
+        root.copy_from_slice(&data[offset..offset + 32]);
+        offset += 32;
+
+        let mut nullifier_hash = [0u8; 32];
+        nullifier_hash.copy_from_slice(&data[offset..offset + 32]);
+        offset += 32;
+
+        let amount_sats = u64::from_le_bytes(data[offset..offset + 8].try_into().unwrap());
+        offset += 8;
+
+        let mut recipient = [0u8; 32];
+        recipient.copy_from_slice(&data[offset..offset + 32]);
+        offset += 32;
+
+        let mut vk_hash = [0u8; 32];
+        vk_hash.copy_from_slice(&data[offset..offset + 32]);
+
+        Ok(Self {
+            proof_source: ProofSource::Buffer,
+            proof: None,
             root,
             nullifier_hash,
             amount_sats,
@@ -109,6 +204,7 @@ impl<'a> ClaimData<'a> {
 
 /// Claim accounts
 ///
+/// ## Inline Mode (10 accounts)
 /// 0. pool_state (writable) - Pool state PDA
 /// 1. commitment_tree (readonly) - Commitment tree for root validation
 /// 2. nullifier_record (writable) - Nullifier PDA (created)
@@ -119,6 +215,9 @@ impl<'a> ClaimData<'a> {
 /// 7. token_program - Token-2022 program
 /// 8. system_program - System program
 /// 9. ultrahonk_verifier - UltraHonk verifier program
+///
+/// ## Buffer Mode (11 accounts - adds proof_buffer)
+/// 10. proof_buffer (readonly) - ChadBuffer account containing proof data
 pub struct ClaimAccounts<'a> {
     pub pool_state: &'a AccountInfo,
     pub commitment_tree: &'a AccountInfo,
@@ -130,11 +229,16 @@ pub struct ClaimAccounts<'a> {
     pub token_program: &'a AccountInfo,
     pub system_program: &'a AccountInfo,
     pub ultrahonk_verifier: &'a AccountInfo,
+    pub proof_buffer: Option<&'a AccountInfo>,
 }
 
 impl<'a> ClaimAccounts<'a> {
-    pub fn from_accounts(accounts: &'a [AccountInfo]) -> Result<Self, ProgramError> {
-        if accounts.len() < 10 {
+    pub fn from_accounts(
+        accounts: &'a [AccountInfo],
+        use_buffer: bool,
+    ) -> Result<Self, ProgramError> {
+        let min_accounts = if use_buffer { 11 } else { 10 };
+        if accounts.len() < min_accounts {
             return Err(ProgramError::NotEnoughAccountKeys);
         }
 
@@ -148,6 +252,11 @@ impl<'a> ClaimAccounts<'a> {
         let token_program = &accounts[7];
         let system_program = &accounts[8];
         let ultrahonk_verifier = &accounts[9];
+        let proof_buffer = if use_buffer {
+            Some(&accounts[10])
+        } else {
+            None
+        };
 
         // Validate user is signer (fee payer)
         if !user.is_signer() {
@@ -165,6 +274,7 @@ impl<'a> ClaimAccounts<'a> {
             token_program,
             system_program,
             ultrahonk_verifier,
+            proof_buffer,
         })
     }
 }
@@ -173,12 +283,19 @@ impl<'a> ClaimAccounts<'a> {
 ///
 /// Claims zkBTC directly to a Solana wallet, revealing the amount.
 /// Proof is verified via CPI to ultrahonk-verifier program.
+/// Supports both inline proofs and ChadBuffer references.
 pub fn process_claim(
     program_id: &Pubkey,
     accounts: &[AccountInfo],
     data: &[u8],
 ) -> ProgramResult {
-    let accounts = ClaimAccounts::from_accounts(accounts)?;
+    // Parse instruction data first to determine proof source
+    if data.is_empty() {
+        return Err(ProgramError::InvalidInstructionData);
+    }
+    let use_buffer = data[0] == ProofSource::Buffer as u8;
+
+    let accounts = ClaimAccounts::from_accounts(accounts, use_buffer)?;
     let ix_data = ClaimData::from_bytes(data)?;
 
     // SECURITY: Validate account owners BEFORE deserializing any data
@@ -233,7 +350,8 @@ pub fn process_claim(
 
     // Verify nullifier PDA
     let nullifier_seeds: &[&[u8]] = &[NullifierRecord::SEED, &ix_data.nullifier_hash];
-    let (expected_nullifier_pda, nullifier_bump) = find_program_address(nullifier_seeds, program_id);
+    let (expected_nullifier_pda, nullifier_bump) =
+        find_program_address(nullifier_seeds, program_id);
     if accounts.nullifier_record.key() != &expected_nullifier_pda {
         return Err(ProgramError::InvalidSeeds);
     }
@@ -268,22 +386,64 @@ pub fn process_claim(
     }
     .invoke_signed(&nullifier_signer)?;
 
-    // Verify UltraHonk proof via CPI (after nullifier is claimed)
-    // Public inputs: [root, nullifier_hash, amount, recipient]
-    pinocchio::msg!("Verifying UltraHonk proof via CPI...");
+    // Get proof bytes and verify (either inline or from ChadBuffer)
+    match ix_data.proof_source {
+        ProofSource::Inline => {
+            let proof = ix_data.proof.ok_or(ProgramError::InvalidInstructionData)?;
 
-    verify_ultrahonk_claim_proof(
-        accounts.ultrahonk_verifier,
-        ix_data.proof,
-        &ix_data.root,
-        &ix_data.nullifier_hash,
-        ix_data.amount_sats,
-        &ix_data.recipient,
-        &ix_data.vk_hash,
-    ).map_err(|_| {
-        pinocchio::msg!("UltraHonk proof verification failed");
-        ZVaultError::ZkVerificationFailed
-    })?;
+            pinocchio::msg!("Verifying UltraHonk proof (inline) via CPI...");
+
+            verify_ultrahonk_claim_proof(
+                accounts.ultrahonk_verifier,
+                proof,
+                &ix_data.root,
+                &ix_data.nullifier_hash,
+                ix_data.amount_sats,
+                &ix_data.recipient,
+                &ix_data.vk_hash,
+            )
+            .map_err(|_| {
+                pinocchio::msg!("UltraHonk proof verification failed");
+                ZVaultError::ZkVerificationFailed
+            })?;
+        }
+        ProofSource::Buffer => {
+            let proof_buffer_account = accounts
+                .proof_buffer
+                .ok_or(ProgramError::NotEnoughAccountKeys)?;
+
+            // Read proof from ChadBuffer (data starts after 32-byte authority)
+            let buffer_data = proof_buffer_account.try_borrow_data()?;
+
+            if buffer_data.len() <= CHADBUFFER_AUTHORITY_SIZE {
+                pinocchio::msg!("ChadBuffer too small");
+                return Err(ProgramError::InvalidAccountData);
+            }
+
+            let proof = &buffer_data[CHADBUFFER_AUTHORITY_SIZE..];
+
+            if proof.len() > MAX_ULTRAHONK_PROOF_SIZE {
+                pinocchio::msg!("Proof in buffer too large");
+                return Err(ZVaultError::InvalidProofLength.into());
+            }
+
+            pinocchio::msg!("Verifying UltraHonk proof (buffer) via CPI...");
+
+            verify_ultrahonk_claim_proof(
+                accounts.ultrahonk_verifier,
+                proof,
+                &ix_data.root,
+                &ix_data.nullifier_hash,
+                ix_data.amount_sats,
+                &ix_data.recipient,
+                &ix_data.vk_hash,
+            )
+            .map_err(|_| {
+                pinocchio::msg!("UltraHonk proof verification failed");
+                ZVaultError::ZkVerificationFailed
+            })?;
+        }
+    }
 
     pinocchio::msg!("UltraHonk proof verified successfully");
 
@@ -292,7 +452,9 @@ pub fn process_claim(
         let mut nullifier_data = accounts.nullifier_record.try_borrow_mut_data()?;
         let nullifier = NullifierRecord::init(&mut nullifier_data)?;
 
-        nullifier.nullifier_hash.copy_from_slice(&ix_data.nullifier_hash);
+        nullifier
+            .nullifier_hash
+            .copy_from_slice(&ix_data.nullifier_hash);
         nullifier.set_spent_at(clock.unix_timestamp);
         nullifier.spent_by.copy_from_slice(&ix_data.recipient);
         nullifier.set_operation_type(NullifierOperationType::Transfer);

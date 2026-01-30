@@ -59,14 +59,11 @@ async function main() {
   );
   console.log(`Stealth Announcement PDA: ${stealthAnnouncementPDA.toBase58()}`);
 
-  // Get zBTC mint and pool vault
-  const zbtcMint = new PublicKey("BdUFQhqKpzYVHVg8cQoh7JdpSoHFtwKM4A48AFAjKFAK");
-  const poolVault = getAssociatedTokenAddressSync(
-    zbtcMint,
-    new PublicKey(poolStatePDA as string),
-    true,
-    TOKEN_2022_PROGRAM_ID
-  );
+  // Get zBTC mint and pool vault from devnet config
+  const devnetConfig = JSON.parse(fs.readFileSync(".devnet-config.json", "utf-8"));
+  const zbtcMint = new PublicKey(devnetConfig.accounts.zkbtcMint);
+  const poolVault = new PublicKey(devnetConfig.accounts.poolVault);
+  console.log(`zBTC Mint: ${zbtcMint.toBase58()}`);
   console.log(`Pool Vault: ${poolVault.toBase58()}`);
 
   // Build instruction data for ADD_DEMO_STEALTH (discriminator 22)
