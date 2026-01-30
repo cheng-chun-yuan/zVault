@@ -123,9 +123,9 @@ export const ATA_PROGRAM_ID: Address = address(
   "ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL"
 );
 
-/** ChadBuffer Program ID (immutable) */
+/** ChadBuffer Program ID (deployed to devnet 2025-01-30) */
 export const CHADBUFFER_PROGRAM_ID: Address = address(
-  "CHADLCyF9jJLvTp4rJe9PMSPG8x8B2KSJsXJmBaG6yCZ"
+  "C5RpjtTMFXKVZCtXSzKXD4CDNTaWBg3dVeMfYvjZYHDF"
 );
 
 // =============================================================================
@@ -133,27 +133,27 @@ export const CHADBUFFER_PROGRAM_ID: Address = address(
 // =============================================================================
 
 /**
- * Devnet Configuration (v1.0.4)
+ * Devnet Configuration (v1.1.0)
  *
  * Current deployment as of 2025-01-30:
- * - Fresh clean deployment for demo
- * - New program IDs and accounts
+ * - zKey vanity address: zKeyrLmpT8W9o8iRvhizuSihLAFLhfAGBvfM638Pbw8
+ * - Fresh clean deployment
  */
 export const DEVNET_CONFIG: NetworkConfig = {
   network: "devnet",
 
   // Program IDs
-  zvaultProgramId: address("AorrjgAcJFHzAXcCTejhJT9p93HHMqYLLqZ4NKKE8nsv"),
+  zvaultProgramId: address("zKeyrLmpT8W9o8iRvhizuSihLAFLhfAGBvfM638Pbw8"),
   btcLightClientProgramId: address("S6rgPjCeBhkYBejWyDR1zzU3sYCMob36LAf8tjwj8pn"),
   chadbufferProgramId: CHADBUFFER_PROGRAM_ID,
   token2022ProgramId: TOKEN_2022_PROGRAM_ID,
   ataProgramId: ATA_PROGRAM_ID,
 
-  // Deployed Accounts
-  poolStatePda: address("6w44R8FZhX4F7akWL6UXZr13K2Q9pGmyDiAoTXfxgR7i"),
-  commitmentTreePda: address("43b5j5HEwHkDP35CX78KwszKX2rFdkQQfTA1JG6bzyS4"),
-  zbtcMint: address("2LmCSgq5jTtfnHe5YF6Sii6Pyc33xrPLJAYjtHhsCDPi"),
-  poolVault: address("DKpjj5ygnJwGZfXMWrZaPf3ZdxtxSgvHg2Kk8HhGhdXV"),
+  // Deployed Accounts (zKey program - initialized 2025-01-30)
+  poolStatePda: address("ELGSdquznDBd6uUkWsBAmguMBmtuur7D5kapwoyZq44J"),
+  commitmentTreePda: address("5p7WERgzB6AHcga19QehvaTfbiVoM1Bg6drkwzYHYamq"),
+  zbtcMint: address("56gihX59Zy3coM9B1PYXLPoFEzjNuPEVhskCZcKq3VKx"),
+  poolVault: address("J3dRjxc441qNitZBhPNrrmS5moWY89Fp1g97ayuQSDSj"),
 
   // RPC Endpoints
   solanaRpcUrl: "https://api.devnet.solana.com",

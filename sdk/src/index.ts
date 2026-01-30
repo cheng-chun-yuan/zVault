@@ -258,17 +258,31 @@ export {
 } from "./prover";
 
 // ==========================================================================
-// ChadBuffer utilities (for SPV verification)
+// ChadBuffer utilities (for large proof uploads)
 // ==========================================================================
 
 export {
+  // Buffer upload operations
   uploadTransactionToBuffer,
+  uploadProofToBuffer,
   closeBuffer,
   readBufferData,
+  // Bitcoin SPV helpers
   fetchRawTransaction,
   fetchMerkleProof,
   prepareVerifyDeposit,
+  buildMerkleProof,
+  // Buffer utilities
+  needsBuffer as bufferNeedsBuffer,
+  getProofSource,
+  calculateUploadTransactions,
+  // Constants
   CHADBUFFER_PROGRAM_ID,
+  AUTHORITY_SIZE,
+  MAX_DATA_PER_WRITE,
+  SOLANA_TX_SIZE_LIMIT,
+  // Types
+  type ProofUploadResult,
 } from "./chadbuffer";
 
 // ==========================================================================
@@ -317,11 +331,6 @@ export {
   commitmentToBytes,
 } from "./pda";
 
-// ==========================================================================
-// Bitcoin SPV helpers
-// ==========================================================================
-
-export { buildMerkleProof } from "./chadbuffer";
 
 // ==========================================================================
 // Main SDK client types - Node.js only (requires proof generation)
@@ -666,4 +675,43 @@ export {
   type SnarkjsProofResult,
   type SolanaGroth16Proof,
 } from "./snarkjs-browser";
+
+// ==========================================================================
+// Low-level Instruction Builders (Buffer Mode Support)
+// ==========================================================================
+
+export {
+  // Claim instruction (supports inline and buffer modes)
+  buildClaimInstructionData,
+  buildClaimInstruction,
+  // Split instruction (supports inline and buffer modes)
+  buildSplitInstructionData,
+  buildSplitInstruction,
+  // SpendPartialPublic instruction (supports inline and buffer modes)
+  buildSpendPartialPublicInstructionData,
+  buildSpendPartialPublicInstruction,
+  // Pool deposit instruction (supports inline and buffer modes)
+  buildPoolDepositInstructionData,
+  buildPoolDepositInstruction,
+  // Pool withdraw instruction (supports inline and buffer modes)
+  buildPoolWithdrawInstructionData,
+  buildPoolWithdrawInstruction,
+  // Pool claim yield instruction (supports inline and buffer modes)
+  buildPoolClaimYieldInstructionData,
+  buildPoolClaimYieldInstruction,
+  // Utilities
+  needsBuffer,
+  calculateAvailableProofSpace,
+  hexToBytes as instructionHexToBytes,
+  bytesToHex as instructionBytesToHex,
+  // Types
+  type Instruction,
+  type ProofSource,
+  type ClaimInstructionOptions,
+  type SplitInstructionOptions,
+  type SpendPartialPublicInstructionOptions,
+  type PoolDepositInstructionOptions,
+  type PoolWithdrawInstructionOptions,
+  type PoolClaimYieldInstructionOptions,
+} from "./instructions";
 
