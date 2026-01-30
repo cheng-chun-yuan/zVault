@@ -7,7 +7,7 @@
  * - amount: Value in satoshis
  *
  * Hash values (commitment, nullifierHash) are computed by Noir circuits
- * using Poseidon2. This SDK stores the raw secrets and optionally
+ * using Poseidon. This SDK stores the raw secrets and optionally
  * accepts pre-computed hash values.
  */
 
@@ -30,11 +30,11 @@ export interface Note {
   nullifier: bigint;
   // Random secret (field element)
   secret: bigint;
-  // note = Poseidon2(nullifier, secret) - computed by circuit
+  // note = Poseidon(nullifier, secret) - computed by circuit
   note: bigint;
-  // commitment = Poseidon2(note, amount) - computed by circuit
+  // commitment = Poseidon(note, amount) - computed by circuit
   commitment: bigint;
-  // nullifierHash = Poseidon2(nullifier) - computed by circuit
+  // nullifierHash = Poseidon(nullifier) - computed by circuit
   nullifierHash: bigint;
   // 32-byte representations
   nullifierBytes: Uint8Array;
@@ -387,7 +387,7 @@ export function estimateSeedStrength(seed: string): {
  * Simple note data structure (for Noir circuit inputs)
  *
  * NOTE: When using Noir circuits, the commitment is computed INSIDE the circuit
- * using Poseidon2. The SDK just provides the raw note data.
+ * using Poseidon. The SDK just provides the raw note data.
  */
 export interface NoteData {
   nullifier: bigint;
@@ -422,7 +422,7 @@ export function createNote(amount: bigint): NoteData {
  */
 export async function initPoseidon(): Promise<void> {
   poseidonInitialized = true;
-  // No actual initialization needed - Noir circuit handles Poseidon2
+  // No actual initialization needed - Noir circuit handles Poseidon
 }
 
 /**
@@ -487,10 +487,10 @@ export interface StealthNote {
   /** Leaf index in Merkle tree (set when commitment added on-chain) */
   leafIndex: number;
 
-  /** Note public key = Poseidon2(ECDHShared.x, ECDHShared.y) */
+  /** Note public key = Poseidon(ECDHShared.x, ECDHShared.y) */
   notePubKey: bigint;
 
-  /** Commitment = Poseidon2(notePubKey, amount, random) */
+  /** Commitment = Poseidon(notePubKey, amount, random) */
   commitment: bigint;
 
   /** Byte representations */

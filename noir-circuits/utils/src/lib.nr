@@ -2,16 +2,21 @@
 //
 // UNIFIED MODEL: All commitments and nullifiers use the same format
 //
-// Commitment = Poseidon2(pub_key_x, amount)
-// Nullifier  = Poseidon2(priv_key, leaf_index)
-// Nullifier Hash = Poseidon2(nullifier)
+// Commitment = Poseidon(pub_key_x, amount)
+// Nullifier  = Poseidon(priv_key, leaf_index)
+// Nullifier Hash = Poseidon(nullifier)
 //
 // This applies to:
 // - User balances (stealth addresses)
 // - Claim links (self-addressed with seed-derived keys)
 // - Pool positions (stealth-based)
+//
+// NOTE: Using Circom-compatible Poseidon (NOT Poseidon2) for compatibility with
+// Solana's sol_poseidon syscall and circomlibjs in SDK.
 
-use dep::poseidon::poseidon2::Poseidon2;
+use std::hash::poseidon::bn254::hash_1;
+use std::hash::poseidon::bn254::hash_2;
+use std::hash::poseidon::bn254::hash_3;
 
 // Grumpkin ECDH module for key derivation
 pub mod grumpkin;
@@ -21,21 +26,21 @@ pub mod grumpkin;
 // ============================================================================
 
 /// Compute commitment from public key x-coordinate and amount
-/// commitment = Poseidon2(pub_key_x, amount)
+/// commitment = Poseidon(pub_key_x, amount)
 pub fn compute_commitment(pub_key_x: Field, amount: Field) -> Field {
-    Poseidon2::hash([pub_key_x, amount], 2)
+    hash_2([pub_key_x, amount])
 }
 
 /// Compute nullifier from private key and leaf index
-/// nullifier = Poseidon2(priv_key, leaf_index)
+/// nullifier = Poseidon(priv_key, leaf_index)
 pub fn compute_nullifier(priv_key: Field, leaf_index: Field) -> Field {
-    Poseidon2::hash([priv_key, leaf_index], 2)
+    hash_2([priv_key, leaf_index])
 }
 
 /// Compute nullifier hash for double-spend prevention
-/// nullifier_hash = Poseidon2(nullifier)
+/// nullifier_hash = Poseidon(nullifier)
 pub fn compute_nullifier_hash(nullifier: Field) -> Field {
-    Poseidon2::hash([nullifier], 1)
+    hash_1([nullifier])
 }
 
 // ============================================================================
@@ -43,9 +48,9 @@ pub fn compute_nullifier_hash(nullifier: Field) -> Field {
 // ============================================================================
 
 /// Compute pool position commitment
-/// pool_commitment = Poseidon2(pub_key_x, principal, deposit_epoch)
+/// pool_commitment = Poseidon(pub_key_x, principal, deposit_epoch)
 pub fn compute_pool_commitment(pub_key_x: Field, principal: Field, deposit_epoch: Field) -> Field {
-    Poseidon2::hash([pub_key_x, principal, deposit_epoch], 3)
+    hash_3([pub_key_x, principal, deposit_epoch])
 }
 
 // ============================================================================
@@ -71,7 +76,7 @@ pub fn verify_merkle_proof_20(
             (current, sibling)
         };
 
-        current = Poseidon2::hash([left, right], 2);
+        current = hash_2([left, right]);
     }
 
     current == root
@@ -83,13 +88,13 @@ pub fn verify_merkle_proof_20(
 
 /// Legacy: Compute note from nullifier and secret (OLD FORMAT - deprecated)
 pub fn compute_note(nullifier: Field, secret: Field) -> Field {
-    Poseidon2::hash([nullifier, secret], 2)
+    hash_2([nullifier, secret])
 }
 
 /// Legacy: Compute commitment from secrets (OLD FORMAT - deprecated)
 pub fn compute_commitment_from_secrets(nullifier: Field, secret: Field, amount: Field) -> Field {
     let note = compute_note(nullifier, secret);
-    Poseidon2::hash([note, amount], 2)
+    hash_2([note, amount])
 }
 
 /// Legacy stealth commitment (same as unified - kept for compatibility)

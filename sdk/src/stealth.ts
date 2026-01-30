@@ -9,24 +9,24 @@
  *   1. ephemeral = random Grumpkin keypair
  *   2. sharedSecret = ECDH(ephemeral.priv, recipientViewingPub)
  *   3. stealthPub = spendingPub + hash(sharedSecret) * G
- *   4. commitment = Poseidon2(stealthPub.x, amount)
+ *   4. commitment = Poseidon(stealthPub.x, amount)
  *   5. encryptedAmount = amount XOR sha256(sharedSecret)[0..8]
  *
  * Recipient (viewing key only - can detect and see amount):
  *   1. sharedSecret = ECDH(viewingPriv, ephemeralPub)
  *   2. amount = encryptedAmount XOR sha256(sharedSecret)[0..8]
  *   3. stealthPub = spendingPub + hash(sharedSecret) * G
- *   4. Verify: commitment == Poseidon2(stealthPub.x, amount)
+ *   4. Verify: commitment == Poseidon(stealthPub.x, amount)
  *
  * Recipient (spending key - can claim):
  *   1. stealthPriv = spendingPriv + hash(sharedSecret)
- *   2. nullifier = Poseidon2(stealthPriv, leafIndex)
+ *   2. nullifier = Poseidon(stealthPriv, leafIndex)
  * ```
  *
  * Format (91 bytes on-chain):
  * - ephemeral_pub (33 bytes) - Single Grumpkin key for ECDH
  * - encrypted_amount (8 bytes) - XOR encrypted with shared secret
- * - commitment (32 bytes) - Poseidon2 hash for Merkle tree
+ * - commitment (32 bytes) - Poseidon hash for Merkle tree
  * - leaf_index (8 bytes) - Position in Merkle tree
  * - created_at (8 bytes) - Timestamp
  *
@@ -67,9 +67,9 @@ import type { StealthMetaAddress, ZVaultKeys, WalletSignerAdapter } from "./keys
 import { deriveKeysFromWallet, parseStealthMetaAddress, constantTimeCompare } from "./keys";
 import { lookupZkeyName, type ZkeyStealthAddress } from "./name-registry";
 import {
-  poseidon2Hash,
-  computeNullifier as poseidon2ComputeNullifier,
-} from "./poseidon2";
+  poseidonHashSync,
+  computeNullifierSync as poseidonComputeNullifier,
+} from "./poseidon";
 
 // ========== Amount Encryption Helpers ==========
 
@@ -163,7 +163,7 @@ export function isWalletAdapter(source: unknown): source is WalletSignerAdapter 
  * Stealth key derivation:
  * - sharedSecret = ECDH(ephemeral.priv, viewingPub)
  * - stealthPub = spendingPub + hash(sharedSecret) * G
- * - commitment = Poseidon2(stealthPub.x, amount)
+ * - commitment = Poseidon(stealthPub.x, amount)
  * - encryptedAmount = amount XOR sha256(sharedSecret.x)[0..8]
  */
 export interface StealthDeposit {
@@ -174,7 +174,7 @@ export interface StealthDeposit {
    * Only recipient with viewing key can decrypt */
   encryptedAmount: Uint8Array;
 
-  /** Commitment for Merkle tree (32 bytes) - Poseidon2(stealthPub.x, amount) */
+  /** Commitment for Merkle tree (32 bytes) - Poseidon(stealthPub.x, amount) */
   commitment: Uint8Array;
 
   /** Unix timestamp when created */
@@ -208,7 +208,7 @@ export interface ScannedNote {
  *
  * Uses EIP-5564/DKSAP stealth key derivation:
  * - stealthPriv = spendingPriv + hash(sharedSecret)
- * - nullifier = Poseidon2(stealthPriv, leafIndex)
+ * - nullifier = Poseidon(stealthPriv, leafIndex)
  */
 export interface ClaimInputs {
   // Private inputs for ZK proof
@@ -317,7 +317,7 @@ function deriveStealthPrivKey(
  * Generates ONE ephemeral Grumpkin keypair and derives stealth address:
  * 1. sharedSecret = ECDH(ephemeral.priv, recipientViewingPub)
  * 2. stealthPub = spendingPub + hash(sharedSecret) * G
- * 3. commitment = Poseidon2(stealthPub.x, amount)
+ * 3. commitment = Poseidon(stealthPub.x, amount)
  * 4. encryptedAmount = amount XOR sha256(sharedSecret.x)[0..8]
  *
  * The amount is encrypted so only the recipient (with viewing key) can see it.
@@ -344,9 +344,9 @@ export async function createStealthDeposit(
   // stealthPub = spendingPub + hash(sharedSecret) * G
   const stealthPub = deriveStealthPubKey(spendingPubKey, sharedSecret);
 
-  // Compute commitment using Poseidon2
-  // commitment = Poseidon2(stealthPub.x, amount)
-  const commitmentBigint = poseidon2Hash([stealthPub.x, amountSats]);
+  // Compute commitment using Poseidon
+  // commitment = Poseidon(stealthPub.x, amount)
+  const commitmentBigint = poseidonHashSync([stealthPub.x, amountSats]);
   const commitment = bigintToBytes(commitmentBigint);
 
   // Encrypt amount with shared secret (only recipient can decrypt)
@@ -369,7 +369,7 @@ export async function createStealthDeposit(
  * 1. sharedSecret = ECDH(viewingPriv, ephemeralPub)
  * 2. amount = decrypt(encryptedAmount, sharedSecret)
  * 3. stealthPub = spendingPub + hash(sharedSecret) * G
- * 4. Verifies: commitment == Poseidon2(stealthPub.x, amount)
+ * 4. Verifies: commitment == Poseidon(stealthPub.x, amount)
  *
  * KEY PRIVACY FEATURE: The viewing key can:
  * - Decrypt the amount (only you can see how much was sent)
@@ -420,7 +420,7 @@ export async function scanAnnouncements(
       const stealthPub = deriveStealthPubKey(keys.spendingPubKey, sharedSecret);
 
       // Verify commitment matches decrypted amount
-      const expectedCommitment = poseidon2Hash([stealthPub.x, amount]);
+      const expectedCommitment = poseidonHashSync([stealthPub.x, amount]);
       const actualCommitment = bytesToBigint(ann.commitment);
 
       if (expectedCommitment !== actualCommitment) {
@@ -539,7 +539,7 @@ export async function scanAnnouncementsViewOnly(
       const stealthPub = deriveStealthPubKey(viewOnlyKeys.spendingPubKey, sharedSecret);
 
       // Verify commitment
-      const expectedCommitment = poseidon2Hash([stealthPub.x, amount]);
+      const expectedCommitment = poseidonHashSync([stealthPub.x, amount]);
       const actualCommitment = bytesToBigint(ann.commitment);
 
       if (expectedCommitment !== actualCommitment) {
@@ -592,7 +592,7 @@ export function exportViewOnlyKeys(keys: ZVaultKeys): ViewOnlyKeys {
  * Derivation:
  * 1. sharedSecret = ECDH(viewingPriv, ephemeralPub)  [already computed in scanning]
  * 2. stealthPriv = spendingPriv + hash(sharedSecret)
- * 3. nullifier = Poseidon2(stealthPriv, leafIndex)
+ * 3. nullifier = Poseidon(stealthPriv, leafIndex)
  *
  * Why sender cannot claim:
  * - Sender knows ephemeralPriv and can compute sharedSecret
@@ -632,9 +632,9 @@ export async function prepareClaimInputs(
   }
 
   // CRITICAL: Nullifier from stealth private key + leaf index
-  // nullifier = Poseidon2(stealthPriv, leafIndex)
+  // nullifier = Poseidon(stealthPriv, leafIndex)
   // Only recipient can compute this!
-  const nullifier = poseidon2ComputeNullifier(stealthPrivKey, BigInt(note.leafIndex));
+  const nullifier = poseidonComputeNullifier(stealthPrivKey, BigInt(note.leafIndex));
 
   return {
     // Private inputs

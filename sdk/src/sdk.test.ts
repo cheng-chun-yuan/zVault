@@ -21,7 +21,7 @@ import { deriveKeysFromSeed, createStealthMetaAddress, encodeStealthMetaAddress,
 import { createStealthDeposit, scanAnnouncements } from "./stealth";
 import { createStealthPoolDeposit, scanPoolAnnouncements, calculateYield, calculateTotalValue } from "./yield-pool";
 import { createEmptyMerkleProof, TREE_DEPTH } from "./merkle";
-import { poseidon2Hash } from "./poseidon2";
+import { poseidonHash } from "./poseidon";
 import { generateKeyPair, pointMul, GRUMPKIN_GENERATOR, isOnCurve } from "./grumpkin";
 import { buildRegisterNameData, hashName, isValidName, NAME_REGISTRY_SEED, ZVAULT_PROGRAM_ID } from "./name-registry";
 import { createClient, ZVaultClient } from "./zvault";
@@ -269,9 +269,9 @@ describe("NAME REGISTRY", () => {
 // ============================================================================
 
 describe("CRYPTOGRAPHY", () => {
-  test("Poseidon2 hash is deterministic", () => {
-    const h1 = poseidon2Hash([123n, 456n]);
-    const h2 = poseidon2Hash([123n, 456n]);
+  test("Poseidon hash is deterministic", () => {
+    const h1 = poseidonHash([123n, 456n]);
+    const h2 = poseidonHash([123n, 456n]);
     expect(h1).toBe(h2);
   });
 

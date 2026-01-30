@@ -1,7 +1,7 @@
 /**
  * Cryptographic utilities for zVault
  *
- * Note: This SDK uses Noir circuits with Poseidon2 hashing.
+ * Note: This SDK uses Noir circuits with Poseidon hashing.
  * Hash computations that must match the circuits should be done
  * via the Noir circuits themselves or via noir_js execution.
  */

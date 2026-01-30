@@ -15,7 +15,7 @@
  * ## WITHDRAW (zkBTC → BTC)
  * - withdraw() - Request BTC withdrawal (burn zkBTC)
  *
- * Note: This SDK uses Noir circuits with Poseidon2 hashing for ZK proofs.
+ * Note: This SDK uses Noir circuits with Poseidon hashing for ZK proofs.
  */
 
 import {

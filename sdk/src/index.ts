@@ -116,15 +116,17 @@ export {
   type WalletSignerAdapter,
 } from "./keys";
 
-// Poseidon2 hash utilities (matches Noir circuits - Unified Model)
+// Poseidon hash utilities (Circom-compatible - matches Noir + Solana)
 export {
-  poseidon2Hash,
+  poseidonHash,
+  poseidonHashSync,
+  initPoseidon,
   computeUnifiedCommitment,
   computeNullifier,
   hashNullifier,
   computePoolCommitment,
   BN254_SCALAR_FIELD,
-} from "./poseidon2";
+} from "./poseidon";
 
 // ==========================================================================
 // Note (shielded commitment) utilities
@@ -147,7 +149,6 @@ export {
   estimateSeedStrength,
   // Simple note creation
   createNote,
-  initPoseidon,
   isPoseidonReady,
   prepareWithdrawal,
   type Note,
@@ -692,4 +693,22 @@ export {
   type PoolWithdrawInstructionOptions,
   type PoolClaimYieldInstructionOptions,
 } from "./instructions";
+
+// ==========================================================================
+// Proof Relay (Backend relayer for large UltraHonk proofs)
+// ==========================================================================
+
+export {
+  // Main relay functions (one function does all: create buffer → upload → submit → close)
+  relaySpendPartialPublic,
+  relaySpendSplit,
+  // Lower-level operations (for custom flows)
+  createChadBuffer as relayCreateChadBuffer,
+  uploadProofToBuffer as relayUploadProofToBuffer,
+  closeChadBuffer as relayCLoseChadBuffer,
+  // Types
+  type RelaySpendPartialPublicParams,
+  type RelaySpendSplitParams,
+  type RelayResult,
+} from "./relay";
 

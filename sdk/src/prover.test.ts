@@ -5,8 +5,8 @@
  * These tests require circuit artifacts in ./circuits directory.
  *
  * UNIFIED MODEL:
- * - Commitment = Poseidon2(pub_key_x, amount)
- * - Nullifier = Poseidon2(priv_key, leaf_index)
+ * - Commitment = Poseidon(pub_key_x, amount)
+ * - Nullifier = Poseidon(priv_key, leaf_index)
  */
 
 import { expect, test, describe, beforeAll } from "bun:test";
@@ -21,7 +21,7 @@ import {
   cleanup,
   circuitExists,
 } from "./prover";
-import { computeUnifiedCommitment, poseidon2Hash } from "./poseidon2";
+import { computeUnifiedCommitment, poseidonHash } from "./poseidon";
 
 /**
  * Compute merkle root from commitment using all-zero siblings.
@@ -30,7 +30,7 @@ import { computeUnifiedCommitment, poseidon2Hash } from "./poseidon2";
 function computeMerkleRootFromCommitment(commitment: bigint, depth: number): bigint {
   let current = commitment;
   for (let i = 0; i < depth; i++) {
-    current = poseidon2Hash([current, 0n]);
+    current = poseidonHash([current, 0n]);
   }
   return current;
 }
@@ -74,7 +74,7 @@ describe("CLAIM PROOF (Unified Model)", () => {
     const pubKeyX = 67890n; // In practice: derived from privKey via curve multiplication
     const amount = 100000000n; // 1 BTC in satoshis
 
-    // Compute commitment = Poseidon2(pub_key_x, amount)
+    // Compute commitment = Poseidon(pub_key_x, amount)
     const commitment = computeUnifiedCommitment(pubKeyX, amount);
 
     // Compute merkle root using depth-20 tree with all-zero siblings

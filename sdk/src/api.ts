@@ -57,7 +57,7 @@ import {
 import { type StealthMetaAddress, type ZVaultKeys } from "./keys";
 import { type MerkleProof, TREE_DEPTH, ZERO_VALUE } from "./merkle";
 import { bigintToBytes, bytesToBigint, hexToBytes } from "./crypto";
-import { hashNullifier } from "./poseidon2";
+import { hashNullifierSync } from "./poseidon";
 
 /** System program address */
 const SYSTEM_PROGRAM_ADDRESS = address("11111111111111111111111111111111");
@@ -428,7 +428,7 @@ export async function depositToNote(
   const note = generateNote(amountSats);
 
   // For taproot derivation, use XOR of nullifier/secret as placeholder commitment
-  // In production, compute actual Poseidon2 hash via helper circuit
+  // In production, compute actual Poseidon hash via helper circuit
   const placeholderCommitment = bigintToBytes(
     (note.nullifier ^ note.secret) % (2n ** 256n)
   );
@@ -866,9 +866,9 @@ export async function claimPublicStealth(
     pathIndices: mp.pathIndices,
   });
 
-  // The nullifier is computed as: nullifier = Poseidon2(stealthPriv, leafIndex)
-  // Then nullifier_hash = Poseidon2(nullifier)
-  const nullifierHash = hashNullifier(claimInputs.nullifier);
+  // The nullifier is computed as: nullifier = Poseidon(stealthPriv, leafIndex)
+  // Then nullifier_hash = Poseidon(nullifier)
+  const nullifierHash = hashNullifierSync(claimInputs.nullifier);
   const nullifierHashBytes = bigintToBytes(nullifierHash);
 
   // Generate ZK proof using stealth inputs
@@ -943,8 +943,8 @@ export async function claimPublicStealth(
  * Uses the stealth-derived private key and nullifier instead of note secrets.
  * The circuit proves:
  * 1. Knowledge of stealthPrivKey such that stealthPub = stealthPrivKey * G
- * 2. Commitment = Poseidon2(stealthPub.x, amount) exists in tree
- * 3. Nullifier = Poseidon2(stealthPrivKey, leafIndex) is correctly computed
+ * 2. Commitment = Poseidon(stealthPub.x, amount) exists in tree
+ * 3. Nullifier = Poseidon(stealthPrivKey, leafIndex) is correctly computed
  *
  * @throws Error - Stealth claim proof generation not yet implemented
  */

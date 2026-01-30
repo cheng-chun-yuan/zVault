@@ -24,7 +24,7 @@
  *   1. ephemeral = random Grumpkin keypair
  *   2. sharedSecret = ECDH(ephemeral.priv, recipientViewingPub)
  *   3. stealthPub = spendingPub + hash(sharedSecret) * G
- *   4. commitment = Poseidon2(stealthPub, amount)
+ *   4. commitment = Poseidon(stealthPub, amount)
  *
  * Recipient (viewing key - can detect):
  *   1. sharedSecret = ECDH(viewingPriv, ephemeralPub)
@@ -33,7 +33,7 @@
  *
  * Recipient (spending key - can claim):
  *   1. stealthPriv = spendingPriv + hash(sharedSecret)
- *   2. nullifier = Poseidon2(stealthPriv, leafIndex)
+ *   2. nullifier = Poseidon(stealthPriv, leafIndex)
  * ```
  *
  * Security Properties:

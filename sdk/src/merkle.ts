@@ -2,10 +2,10 @@
  * Merkle tree utilities for zVault
  *
  * Provides structures and helpers for Merkle proofs.
- * Actual tree operations use Poseidon2 hashing which is computed
+ * Actual tree operations use Poseidon hashing which is computed
  * on-chain or via Noir circuits.
  *
- * Note: This module does NOT compute Poseidon2 hashes in JavaScript.
+ * Note: This module does NOT compute Poseidon hashes in JavaScript.
  * The on-chain program maintains the Merkle tree. This SDK provides
  * proof structures for interaction with the program.
  */

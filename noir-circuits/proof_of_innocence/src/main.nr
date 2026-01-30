@@ -21,7 +21,7 @@
 
 use dep::zvault_utils;
 use dep::zvault_utils::grumpkin;
-use dep::poseidon::poseidon2::Poseidon2;
+use std::hash::poseidon::bn254::hash_2;
 
 // Merkle tree depth for innocence tree
 global TREE_DEPTH: u32 = 20;
@@ -155,7 +155,7 @@ fn compute_merkle_root_20(
             (current, sibling)
         };
 
-        current = Poseidon2::hash([left, right], 2);
+        current = hash_2([left, right]);
     }
 
     current
@@ -196,7 +196,7 @@ fn test_proof_of_innocence_valid() {
 
     let mut current = commitment;
     for _i in 0..20 {
-        current = Poseidon2::hash([current, zero], 2);
+        current = hash_2([current, zero]);
     }
     let innocence_tree_root = current;
 
@@ -246,7 +246,7 @@ fn test_proof_of_innocence_not_in_tree() {
     let fake_commitment = 123456789;
     let mut current = fake_commitment;
     for _i in 0..20 {
-        current = Poseidon2::hash([current, zero], 2);
+        current = hash_2([current, zero]);
     }
     let innocence_tree_root = current;
 
@@ -292,7 +292,7 @@ fn test_proof_of_innocence_wrong_nullifier() {
 
     let mut current = commitment;
     for _i in 0..20 {
-        current = Poseidon2::hash([current, zero], 2);
+        current = hash_2([current, zero]);
     }
     let innocence_tree_root = current;
 

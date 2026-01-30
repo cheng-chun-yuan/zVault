@@ -16,7 +16,9 @@ use std::embedded_curve_ops::{
     embedded_curve_add,
     multi_scalar_mul,
 };
-use dep::poseidon::poseidon2::Poseidon2;
+use std::hash::poseidon::bn254::hash_1;
+use std::hash::poseidon::bn254::hash_2;
+use std::hash::poseidon::bn254::hash_3;
 
 // Domain separators
 global DOMAIN_NPK: Field = 0x6e706b;     // "npk" - note public key
@@ -66,7 +68,7 @@ pub fn ecdh(
  * with the correct spending key can derive the same notePubKey.
  */
 pub fn derive_note_pubkey(shared_x: Field, shared_y: Field) -> Field {
-    Poseidon2::hash([shared_x, shared_y, DOMAIN_NPK], 3)
+    hash_3([shared_x, shared_y, DOMAIN_NPK])
 }
 
 /**
@@ -82,10 +84,10 @@ pub fn derive_note_pubkey(shared_x: Field, shared_y: Field) -> Field {
 pub fn compute_stealth_commitment(note_pubkey: Field, amount: Field, random: Field) -> Field {
     if random == 0 {
         // Simplified: no random
-        Poseidon2::hash([note_pubkey, amount], 2)
+        hash_2([note_pubkey, amount])
     } else {
         // With random for additional entropy
-        Poseidon2::hash([note_pubkey, amount, random], 3)
+        hash_3([note_pubkey, amount, random])
     }
 }
 
@@ -100,7 +102,7 @@ pub fn compute_stealth_commitment(note_pubkey: Field, amount: Field, random: Fie
  * nullifier = Poseidon2(spending_priv, leaf_index, DOMAIN_NULL)
  */
 pub fn compute_stealth_nullifier(spending_priv: Field, leaf_index: Field) -> Field {
-    Poseidon2::hash([spending_priv, leaf_index, DOMAIN_NULL], 3)
+    hash_3([spending_priv, leaf_index, DOMAIN_NULL])
 }
 
 /**
@@ -116,7 +118,7 @@ pub fn compute_stealth_nullifier(spending_priv: Field, leaf_index: Field) -> Fie
  * nullifier_hash = Poseidon2(nullifier)
  */
 pub fn hash_nullifier(nullifier: Field) -> Field {
-    Poseidon2::hash([nullifier], 1)
+    hash_1([nullifier])
 }
 
 /**
