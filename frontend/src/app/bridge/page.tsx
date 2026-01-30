@@ -237,18 +237,31 @@ export default function BridgePage() {
               {error && (
                 <p className="text-caption text-red-400 mb-3">{error}</p>
               )}
-              <button
-                onClick={deriveKeys}
-                disabled={isLoading}
-                className={cn(
-                  "inline-flex items-center gap-2 px-4 py-2 rounded-[10px]",
-                  "bg-privacy hover:bg-privacy/80 disabled:bg-gray/30",
-                  "text-body2 text-background disabled:text-gray transition-colors"
-                )}
-              >
-                <Key className="w-4 h-4" />
-                {isLoading ? "Signing..." : "Sign to Derive Keys"}
-              </button>
+              <div className="flex items-center justify-center gap-3">
+                <button
+                  onClick={deriveKeys}
+                  disabled={isLoading}
+                  className={cn(
+                    "inline-flex items-center gap-2 px-4 py-2 rounded-[10px]",
+                    "bg-privacy hover:bg-privacy/80 disabled:bg-gray/30",
+                    "text-body2 text-background disabled:text-gray transition-colors"
+                  )}
+                >
+                  <Key className="w-4 h-4" />
+                  {isLoading ? "Signing..." : "Sign to Derive Keys"}
+                </button>
+                <button
+                  onClick={() => wallet.disconnect().catch(() => {})}
+                  className={cn(
+                    "inline-flex items-center gap-2 px-4 py-2 rounded-[10px]",
+                    "bg-gray/20 hover:bg-red-500/20 border border-gray/30 hover:border-red-500/30",
+                    "text-body2 text-gray hover:text-red-400 transition-colors"
+                  )}
+                >
+                  <LogOut className="w-4 h-4" />
+                  Sign out
+                </button>
+              </div>
             </div>
           ) : (
             <div>

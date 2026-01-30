@@ -43,7 +43,7 @@ interface ZVaultContextValue {
   isLoading: boolean;
   error: string | null;
   deriveKeys: () => Promise<void>;
-  clearKeys: () => void;
+  clearKeys: () => Promise<void>;
   hasKeys: boolean;
   isWalletConnected: boolean;
 
@@ -143,14 +143,22 @@ export function ZVaultProvider({ children }: { children: ReactNode }) {
     }
   }, [wallet]);
 
-  const clearKeys = useCallback(() => {
+  const clearKeys = useCallback(async () => {
     setKeys(null);
     setStealthAddress(null);
     setStealthAddressEncoded(null);
     setError(null);
     setInboxNotes([]);
     setHasFetchedInbox(false);
-  }, []);
+    // Also disconnect the wallet
+    try {
+      if (wallet.connected) {
+        await wallet.disconnect();
+      }
+    } catch {
+      // Ignore disconnect errors (wallet may already be disconnected)
+    }
+  }, [wallet]);
 
   // Fetch and scan stealth inbox
   const refreshInbox = useCallback(async () => {

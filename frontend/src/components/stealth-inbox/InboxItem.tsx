@@ -1,7 +1,7 @@
 "use client";
 
 import { useRouter } from "next/navigation";
-import { ArrowRight, Clock, Shield, Send, Coins } from "lucide-react";
+import { Clock, Shield, Send, Wallet } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { formatBtc } from "@/lib/utils/formatting";
 import type { InboxNote } from "@/hooks/use-zvault";
@@ -30,24 +30,23 @@ function formatRelativeTime(timestamp: number): string {
 export function InboxItem({ note }: InboxItemProps) {
   const router = useRouter();
 
-  // Navigate to claim page with stealth note data
-  const handleClaim = () => {
+  // Navigate to pay page with note data
+  const handleSendPublic = () => {
     const params = new URLSearchParams({
-      stealth: "true",
       commitment: note.commitmentHex,
       leafIndex: note.leafIndex.toString(),
       amount: note.amount.toString(),
+      mode: "public",
     });
-    router.push(`/claim?${params.toString()}`);
+    router.push(`/bridge/pay?${params.toString()}`);
   };
 
-  // Navigate to pay page with note pre-selected
   const handleSendPrivate = () => {
     const params = new URLSearchParams({
-      noteId: note.commitmentHex,
       commitment: note.commitmentHex,
       leafIndex: note.leafIndex.toString(),
       amount: note.amount.toString(),
+      mode: "stealth",
     });
     router.push(`/bridge/pay?${params.toString()}`);
   };
@@ -101,19 +100,18 @@ export function InboxItem({ note }: InboxItemProps) {
       {/* Action buttons */}
       <div className="flex gap-2">
         <button
-          onClick={handleClaim}
+          onClick={handleSendPublic}
           className="flex-1 flex items-center justify-center gap-2 px-4 py-3 rounded-[10px] bg-privacy/10 hover:bg-privacy/20 text-privacy transition-colors"
         >
-          <Coins className="w-4 h-4" />
-          Claim zBTC
-          <ArrowRight className="w-4 h-4" />
+          <Wallet className="w-4 h-4" />
+          Send Public
         </button>
         <button
           onClick={handleSendPrivate}
-          className="flex-1 flex items-center justify-center gap-2 px-4 py-3 rounded-[10px] bg-accent/10 hover:bg-accent/20 text-accent transition-colors"
+          className="flex-1 flex items-center justify-center gap-2 px-4 py-3 rounded-[10px] bg-purple/10 hover:bg-purple/20 text-purple transition-colors"
         >
-          Send Private
           <Send className="w-4 h-4" />
+          Send Private
         </button>
       </div>
     </div>

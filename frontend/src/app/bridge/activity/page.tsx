@@ -11,19 +11,22 @@ import {
   Inbox,
   CheckCircle2,
   Link2,
+  Database,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { ErrorBoundary } from "@/components/error-boundary";
 import { BalanceView } from "@/components/btc-widget/balance-view";
 import { useZVaultKeys, useStealthInbox } from "@/hooks/use-zvault";
 import { InboxList, EmptyInbox } from "@/components/stealth-inbox";
+import { SPVHistoryView } from "@/components/spv-history";
 
-type TabType = "deposits" | "claimable" | "claimed";
+type TabType = "deposits" | "claimable" | "claimed" | "history";
 
 const tabs: { id: TabType; label: string; icon: React.ReactNode }[] = [
   { id: "deposits", label: "Deposits", icon: <ArrowDownToLine className="w-4 h-4" /> },
   { id: "claimable", label: "Claimable", icon: <Inbox className="w-4 h-4" /> },
   { id: "claimed", label: "Claimed", icon: <CheckCircle2 className="w-4 h-4" /> },
+  { id: "history", label: "History", icon: <Database className="w-4 h-4" /> },
 ];
 
 function TabBar({
@@ -172,6 +175,7 @@ function ActivityContent() {
         {activeTab === "deposits" && <BalanceView />}
         {activeTab === "claimable" && <ClaimableTab />}
         {activeTab === "claimed" && <ClaimedTab />}
+        {activeTab === "history" && <SPVHistoryView />}
       </ErrorBoundary>
     </>
   );

@@ -1,27 +1,30 @@
 "use client";
 
-import { useState, useCallback, useEffect } from "react";
+import { useState, useCallback, useEffect, useMemo } from "react";
 import { useConnection, useWallet } from "@solana/wallet-adapter-react";
 import { PublicKey, TransactionInstruction, Transaction } from "@solana/web3.js";
-import { sha256 } from "@noble/hashes/sha2.js";
 import { useZVaultKeys } from "./use-zvault";
 
-// Program ID for zVault
-const PROGRAM_ID = new PublicKey("DjnryiDxMsUY8pzYCgynVUGDgv45J9b3XbSDnp4qDYrq");
+// Import all name registry functions from SDK (single source of truth)
+import {
+  DEVNET_CONFIG,
+  hashName,
+  isValidName,
+  normalizeName,
+  formatZkeyName,
+  getNameValidationError,
+  parseNameRegistry as sdkParseNameRegistry,
+  parseReverseRegistry,
+  buildRegisterNameData as sdkBuildRegisterNameData,
+  NAME_REGISTRY_SEED,
+  REVERSE_REGISTRY_SEED,
+  NAME_REGISTRY_DISCRIMINATOR,
+  REVERSE_REGISTRY_DISCRIMINATOR,
+  type NameRegistryEntry,
+} from "@zvault/sdk";
 
-// Constants
-const NAME_REGISTRY_SEED = "zkey";
-const REVERSE_REGISTRY_SEED = "reverse";
-const NAME_REGISTRY_DISCRIMINATOR = 0x09;
-const REVERSE_REGISTRY_DISCRIMINATOR = 0x0a;
-const REGISTER_NAME_DISCRIMINATOR = 17;
-
-interface NameRegistryEntry {
-  name: string;
-  owner: Uint8Array;
-  spendingPubKey: Uint8Array;
-  viewingPubKey: Uint8Array;
-}
+// Program ID from SDK config
+const PROGRAM_ID = new PublicKey(DEVNET_CONFIG.zvaultProgramId);
 
 interface UseZkeyNameReturn {
   registeredName: string | null;
@@ -40,79 +43,9 @@ interface UseZkeyNameReturn {
   formatName: (name: string) => string;
 }
 
-// Hash name using SHA256
-function hashName(name: string): Uint8Array {
-  const normalized = name.toLowerCase().replace(/\.zkey\.sol$/, "").replace(/\.zkey$/, "");
-  return sha256(new TextEncoder().encode(normalized));
-}
-
-// Validate name
-function isValidName(name: string): boolean {
-  if (!name || name.length < 1 || name.length > 32) return false;
-  return /^[a-z0-9_]+$/.test(name);
-}
-
-// Normalize name
-function normalizeName(name: string): string {
-  return name.toLowerCase().replace(/\.zkey\.sol$/, "").replace(/\.zkey$/, "").trim();
-}
-
-// Format with .zkey.sol suffix
-function formatZkeyName(name: string): string {
-  return `${normalizeName(name)}.zkey.sol`;
-}
-
-// Get validation error
-function getNameValidationError(name: string): string | null {
-  if (!name) return "Name is required";
-  if (name.length < 1) return "Name must be at least 1 character";
-  if (name.length > 32) return "Name must be at most 32 characters";
-  if (!/^[a-z0-9_]+$/.test(name)) return "Name can only contain lowercase letters, numbers, and underscores";
-  return null;
-}
-
-// Parse name registry account data
-function parseNameRegistry(data: Uint8Array, name: string): NameRegistryEntry | null {
-  if (data.length < 100) return null;
-  if (data[0] !== NAME_REGISTRY_DISCRIMINATOR) return null;
-
-  return {
-    name,
-    owner: data.slice(34, 66),
-    spendingPubKey: data.slice(66, 99),
-    viewingPubKey: data.slice(99, 132),
-  };
-}
-
-// Build register name instruction data
-// Layout: discriminator (1) + name_len (1) + name (name_len) + name_hash (32) + spending_pubkey (33) + viewing_pubkey (33)
-function buildRegisterNameData(
-  name: string,
-  spendingPubKey: Uint8Array,
-  viewingPubKey: Uint8Array
-): Uint8Array {
-  const nameBytes = new TextEncoder().encode(name);
-  const nameHashBytes = hashName(name);
-
-  // Total: 1 (discriminator) + 1 (name_len) + name_len + 32 (name_hash) + 33 (spending) + 33 (viewing)
-  const data = new Uint8Array(1 + 1 + nameBytes.length + 32 + 33 + 33);
-  let offset = 0;
-
-  data[offset++] = REGISTER_NAME_DISCRIMINATOR;
-  data[offset++] = nameBytes.length;
-  data.set(nameBytes, offset);
-  offset += nameBytes.length;
-  data.set(nameHashBytes, offset);
-  offset += 32;
-  data.set(spendingPubKey, offset);
-  offset += 33;
-  data.set(viewingPubKey, offset);
-
-  return data;
-}
-
 /**
  * Hook for managing .zkey.sol name registration
+ * Uses @zvault/sdk for all name registry operations
  */
 export function useZkeyName(): UseZkeyNameReturn {
   const { connection } = useConnection();
@@ -127,7 +60,7 @@ export function useZkeyName(): UseZkeyNameReturn {
   const [isNameTaken, setIsNameTaken] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  // Derive PDA for a name
+  // Derive PDA for a name (uses SDK's hashName)
   const deriveNamePDA = useCallback((name: string): [PublicKey, number] => {
     const nameHash = hashName(name);
     return PublicKey.findProgramAddressSync(
@@ -158,7 +91,7 @@ export function useZkeyName(): UseZkeyNameReturn {
       const accountInfo = await connection.getAccountInfo(pda);
       if (!accountInfo) return null;
 
-      return parseNameRegistry(new Uint8Array(accountInfo.data), normalized);
+      return sdkParseNameRegistry(new Uint8Array(accountInfo.data), normalized);
     } catch (err) {
       console.error("Failed to lookup name:", err);
       return null;
@@ -199,20 +132,14 @@ export function useZkeyName(): UseZkeyNameReturn {
       const [reversePDA] = deriveReversePDA(stealthAddress.spendingPubKey);
       const reverseAccount = await connection.getAccountInfo(reversePDA);
 
-      if (reverseAccount && reverseAccount.data.length >= 100) {
+      if (reverseAccount && reverseAccount.data.length >= 68) {
         const data = new Uint8Array(reverseAccount.data);
-        // Check discriminator
-        if (data[0] === REVERSE_REGISTRY_DISCRIMINATOR) {
-          // Parse name from reverse registry
-          // Layout: disc(1) + bump(1) + spending_pubkey(33) + name_len(1) + name(32)
-          const nameLen = data[35];
-          if (nameLen > 0 && nameLen <= 32) {
-            const nameBytes = data.slice(36, 36 + nameLen);
-            const name = new TextDecoder().decode(nameBytes);
-            setRegisteredName(name);
-            setHasRegisteredName(true);
-            return;
-          }
+        // Use SDK's parseReverseRegistry
+        const name = parseReverseRegistry(data);
+        if (name) {
+          setRegisteredName(name);
+          setHasRegisteredName(true);
+          return;
         }
       }
 
@@ -276,8 +203,8 @@ export function useZkeyName(): UseZkeyNameReturn {
         return false;
       }
 
-      // Build instruction
-      const instructionData = buildRegisterNameData(
+      // Build instruction using SDK function
+      const instructionData = sdkBuildRegisterNameData(
         normalized,
         stealthAddress.spendingPubKey,
         stealthAddress.viewingPubKey

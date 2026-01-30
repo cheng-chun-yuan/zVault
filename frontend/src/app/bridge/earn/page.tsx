@@ -25,16 +25,14 @@ import { useWallet } from "@solana/wallet-adapter-react";
 import { useWalletModal } from "@solana/wallet-adapter-react-ui";
 import { useZVaultKeys, useStealthInbox } from "@/hooks/use-zvault";
 import { useYieldPool, type PoolStats, type EnrichedPoolPosition } from "@/hooks/use-yield-pool";
-import { createStealthMetaAddress } from "@zvault/sdk";
+import { createStealthMetaAddress, formatBtcAmount } from "@zvault/sdk";
 import {
   OperationStatus,
   type PoolOperationStatus,
 } from "@/components/earn/OperationStatus";
 
-// Format helpers
-function formatBtc(sats: bigint): string {
-  return (Number(sats) / 100_000_000).toFixed(8);
-}
+// Alias for consistency with existing code
+const formatBtc = formatBtcAmount;
 
 function formatApy(bps: number): string {
   return `${(bps / 100).toFixed(2)}%`;

@@ -7,9 +7,14 @@
  * This module is server-only (runs in Next.js API routes).
  */
 
-import { CommitmentTreeIndex, DEVNET_CONFIG } from "@zvault/sdk";
+import {
+  CommitmentTreeIndex,
+  DEVNET_CONFIG,
+  parseCommitmentTreeData,
+  COMMITMENT_TREE_DISCRIMINATOR,
+  ROOT_HISTORY_SIZE,
+} from "@zvault/sdk";
 import { readFileSync, writeFileSync, existsSync, mkdirSync } from "fs";
-import { dirname } from "path";
 import { PublicKey } from "@solana/web3.js";
 import { getHeliusConnection } from "./helius-server";
 
@@ -19,10 +24,6 @@ const INDEX_FILE = DATA_DIR + "/commitment-index.json";
 
 // Commitment tree PDA - from SDK config (single source of truth)
 const COMMITMENT_TREE_ADDRESS = DEVNET_CONFIG.commitmentTreePda;
-
-// Discriminator for CommitmentTree account
-const COMMITMENT_TREE_DISCRIMINATOR = 0x05;
-const ROOT_HISTORY_SIZE = 100;
 
 // Server-side singleton
 let serverIndex: CommitmentTreeIndex | null = null;
@@ -120,18 +121,7 @@ export function getTreeStatus(): {
 }
 
 /**
- * Read little-endian u64 from buffer
- */
-function readU64LE(buffer: Buffer | Uint8Array, offset: number): bigint {
-  let result = 0n;
-  for (let i = 0; i < 8; i++) {
-    result |= BigInt(buffer[offset + i]) << BigInt(i * 8);
-  }
-  return result;
-}
-
-/**
- * Fetch on-chain commitment tree state
+ * Fetch on-chain commitment tree state using SDK's parseCommitmentTreeData
  */
 export async function fetchOnChainTreeState(): Promise<{
   currentRoot: string;
@@ -146,29 +136,13 @@ export async function fetchOnChainTreeState(): Promise<{
     throw new Error("Commitment tree account not found on-chain");
   }
 
-  const data = accountInfo.data;
-
-  // Validate discriminator
-  if (data[0] !== COMMITMENT_TREE_DISCRIMINATOR) {
-    throw new Error("Invalid commitment tree discriminator");
-  }
-
-  // Parse state
-  const currentRoot = Buffer.from(data.slice(8, 40)).toString("hex");
-  const nextIndex = readU64LE(data, 40);
-
-  // Skip root history for now (100 * 32 bytes)
-  const rootHistoryOffset = 48 + ROOT_HISTORY_SIZE * 32;
-  const rootHistoryIndex =
-    data[rootHistoryOffset] |
-    (data[rootHistoryOffset + 1] << 8) |
-    (data[rootHistoryOffset + 2] << 16) |
-    (data[rootHistoryOffset + 3] << 24);
+  // Use SDK's parseCommitmentTreeData (handles discriminator validation + parsing)
+  const state = parseCommitmentTreeData(new Uint8Array(accountInfo.data));
 
   return {
-    currentRoot,
-    nextIndex,
-    rootHistoryIndex,
+    currentRoot: Buffer.from(state.currentRoot).toString("hex"),
+    nextIndex: state.nextIndex,
+    rootHistoryIndex: state.rootHistoryIndex,
   };
 }
 

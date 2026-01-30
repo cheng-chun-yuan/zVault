@@ -3,6 +3,7 @@ import {
   Keypair,
   sendAndConfirmTransaction,
 } from "@solana/web3.js";
+import { hexToBytes } from "@zvault/sdk";
 import { buildAddDemoStealthTransaction } from "@/lib/solana/demo-instructions";
 import { getHeliusConnection, isHeliusConfigured } from "@/lib/helius-server";
 
@@ -133,15 +134,4 @@ function isValidHex(hex: string, expectedLength: number): boolean {
     return false;
   }
   return /^[0-9a-fA-F]+$/.test(hex);
-}
-
-/**
- * Convert hex string to bytes (assumes already validated)
- */
-function hexToBytes(hex: string): Uint8Array {
-  const bytes = new Uint8Array(hex.length / 2);
-  for (let i = 0; i < hex.length; i += 2) {
-    bytes[i / 2] = parseInt(hex.substr(i, 2), 16);
-  }
-  return bytes;
 }

@@ -1,14 +1,14 @@
 import { NextRequest, NextResponse } from "next/server";
 import { PublicKey } from "@solana/web3.js";
 import { getHeliusConnection, isHeliusConfigured } from "@/lib/helius-server";
-import { DEVNET_CONFIG } from "@zvault/sdk";
+import { DEVNET_CONFIG, bytesToBigint } from "@zvault/sdk";
 
 export const runtime = "nodejs";
 
 // Pool state PDA from SDK (single source of truth)
 const POOL_STATE_ADDRESS = DEVNET_CONFIG.poolStatePda;
 
-// Discriminator for PoolState account
+// Discriminator for PoolState account (not exported by SDK yet)
 const POOL_STATE_DISCRIMINATOR = 0x01;
 
 interface PoolStateData {
@@ -61,21 +61,22 @@ export async function GET(request: NextRequest) {
     }
 
     // Parse state (simplified - matches PoolState struct layout)
+    // Using SDK's bytesToBigint for u64 parsing
     const state: PoolStateData = {
       discriminator: data[0],
       bump: data[1],
       authority: new PublicKey(data.slice(8, 40)).toBase58(),
       zbtcMint: new PublicKey(data.slice(40, 72)).toBase58(),
       poolVault: new PublicKey(data.slice(72, 104)).toBase58(),
-      minDeposit: readU64LE(data, 104).toString(),
-      totalMinted: readU64LE(data, 112).toString(),
-      totalBurned: readU64LE(data, 120).toString(),
-      totalShielded: readU64LE(data, 128).toString(),
-      depositCount: readU64LE(data, 136).toString(),
-      directClaims: readU64LE(data, 144).toString(),
-      stealthClaims: readU64LE(data, 152).toString(),
+      minDeposit: bytesToBigint(data.slice(104, 112)).toString(),
+      totalMinted: bytesToBigint(data.slice(112, 120)).toString(),
+      totalBurned: bytesToBigint(data.slice(120, 128)).toString(),
+      totalShielded: bytesToBigint(data.slice(128, 136)).toString(),
+      depositCount: bytesToBigint(data.slice(136, 144)).toString(),
+      directClaims: bytesToBigint(data.slice(144, 152)).toString(),
+      stealthClaims: bytesToBigint(data.slice(152, 160)).toString(),
       isPaused: data[160] !== 0,
-      lastUpdate: Number(readI64LE(data, 168)),
+      lastUpdate: Number(bytesToBigint(data.slice(168, 176))),
     };
 
     return NextResponse.json({
@@ -94,23 +95,4 @@ export async function GET(request: NextRequest) {
       { status: 500 }
     );
   }
-}
-
-// Read little-endian u64
-function readU64LE(buffer: Buffer | Uint8Array, offset: number): bigint {
-  let result = 0n;
-  for (let i = 0; i < 8; i++) {
-    result |= BigInt(buffer[offset + i]) << BigInt(i * 8);
-  }
-  return result;
-}
-
-// Read little-endian i64
-function readI64LE(buffer: Buffer | Uint8Array, offset: number): bigint {
-  const unsigned = readU64LE(buffer, offset);
-  // Convert to signed if negative
-  if (unsigned >= 0x8000000000000000n) {
-    return unsigned - 0x10000000000000000n;
-  }
-  return unsigned;
 }

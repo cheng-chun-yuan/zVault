@@ -14,6 +14,7 @@ import { useZVaultKeys, useStealthInbox, type InboxNote } from "@/hooks/use-zvau
 import {
   initPoseidon,
   createStealthDeposit,
+  bytesToHex,
   type StealthMetaAddress,
 } from "@zvault/sdk";
 
@@ -27,19 +28,21 @@ function isValidSolanaAddress(address: string): boolean {
   }
 }
 
-// Convert bytes to hex string
-function bytesToHex(bytes: Uint8Array): string {
-  return Array.from(bytes)
-    .map((b) => b.toString(16).padStart(2, "0"))
-    .join("");
-}
-
 // Constants
 const MIN_PAY_SATS = 1000;
 
 type PayStep = "connect" | "select_note" | "form" | "proving" | "success";
 
-export function PayFlow() {
+interface PayFlowProps {
+  initialMode?: "public" | "stealth";
+  preselectedNote?: {
+    commitment: string;
+    leafIndex: number;
+    amount: bigint;
+  };
+}
+
+export function PayFlow({ initialMode, preselectedNote }: PayFlowProps) {
   const { publicKey, connected, signTransaction } = useWallet();
   const { connection } = useConnection();
   const { hasKeys, deriveKeys, isLoading: keysLoading, stealthAddress } = useZVaultKeys();
@@ -55,12 +58,13 @@ export function PayFlow() {
   const [changeAmountSats, setChangeAmountSats] = useState<number>(0);
   const [changeClaimCopied, setChangeClaimCopied] = useState(false);
 
-  // Recipient address state
-  const [recipientMode, setRecipientMode] = useState<"public" | "stealth">("public");
+  // Recipient address state - use initialMode from props
+  const [recipientMode, setRecipientMode] = useState<"public" | "stealth">(initialMode || "public");
   const [recipientAddress, setRecipientAddress] = useState<string>("");
   const [isEditingRecipient, setIsEditingRecipient] = useState(false);
   const [recipientError, setRecipientError] = useState<string | null>(null);
   const recipientInitializedRef = useRef(false);
+  const notePreselectedRef = useRef(false);
 
   // Stealth recipient state
   const [resolvedMeta, setResolvedMeta] = useState<StealthMetaAddress | null>(null);
@@ -74,6 +78,20 @@ export function PayFlow() {
       recipientInitializedRef.current = true;
     }
   }, [publicKey]);
+
+  // Pre-select note from props (when coming from inbox)
+  useEffect(() => {
+    if (notePreselectedRef.current || inboxLoading || !preselectedNote) return;
+
+    const matchingNote = inboxNotes.find(n => n.commitmentHex === preselectedNote.commitment);
+    if (matchingNote) {
+      setSelectedNote(matchingNote);
+      notePreselectedRef.current = true;
+      if (connected && hasKeys) {
+        setStep("form");
+      }
+    }
+  }, [preselectedNote, inboxNotes, inboxLoading, connected, hasKeys]);
 
   // Validate recipient address (for public mode)
   const validateRecipient = useCallback((address: string): boolean => {
@@ -269,12 +287,16 @@ export function PayFlow() {
 
   useEffect(() => {
     if (connected && hasKeys && step === "connect") {
-      // Move to note selection if notes available, otherwise stay for info
-      setStep(availableNotes.length > 0 ? "select_note" : "connect");
+      // If note is pre-selected, go directly to form; otherwise to note selection
+      if (selectedNote) {
+        setStep("form");
+      } else {
+        setStep(availableNotes.length > 0 ? "select_note" : "connect");
+      }
     } else if (!connected && step !== "connect") {
       setStep("connect");
     }
-  }, [connected, hasKeys, step, availableNotes.length]);
+  }, [connected, hasKeys, step, availableNotes.length, selectedNote]);
 
   // Connect step - also shows if no notes available
   if (step === "connect") {
