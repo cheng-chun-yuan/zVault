@@ -6,6 +6,7 @@ import {
 import { hexToBytes } from "@zvault/sdk";
 import { buildAddDemoStealthTransaction } from "@/lib/solana/demo-instructions";
 import { getHeliusConnection, isHeliusConfigured } from "@/lib/helius-server";
+import { addCommitmentToIndex } from "@/lib/commitment-index";
 
 export const runtime = "nodejs";
 
@@ -30,14 +31,13 @@ function getAdminKeypair(): Keypair | null {
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
-    const { type, ephemeralPub, commitment, encryptedAmount } = body;
+    const { type, ephemeralPub, commitment, encryptedAmount, amount } = body;
 
-    // Validate type - only stealth mode is supported
-    if (type && type !== "stealth") {
-      return NextResponse.json(
-        { success: false, error: "Only 'stealth' type is supported. Use stealth deposits." },
-        { status: 400 }
-      );
+    // For demo mode, both public and stealth use stealth deposits
+    // Public transfer (SPEND_PARTIAL_PUBLIC) requires ZK proofs in production
+    if (type === "public") {
+      console.log("[Demo API] Public mode - using stealth deposit for demo");
+      // In demo mode, fall through to stealth handling
     }
 
     // Validate stealth mode params with proper hex validation
@@ -56,6 +56,14 @@ export async function POST(request: NextRequest) {
     if (!isValidHex(encryptedAmount, 16)) {
       return NextResponse.json(
         { success: false, error: "Invalid encryptedAmount. Must be 16 valid hex characters (8 bytes)" },
+        { status: 400 }
+      );
+    }
+
+    // Amount is required for adding to the local merkle tree index
+    if (amount === undefined || amount === null) {
+      return NextResponse.json(
+        { success: false, error: "Missing amount field (required for merkle tree indexing)" },
         { status: 400 }
       );
     }
@@ -95,9 +103,20 @@ export async function POST(request: NextRequest) {
 
       console.log("[Demo API] Transaction confirmed:", signature);
 
+      // Add commitment to local merkle tree index for proof generation
+      try {
+        const commitmentBigInt = BigInt("0x" + commitment);
+        const amountBigInt = BigInt(amount);
+        const indexResult = addCommitmentToIndex(commitmentBigInt, amountBigInt);
+        console.log("[Demo API] Added to local index, leafIndex:", indexResult.leafIndex.toString());
+      } catch (indexError) {
+        console.warn("[Demo API] Failed to add to local index (may already exist):", indexError);
+        // Don't fail the request - on-chain deposit succeeded
+      }
+
       return NextResponse.json({
         success: true,
-        type: "stealth",
+        type: type || "stealth",
         signature,
         message: "Demo stealth deposit added on-chain",
       });

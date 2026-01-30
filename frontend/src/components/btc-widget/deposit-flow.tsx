@@ -89,6 +89,7 @@ export function DepositFlow() {
           ephemeralPub: bytesToHex(stealthDepositData.ephemeralPub),
           commitment: bytesToHex(stealthDepositData.commitment),
           encryptedAmount: bytesToHex(stealthDepositData.encryptedAmount),
+          amount: amount.toString(), // For merkle tree indexing
         }),
       });
 
