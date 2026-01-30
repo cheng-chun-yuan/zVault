@@ -3,20 +3,29 @@
 import { useState, useEffect, useMemo, useCallback, useRef } from "react";
 import { useWallet } from "@solana/wallet-adapter-react";
 import { useConnection } from "@solana/wallet-adapter-react";
-import { PublicKey } from "@solana/web3.js";
-import { CheckCircle2, Send, Wallet, Shield, Clock, AlertCircle, Key, Copy, Check, Pencil, X, Loader2 } from "lucide-react";
+import { PublicKey, sendAndConfirmTransaction } from "@solana/web3.js";
+import { CheckCircle2, Send, Wallet, Shield, Clock, AlertCircle, Key, Copy, Check, Pencil, X, Loader2, Zap } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { parseSats, validateWithdrawalAmount } from "@/lib/utils/validation";
 import { WalletButton } from "@/components/ui";
 import { StealthRecipientInput } from "@/components/ui/stealth-recipient-input";
 import { formatBtc, truncateMiddle } from "@/lib/utils/formatting";
-import { useZVaultKeys, useStealthInbox, type InboxNote } from "@/hooks/use-zvault";
+import { useZVault, type InboxNote } from "@/hooks/use-zvault";
+import { useProver } from "@/hooks/use-prover";
 import {
   initPoseidon,
-  createStealthDeposit,
-  bytesToHex,
+  grumpkinEcdh,
   type StealthMetaAddress,
+  type ScannedNote,
 } from "@zvault/sdk";
+import {
+  buildSplitTransaction,
+  buildSpendPartialPublicTransaction,
+  getOrCreateTokenAccount,
+  bigintTo32Bytes,
+} from "@/lib/solana/instructions";
+import { getAssociatedTokenAddressSync, createAssociatedTokenAccountInstruction, TOKEN_2022_PROGRAM_ID } from "@solana/spl-token";
+import { ZBTC_MINT_ADDRESS } from "@/lib/solana/instructions";
 
 // Validate Solana address
 function isValidSolanaAddress(address: string): boolean {
@@ -45,8 +54,17 @@ interface PayFlowProps {
 export function PayFlow({ initialMode, preselectedNote }: PayFlowProps) {
   const { publicKey, connected, signTransaction } = useWallet();
   const { connection } = useConnection();
-  const { hasKeys, deriveKeys, isLoading: keysLoading, stealthAddress } = useZVaultKeys();
-  const { notes: inboxNotes, isLoading: inboxLoading, refresh: refreshInbox } = useStealthInbox();
+  const {
+    keys,
+    hasKeys,
+    deriveKeys,
+    isLoading: keysLoading,
+    stealthAddress,
+    inboxNotes,
+    inboxLoading,
+    refreshInbox,
+  } = useZVault();
+  const prover = useProver();
 
   const [step, setStep] = useState<PayStep>("connect");
   const [selectedNote, setSelectedNote] = useState<InboxNote | null>(null);
@@ -57,6 +75,7 @@ export function PayFlow({ initialMode, preselectedNote }: PayFlowProps) {
   const [changeClaimLink, setChangeClaimLink] = useState<string | null>(null);
   const [changeAmountSats, setChangeAmountSats] = useState<number>(0);
   const [changeClaimCopied, setChangeClaimCopied] = useState(false);
+  const [proofStatus, setProofStatus] = useState<string>("");
 
   // Recipient address state - use initialMode from props
   const [recipientMode, setRecipientMode] = useState<"public" | "stealth">(initialMode || "public");
@@ -182,6 +201,7 @@ export function PayFlow({ initialMode, preselectedNote }: PayFlowProps) {
     setLoading(true);
     setError(null);
     setStep("proving");
+    setProofStatus("Initializing...");
 
     try {
       // Initialize Poseidon for hashing
@@ -193,66 +213,179 @@ export function PayFlow({ initialMode, preselectedNote }: PayFlowProps) {
       console.log("[Pay] Commitment:", selectedNote.commitmentHex);
       console.log("[Pay] Mode:", recipientMode);
 
-      // Determine target stealth meta address
-      let targetMeta: StealthMetaAddress | null = null;
+      // Validate keys and wallet
+      if (!keys) {
+        throw new Error("Please derive your stealth keys first");
+      }
+      if (!signTransaction) {
+        throw new Error("Wallet doesn't support transaction signing");
+      }
 
-      if (recipientMode === "stealth") {
-        // Stealth mode: use resolved meta address
+      setProofStatus("Initializing prover...");
+
+      // Initialize prover if needed
+      if (!prover.isInitialized) {
+        await prover.initialize();
+      }
+
+      // Convert InboxNote to ScannedNote format for SDK functions
+      const scannedNote: ScannedNote = {
+        amount: selectedNote.amount,
+        ephemeralPub: selectedNote.ephemeralPub,
+        stealthPub: selectedNote.stealthPub,
+        leafIndex: selectedNote.leafIndex,
+        commitment: selectedNote.commitment,
+      };
+
+      // Derive stealth private key using ECDH (same as prepareClaimInputs)
+      setProofStatus("Deriving stealth keys...");
+      const sharedSecret = grumpkinEcdh(keys.viewingPrivKey, scannedNote.ephemeralPub);
+
+      // Compute stealth scalar: hash(sharedSecret)
+      const { sha256 } = await import("@noble/hashes/sha256");
+      const secretBytes = new Uint8Array(64);
+      const xHex = sharedSecret.x.toString(16).padStart(64, "0");
+      const yHex = sharedSecret.y.toString(16).padStart(64, "0");
+      for (let i = 0; i < 32; i++) {
+        secretBytes[i] = parseInt(xHex.slice(i * 2, i * 2 + 2), 16);
+        secretBytes[32 + i] = parseInt(yHex.slice(i * 2, i * 2 + 2), 16);
+      }
+      const scalarHash = sha256(secretBytes);
+      let scalar = 0n;
+      for (const byte of scalarHash) {
+        scalar = (scalar << 8n) | BigInt(byte);
+      }
+      // Grumpkin order
+      const GRUMPKIN_ORDER = 0x30644e72e131a029b85045b68181585d2833e84879b9709143e1f593f0000001n;
+      scalar = scalar % GRUMPKIN_ORDER;
+
+      // Derive stealth private key: stealthPriv = spendingPriv + scalar
+      const stealthPrivKey = (keys.spendingPrivKey + scalar) % GRUMPKIN_ORDER;
+
+      console.log("[Pay] Stealth private key derived");
+
+      if (recipientMode === "public") {
+        // =================================================================
+        // PUBLIC MODE: SPEND_PARTIAL_PUBLIC
+        // Transfers part to public wallet, rest as change commitment
+        // =================================================================
+        setProofStatus("Generating ZK proof for public transfer...");
+
+        // Validate recipient
+        if (!validateRecipient(recipientAddress)) {
+          throw new Error("Invalid recipient address");
+        }
+
+        const recipientPubkey = new PublicKey(recipientAddress);
+
+        // Generate proof
+        const proofResult = await prover.generatePartialPublicProof({
+          privKey: stealthPrivKey,
+          pubKeyX: scannedNote.stealthPub.x,
+          amount: scannedNote.amount,
+          commitmentHex: selectedNote.commitmentHex,
+          publicAmount: BigInt(amountSats),
+          changePubKeyX: scannedNote.stealthPub.x, // Change goes back to same key
+          recipient: recipientPubkey.toBytes(),
+        });
+
+        setProofStatus("Proof generated! Building transaction...");
+
+        // Get or create recipient token account
+        const recipientTokenAccount = getAssociatedTokenAddressSync(
+          ZBTC_MINT_ADDRESS,
+          recipientPubkey,
+          false,
+          TOKEN_2022_PROGRAM_ID
+        );
+
+        // Build transaction
+        const tx = await buildSpendPartialPublicTransaction(connection, {
+          userPubkey: publicKey,
+          zkProof: proofResult.proof.proof,
+          merkleRoot: bigintTo32Bytes(proofResult.merkleRoot),
+          nullifierHash: bigintTo32Bytes(proofResult.nullifierHash),
+          publicAmount: BigInt(amountSats),
+          changeCommitment: bigintTo32Bytes(proofResult.changeCommitment),
+          recipient: recipientPubkey,
+          recipientTokenAccount,
+        });
+
+        setProofStatus("Sending transaction...");
+
+        // Sign and send transaction
+        const signedTx = await signTransaction(tx);
+        const signature = await connection.sendRawTransaction(signedTx.serialize(), {
+          skipPreflight: false,
+          preflightCommitment: "confirmed",
+        });
+
+        setProofStatus("Confirming transaction...");
+        await connection.confirmTransaction(signature, "confirmed");
+
+        console.log("[Pay] Transaction confirmed:", signature);
+        setRequestId(signature);
+      } else {
+        // =================================================================
+        // STEALTH MODE: SPEND_SPLIT
+        // Creates two private commitments: one for recipient, one for change
+        // =================================================================
+        setProofStatus("Generating ZK proof for private transfer...");
+
         if (!resolvedMeta) {
           throw new Error("Please resolve stealth recipient first");
         }
-        targetMeta = resolvedMeta;
-      } else {
-        // Public mode: Create a deposit that recipient can claim
-        // Since contract doesn't support direct transfer to Solana wallet,
-        // we create a deposit to sender's stealth address and generate a claim link
-        // that can be shared with the recipient
-        if (!stealthAddress) {
-          throw new Error("Please derive your stealth keys first");
-        }
-        targetMeta = stealthAddress;
+
+        // Recipient's stealth public key X coordinate
+        const recipientPubKeyX = resolvedMeta.spendingPubKey.x;
+
+        // Generate proof
+        const proofResult = await prover.generateSplitProof({
+          privKey: stealthPrivKey,
+          pubKeyX: scannedNote.stealthPub.x,
+          amount: scannedNote.amount,
+          commitmentHex: selectedNote.commitmentHex,
+          sendAmount: BigInt(amountSats),
+          recipientPubKeyX,
+          changePubKeyX: scannedNote.stealthPub.x, // Change goes back to same key
+        });
+
+        setProofStatus("Proof generated! Building transaction...");
+
+        // Build transaction
+        const tx = await buildSplitTransaction(connection, {
+          userPubkey: publicKey,
+          zkProof: proofResult.proof.proof,
+          inputNullifierHash: bigintTo32Bytes(proofResult.nullifierHash),
+          outputCommitment1: bigintTo32Bytes(proofResult.outputCommitment1),
+          outputCommitment2: bigintTo32Bytes(proofResult.outputCommitment2),
+          merkleRoot: bigintTo32Bytes(proofResult.merkleRoot),
+        });
+
+        setProofStatus("Sending transaction...");
+
+        // Sign and send transaction
+        const signedTx = await signTransaction(tx);
+        const signature = await connection.sendRawTransaction(signedTx.serialize(), {
+          skipPreflight: false,
+          preflightCommitment: "confirmed",
+        });
+
+        setProofStatus("Confirming transaction...");
+        await connection.confirmTransaction(signature, "confirmed");
+
+        console.log("[Pay] Transaction confirmed:", signature);
+        setRequestId(signature);
       }
 
-      // Validate recipient address for public mode
-      if (recipientMode === "public" && !validateRecipient(recipientAddress)) {
-        throw new Error("Invalid recipient address");
-      }
-
-      // Create stealth deposit data client-side
-      const stealthDepositData = await createStealthDeposit(targetMeta, BigInt(amountSats));
-
-      console.log("[Pay] Created stealth deposit, submitting via relayer...");
-
-      // Submit via demo API relayer (keeps user anonymous)
-      const response = await fetch("/api/demo", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          type: "stealth",
-          ephemeralPub: bytesToHex(stealthDepositData.ephemeralPub),
-          commitment: bytesToHex(stealthDepositData.commitment),
-          encryptedAmount: bytesToHex(stealthDepositData.encryptedAmount),
-        }),
-      });
-
-      const result = await response.json();
-      if (!result.success) {
-        throw new Error(result.error || "Failed to submit payment");
-      }
-
-      console.log("[Pay] Transaction confirmed:", result.signature);
-
-      // Calculate change if partial payment
-      const noteAmountSats = Number(selectedNote.amount);
+      // Calculate change
       const changeAmount = noteAmountSats - amountSats;
-
       if (changeAmount > 0) {
         setChangeAmountSats(changeAmount);
         setChangeClaimLink(null);
-        console.log("[Pay] Change amount:", changeAmount, "sats");
+        console.log("[Pay] Change amount:", changeAmount, "sats (kept as private commitment)");
       }
 
-      setRequestId(result.signature);
       setStep("success");
     } catch (err) {
       console.error("[Pay] Error:", err);
@@ -261,6 +394,7 @@ export function PayFlow({ initialMode, preselectedNote }: PayFlowProps) {
       setStep("form");
     } finally {
       setLoading(false);
+      setProofStatus("");
     }
   };
 
@@ -526,7 +660,7 @@ export function PayFlow({ initialMode, preselectedNote }: PayFlowProps) {
                   : "bg-muted border border-gray/20 text-gray hover:border-gray/40"
               )}
             >
-              Public (Solana)
+              Send to Wallet
             </button>
             <button
               onClick={() => {
@@ -540,7 +674,7 @@ export function PayFlow({ initialMode, preselectedNote }: PayFlowProps) {
                   : "bg-muted border border-gray/20 text-gray hover:border-gray/40"
               )}
             >
-              Private (Stealth)
+              Send Private
             </button>
           </div>
 
@@ -620,7 +754,7 @@ export function PayFlow({ initialMode, preselectedNote }: PayFlowProps) {
               <p className="text-caption text-gray mt-1 pl-2">
                 {isOwnWallet
                   ? "Creates a private deposit (appears in your Notes)"
-                  : "Creates a claimable deposit - share claim link with recipient"}
+                  : "Demo: Creates stealth deposit recipient can scan • Production: Direct token transfer"}
                 {!isEditingRecipient && (
                   <span className="text-gray/40"> • Click to edit</span>
                 )}
@@ -660,7 +794,8 @@ export function PayFlow({ initialMode, preselectedNote }: PayFlowProps) {
         <div className="flex items-center gap-3 p-3 bg-muted border border-gray/15 rounded-[12px] mb-4">
           <Clock className="w-5 h-5 text-gray shrink-0" />
           <div className="text-caption text-gray">
-            <span className="text-gray-light">Processing time:</span> Instant
+            <span className="text-gray-light">Processing time:</span>{" "}
+            30-60s (ZK proof generation)
           </div>
         </div>
 
@@ -687,6 +822,11 @@ export function PayFlow({ initialMode, preselectedNote }: PayFlowProps) {
 
   // Proving step
   if (step === "proving") {
+    // Combine proofStatus with prover's progress for detailed updates
+    const displayStatus = prover.isGenerating && prover.progress
+      ? prover.progress
+      : proofStatus || "Preparing transaction...";
+
     return (
       <div className="flex flex-col items-center py-6">
         {/* Progress circle */}
@@ -697,14 +837,36 @@ export function PayFlow({ initialMode, preselectedNote }: PayFlowProps) {
             style={{ animationDuration: "2s" }}
           />
           <div className="absolute inset-0 flex items-center justify-center">
-            <Shield className="w-8 h-8 text-purple" />
+            <Zap className="w-8 h-8 text-purple" />
           </div>
         </div>
 
-        <p className="text-heading6 text-foreground mb-2">Generating ZK Proof</p>
-        <p className="text-body2 text-gray text-center mb-4">
-          Creating your zero-knowledge payment proof...
+        <p className="text-heading6 text-foreground mb-2">
+          Generating ZK Proof
         </p>
+
+        {/* Status display */}
+        <div className="w-full mb-4 p-3 bg-muted border border-gray/15 rounded-[12px]">
+          <div className="flex items-center gap-2 text-body2 text-gray-light">
+            <Loader2 className="w-4 h-4 animate-spin text-purple" />
+            <span>{displayStatus}</span>
+          </div>
+          {prover.isGenerating && (
+            <p className="text-caption text-gray mt-2 pl-6">
+              ZK proof generation may take 30-60 seconds...
+            </p>
+          )}
+        </div>
+
+        {/* Prover error display */}
+        {prover.error && (
+          <div className="w-full mb-4 p-3 bg-red-500/10 border border-red-500/20 rounded-[12px]">
+            <div className="flex items-center gap-2 text-body2 text-red-400">
+              <AlertCircle className="w-4 h-4" />
+              <span>{prover.error}</span>
+            </div>
+          </div>
+        )}
 
         {/* Privacy info */}
         <div className="w-full privacy-box">
@@ -712,7 +874,7 @@ export function PayFlow({ initialMode, preselectedNote }: PayFlowProps) {
           <div className="flex flex-col">
             <span className="text-body2-semibold">Privacy Protected</span>
             <span className="text-caption opacity-80">
-              This proof hides the link between your deposit and payment
+              ZK proof hides the link between your deposit and payment
             </span>
           </div>
         </div>

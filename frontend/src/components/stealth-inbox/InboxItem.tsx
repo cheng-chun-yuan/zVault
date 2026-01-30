@@ -104,7 +104,7 @@ export function InboxItem({ note }: InboxItemProps) {
           className="flex-1 flex items-center justify-center gap-2 px-4 py-3 rounded-[10px] bg-privacy/10 hover:bg-privacy/20 text-privacy transition-colors"
         >
           <Wallet className="w-4 h-4" />
-          Send Public
+          To Wallet
         </button>
         <button
           onClick={handleSendPrivate}

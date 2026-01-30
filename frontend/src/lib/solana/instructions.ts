@@ -37,6 +37,7 @@ export const ZBTC_MINT_ADDRESS = new PublicKey(DEVNET_CONFIG.zbtcMint);
 export const INSTRUCTION_DISCRIMINATORS = {
   CLAIM: 9,
   SPLIT_COMMITMENT: 4,
+  SPEND_PARTIAL_PUBLIC: 10,
   REQUEST_REDEMPTION: 5,
 } as const;
 
@@ -240,6 +241,54 @@ export function buildSplitInstructionData(
 }
 
 /**
+ * Build instruction data for SPEND_PARTIAL_PUBLIC
+ *
+ * @param zkProof - Groth16 proof bytes
+ * @param merkleRoot - 32-byte merkle root
+ * @param nullifierHash - 32-byte input nullifier hash
+ * @param publicAmount - Amount to claim publicly (8 bytes)
+ * @param changeCommitment - 32-byte change commitment
+ * @param recipient - 32-byte recipient Solana address
+ */
+export function buildSpendPartialPublicInstructionData(
+  zkProof: Uint8Array,
+  merkleRoot: Uint8Array,
+  nullifierHash: Uint8Array,
+  publicAmount: bigint,
+  changeCommitment: Uint8Array,
+  recipient: Uint8Array
+): Uint8Array {
+  const proofLen = zkProof.length;
+  // Layout: discriminator(1) + proof(N) + root(32) + nullifier_hash(32) + public_amount(8) + change_commitment(32) + recipient(32)
+  const totalLen = 1 + proofLen + 32 + 32 + 8 + 32 + 32;
+
+  const data = new Uint8Array(totalLen);
+  let offset = 0;
+
+  data[offset++] = INSTRUCTION_DISCRIMINATORS.SPEND_PARTIAL_PUBLIC;
+
+  data.set(zkProof, offset);
+  offset += proofLen;
+
+  data.set(merkleRoot, offset);
+  offset += 32;
+
+  data.set(nullifierHash, offset);
+  offset += 32;
+
+  const amountView = new DataView(data.buffer, offset);
+  amountView.setBigUint64(0, publicAmount, true);
+  offset += 8;
+
+  data.set(changeCommitment, offset);
+  offset += 32;
+
+  data.set(recipient, offset);
+
+  return data;
+}
+
+/**
  * Build instruction data for REQUEST_REDEMPTION
  *
  * @param amountSats - Amount to redeem
@@ -407,6 +456,100 @@ export async function buildSplitTransaction(
       { pubkey: commitmentTree, isSigner: false, isWritable: true },
       { pubkey: nullifierPDA, isSigner: false, isWritable: true },
       { pubkey: userPubkey, isSigner: true, isWritable: true },
+      { pubkey: SystemProgram.programId, isSigner: false, isWritable: false },
+    ],
+    data: Buffer.from(instructionData),
+  });
+
+  // Get priority fee instructions for better transaction landing
+  const priorityFeeIxs = await getPriorityFeeInstructions([
+    ZVAULT_PROGRAM_ID.toBase58(),
+  ]);
+
+  const transaction = new Transaction();
+  transaction.add(...priorityFeeIxs);
+  transaction.add(instruction);
+  transaction.feePayer = userPubkey;
+
+  const { blockhash } = await connection.getLatestBlockhash();
+  transaction.recentBlockhash = blockhash;
+
+  return transaction;
+}
+
+export interface SpendPartialPublicParams {
+  /** User's Solana public key (payer) */
+  userPubkey: PublicKey;
+  /** ZK proof bytes */
+  zkProof: Uint8Array;
+  /** Merkle root (32 bytes) */
+  merkleRoot: Uint8Array;
+  /** Nullifier hash (32 bytes) */
+  nullifierHash: Uint8Array;
+  /** Amount to claim publicly */
+  publicAmount: bigint;
+  /** Change commitment (32 bytes) */
+  changeCommitment: Uint8Array;
+  /** Recipient Solana public key */
+  recipient: PublicKey;
+  /** Recipient's zBTC token account */
+  recipientTokenAccount: PublicKey;
+}
+
+/**
+ * Build SPEND_PARTIAL_PUBLIC transaction
+ *
+ * Claims part of a commitment to a public wallet, with change returned as a new commitment.
+ */
+export async function buildSpendPartialPublicTransaction(
+  connection: Connection,
+  params: SpendPartialPublicParams
+): Promise<Transaction> {
+  const {
+    userPubkey,
+    zkProof,
+    merkleRoot,
+    nullifierHash,
+    publicAmount,
+    changeCommitment,
+    recipient,
+    recipientTokenAccount,
+  } = params;
+
+  const [poolState] = derivePoolStatePDA();
+  const [commitmentTree] = deriveCommitmentTreePDA();
+  const [nullifierPDA] = deriveNullifierPDA(nullifierHash);
+  const [zbtcMint] = derivezBTCMintPDA();
+
+  // Pool vault ATA
+  const { getAssociatedTokenAddressSync } = await import("@solana/spl-token");
+  const poolVault = getAssociatedTokenAddressSync(
+    zbtcMint,
+    poolState,
+    true,
+    TOKEN_2022_PROGRAM_ID
+  );
+
+  const instructionData = buildSpendPartialPublicInstructionData(
+    zkProof,
+    merkleRoot,
+    nullifierHash,
+    publicAmount,
+    changeCommitment,
+    recipient.toBytes()
+  );
+
+  const instruction = new TransactionInstruction({
+    programId: ZVAULT_PROGRAM_ID,
+    keys: [
+      { pubkey: poolState, isSigner: false, isWritable: true },
+      { pubkey: commitmentTree, isSigner: false, isWritable: true },
+      { pubkey: nullifierPDA, isSigner: false, isWritable: true },
+      { pubkey: zbtcMint, isSigner: false, isWritable: false },
+      { pubkey: poolVault, isSigner: false, isWritable: true },
+      { pubkey: recipientTokenAccount, isSigner: false, isWritable: true },
+      { pubkey: userPubkey, isSigner: true, isWritable: true },
+      { pubkey: TOKEN_2022_PROGRAM_ID, isSigner: false, isWritable: false },
       { pubkey: SystemProgram.programId, isSigner: false, isWritable: false },
     ],
     data: Buffer.from(instructionData),
