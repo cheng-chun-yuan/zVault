@@ -202,9 +202,10 @@ pub fn process_register_name(
     if reverse_account_len == 0 {
         let lamports = rent.minimum_balance(ReverseRegistry::SIZE);
         let reverse_bump_bytes = [reverse_bump];
+        // Use the same compressed seed that was used for PDA derivation
         let reverse_signer_seeds: &[&[u8]] = &[
             ReverseRegistry::SEED,
-            &ix_data.spending_pubkey,
+            &spending_key_seed,
             &reverse_bump_bytes,
         ];
 
