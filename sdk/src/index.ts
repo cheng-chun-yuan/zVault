@@ -475,6 +475,10 @@ export {
   lookupZkeyName,
   lookupZkeyNameWithPDA,
   parseNameRegistry,
+  // Reverse lookup (SNS pattern)
+  reverseLookupZkeyName,
+  deriveReverseRegistryPDA,
+  parseReverseRegistry,
   // Validation
   isValidName,
   normalizeName,
@@ -488,8 +492,11 @@ export {
   // Constants
   MAX_NAME_LENGTH,
   NAME_REGISTRY_SEED,
+  REVERSE_REGISTRY_SEED,
   NAME_REGISTRY_DISCRIMINATOR,
+  REVERSE_REGISTRY_DISCRIMINATOR,
   NAME_REGISTRY_SIZE,
+  REVERSE_REGISTRY_SIZE,
   // Types
   type NameRegistryEntry,
   type ZkeyStealthAddress,

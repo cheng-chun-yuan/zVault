@@ -11,7 +11,9 @@ const PROGRAM_ID = new PublicKey("DjnryiDxMsUY8pzYCgynVUGDgv45J9b3XbSDnp4qDYrq")
 
 // Constants
 const NAME_REGISTRY_SEED = "zkey";
+const REVERSE_REGISTRY_SEED = "reverse";
 const NAME_REGISTRY_DISCRIMINATOR = 0x09;
+const REVERSE_REGISTRY_DISCRIMINATOR = 0x0a;
 const REGISTER_NAME_DISCRIMINATOR = 17;
 
 interface NameRegistryEntry {
@@ -134,6 +136,14 @@ export function useZkeyName(): UseZkeyNameReturn {
     );
   }, []);
 
+  // Derive reverse registry PDA for a spending pubkey (SNS pattern)
+  const deriveReversePDA = useCallback((spendingPubKey: Uint8Array): [PublicKey, number] => {
+    return PublicKey.findProgramAddressSync(
+      [Buffer.from(REVERSE_REGISTRY_SEED), Buffer.from(spendingPubKey)],
+      PROGRAM_ID
+    );
+  }, []);
+
   // Look up a name on-chain
   const lookupName = useCallback(async (name: string): Promise<NameRegistryEntry | null> => {
     try {
@@ -173,7 +183,7 @@ export function useZkeyName(): UseZkeyNameReturn {
     }
   }, [lookupName]);
 
-  // Look up if current wallet has a registered name
+  // Look up if current wallet has a registered name using reverse lookup (SNS pattern)
   const lookupMyName = useCallback(async () => {
     if (!wallet.publicKey || !stealthAddress) return;
 
@@ -181,39 +191,21 @@ export function useZkeyName(): UseZkeyNameReturn {
     setError(null);
 
     try {
-      // First, check if we have a cached name from this session and verify it
-      const cachedName = typeof window !== "undefined" ? sessionStorage.getItem(`zkey_name_${wallet.publicKey.toBase58()}`) : null;
-      if (cachedName) {
-        const entry = await lookupName(cachedName);
-        if (entry) {
-          const entrySpendingHex = Buffer.from(entry.spendingPubKey).toString("hex");
-          const ourSpendingHex = Buffer.from(stealthAddress.spendingPubKey).toString("hex");
-          if (entrySpendingHex === ourSpendingHex) {
-            setRegisteredName(cachedName);
-            setHasRegisteredName(true);
-            return;
-          }
-        }
-        // Cached name invalid, clear it
-        sessionStorage.removeItem(`zkey_name_${wallet.publicKey.toBase58()}`);
-      }
+      // Use reverse lookup: spending_pubkey → name
+      const [reversePDA] = deriveReversePDA(stealthAddress.spendingPubKey);
+      const reverseAccount = await connection.getAccountInfo(reversePDA);
 
-      // Scan program accounts to check if user has any registered name
-      const accounts = await connection.getProgramAccounts(PROGRAM_ID, {
-        filters: [
-          { dataSize: 180 },
-          { memcmp: { offset: 34, bytes: wallet.publicKey.toBase58() } },
-        ],
-      });
-
-      for (const { account } of accounts) {
-        const entry = parseNameRegistry(new Uint8Array(account.data), "");
-        if (entry) {
-          const entrySpendingHex = Buffer.from(entry.spendingPubKey).toString("hex");
-          const ourSpendingHex = Buffer.from(stealthAddress.spendingPubKey).toString("hex");
-          if (entrySpendingHex === ourSpendingHex) {
-            // Found matching account but don't know the name (only hash stored)
-            // User will need to verify their name
+      if (reverseAccount && reverseAccount.data.length >= 100) {
+        const data = new Uint8Array(reverseAccount.data);
+        // Check discriminator
+        if (data[0] === REVERSE_REGISTRY_DISCRIMINATOR) {
+          // Parse name from reverse registry
+          // Layout: disc(1) + bump(1) + spending_pubkey(33) + name_len(1) + name(32)
+          const nameLen = data[35];
+          if (nameLen > 0 && nameLen <= 32) {
+            const nameBytes = data.slice(36, 36 + nameLen);
+            const name = new TextDecoder().decode(nameBytes);
+            setRegisteredName(name);
             setHasRegisteredName(true);
             return;
           }
@@ -228,7 +220,7 @@ export function useZkeyName(): UseZkeyNameReturn {
     } finally {
       setIsLoading(false);
     }
-  }, [wallet.publicKey, stealthAddress, connection, lookupName]);
+  }, [wallet.publicKey, stealthAddress, connection, deriveReversePDA]);
 
   // Verify ownership of a specific name
   const verifyMyName = useCallback(async (name: string): Promise<boolean> => {
@@ -247,10 +239,6 @@ export function useZkeyName(): UseZkeyNameReturn {
       if (entrySpendingHex === ourSpendingHex) {
         setRegisteredName(normalized);
         setHasRegisteredName(true);
-        // Cache verified name in sessionStorage
-        if (typeof window !== "undefined") {
-          sessionStorage.setItem(`zkey_name_${wallet.publicKey.toBase58()}`, normalized);
-        }
         return true;
       }
       return false;
@@ -292,10 +280,13 @@ export function useZkeyName(): UseZkeyNameReturn {
       );
 
       const [namePDA] = deriveNamePDA(normalized);
+      const [reversePDA] = deriveReversePDA(stealthAddress.spendingPubKey);
 
+      // Accounts: name_registry, reverse_registry, owner, system_program
       const instruction = new TransactionInstruction({
         keys: [
           { pubkey: namePDA, isSigner: false, isWritable: true },
+          { pubkey: reversePDA, isSigner: false, isWritable: true },
           { pubkey: wallet.publicKey, isSigner: true, isWritable: true },
           { pubkey: new PublicKey("11111111111111111111111111111111"), isSigner: false, isWritable: false },
         ],
@@ -325,10 +316,6 @@ export function useZkeyName(): UseZkeyNameReturn {
 
       setRegisteredName(normalized);
       setHasRegisteredName(true);
-      // Cache name in sessionStorage for page reload recovery
-      if (typeof window !== "undefined") {
-        sessionStorage.setItem(`zkey_name_${wallet.publicKey.toBase58()}`, normalized);
-      }
       console.log(`[zkey.sol] Registered: ${formatZkeyName(normalized)} (tx: ${txid})`);
       return true;
     } catch (err) {
@@ -339,7 +326,7 @@ export function useZkeyName(): UseZkeyNameReturn {
     } finally {
       setIsRegistering(false);
     }
-  }, [wallet, stealthAddress, connection, deriveNamePDA, lookupName]);
+  }, [wallet, stealthAddress, connection, deriveNamePDA, deriveReversePDA, lookupName]);
 
   // Check for existing name on mount
   useEffect(() => {

@@ -29,11 +29,20 @@ const NAME_REGEX = /^[a-z0-9_]{1,32}$/;
 /** PDA seed for name registry */
 export const NAME_REGISTRY_SEED = "zkey";
 
+/** PDA seed for reverse registry (SNS pattern) */
+export const REVERSE_REGISTRY_SEED = "reverse";
+
 /** Account discriminator */
 export const NAME_REGISTRY_DISCRIMINATOR = 0x09;
 
+/** Reverse registry discriminator */
+export const REVERSE_REGISTRY_DISCRIMINATOR = 0x0a;
+
 /** Account size in bytes */
 export const NAME_REGISTRY_SIZE = 180;
+
+/** Reverse registry size in bytes */
+export const REVERSE_REGISTRY_SIZE = 100;
 
 /** Default program ID (devnet) - re-exported from pda.ts as string */
 export const ZVAULT_PROGRAM_ID = PROGRAM_ID_ADDRESS as string;
@@ -368,6 +377,114 @@ export async function lookupZkeyNameWithPDA(
     console.error("Failed to lookup .zkey name:", err);
     return null;
   }
+}
+
+// ========== Reverse Lookup (SNS Pattern) ==========
+
+/**
+ * Parse a ReverseRegistry account data
+ *
+ * Layout (100 bytes):
+ * - discriminator (1 byte) = 0x0A
+ * - bump (1 byte)
+ * - spending_pubkey (33 bytes)
+ * - name_len (1 byte)
+ * - name (32 bytes, padded)
+ * - _reserved (32 bytes)
+ *
+ * @param data - Raw account data
+ * @returns The name string or null if invalid
+ */
+export function parseReverseRegistry(data: Uint8Array): string | null {
+  if (data.length < REVERSE_REGISTRY_SIZE) {
+    return null;
+  }
+
+  // Check discriminator
+  if (data[0] !== REVERSE_REGISTRY_DISCRIMINATOR) {
+    return null;
+  }
+
+  // Skip discriminator (1), bump (1), spending_pubkey (33)
+  const nameLen = data[35];
+  if (nameLen === 0 || nameLen > MAX_NAME_LENGTH) {
+    return null;
+  }
+
+  // Name starts at offset 36
+  const nameBytes = data.slice(36, 36 + nameLen);
+  return new TextDecoder().decode(nameBytes);
+}
+
+/**
+ * Reverse lookup: Get the .zkey.sol name for a spending public key
+ *
+ * This is the SNS-style reverse lookup that enables:
+ * spending_pubkey → name
+ *
+ * @param connection - Solana connection
+ * @param spendingPubKey - 33-byte compressed Grumpkin spending public key
+ * @param programId - The zVault program ID
+ * @returns The registered name or null if not found
+ */
+export async function reverseLookupZkeyName(
+  connection: {
+    getAccountInfo: (
+      pubkey: import("@solana/kit").Address
+    ) => Promise<{ data: Uint8Array } | null>;
+  },
+  spendingPubKey: Uint8Array,
+  programId: string = ZVAULT_PROGRAM_ID
+): Promise<string | null> {
+  if (spendingPubKey.length !== 33) {
+    return null;
+  }
+
+  try {
+    const { address, getProgramDerivedAddress } = await import("@solana/kit");
+
+    const [pda] = await getProgramDerivedAddress({
+      seeds: [
+        new TextEncoder().encode(REVERSE_REGISTRY_SEED),
+        spendingPubKey,
+      ],
+      programAddress: address(programId),
+    });
+
+    const accountInfo = await connection.getAccountInfo(pda);
+    if (!accountInfo) {
+      return null;
+    }
+
+    return parseReverseRegistry(new Uint8Array(accountInfo.data));
+  } catch (err) {
+    console.error("Failed to reverse lookup .zkey name:", err);
+    return null;
+  }
+}
+
+/**
+ * Derive the reverse registry PDA for a spending public key
+ *
+ * @param spendingPubKey - 33-byte compressed Grumpkin spending public key
+ * @param programId - The zVault program ID
+ * @returns The PDA address
+ */
+export async function deriveReverseRegistryPDA(
+  spendingPubKey: Uint8Array,
+  programId: string = ZVAULT_PROGRAM_ID
+): Promise<string> {
+  const { address, getProgramDerivedAddress } = await import("@solana/kit");
+
+  const [pda] = await getProgramDerivedAddress({
+    seeds: [
+      new TextEncoder().encode(REVERSE_REGISTRY_SEED),
+      spendingPubKey,
+    ],
+    programAddress: address(programId),
+  });
+
+  return pda;
 }
 
 // ========== Instruction Data Builders ==========

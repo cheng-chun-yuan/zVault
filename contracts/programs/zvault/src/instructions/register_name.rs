@@ -3,6 +3,10 @@
 //! Registers a human-readable .zkey name for a stealth address.
 //! Example: "albert.zkey" → (spendingPubKey, viewingPubKey)
 //!
+//! Also creates a reverse lookup account (SNS pattern) to enable:
+//! - Forward: hash(name) → NameRegistry → stealth address
+//! - Reverse: spending_pubkey → ReverseRegistry → name
+//!
 //! This is OPTIONAL - users who want maximum privacy should share
 //! their stealth meta-address off-chain instead.
 
@@ -16,7 +20,10 @@ use pinocchio::{
 
 use crate::utils::create_pda_account;
 
-use crate::state::{NameRegistry, NAME_REGISTRY_DISCRIMINATOR, validate_name};
+use crate::state::{
+    NameRegistry, NAME_REGISTRY_DISCRIMINATOR, validate_name,
+    ReverseRegistry, REVERSE_REGISTRY_DISCRIMINATOR,
+};
 
 /// Register name instruction data
 /// Layout:
@@ -102,24 +109,27 @@ impl UpdateNameData {
 /// Register a .zkey name
 ///
 /// Creates a PDA seeded by the name hash that stores the stealth address.
+/// Also creates a reverse lookup PDA seeded by spending_pubkey for name resolution.
 /// The registering wallet becomes the owner and can update the keys later.
 ///
 /// Accounts:
-/// 0. name_registry (PDA to create)
-/// 1. owner (signer, pays rent, becomes owner)
-/// 2. system_program
+/// 0. name_registry (PDA to create, seed: ["zkey", name_hash])
+/// 1. reverse_registry (PDA to create, seed: ["reverse", spending_pubkey])
+/// 2. owner (signer, pays rent, becomes owner)
+/// 3. system_program
 pub fn process_register_name(
     program_id: &Pubkey,
     accounts: &[AccountInfo],
     data: &[u8],
 ) -> ProgramResult {
-    if accounts.len() < 3 {
+    if accounts.len() < 4 {
         return Err(ProgramError::NotEnoughAccountKeys);
     }
 
     let name_registry = &accounts[0];
-    let owner = &accounts[1];
-    let _system_program = &accounts[2];
+    let reverse_registry = &accounts[1];
+    let owner = &accounts[2];
+    let _system_program = &accounts[3];
 
     let ix_data = RegisterNameData::from_bytes(data)?;
 
@@ -128,32 +138,50 @@ pub fn process_register_name(
         return Err(ProgramError::MissingRequiredSignature);
     }
 
-    // Verify PDA (seeded by name_hash)
-    let seeds: &[&[u8]] = &[NameRegistry::SEED, &ix_data.name_hash];
-    let (expected_pda, bump) = find_program_address(seeds, program_id);
-    if name_registry.key() != &expected_pda {
+    // Verify name registry PDA (seeded by name_hash)
+    let name_seeds: &[&[u8]] = &[NameRegistry::SEED, &ix_data.name_hash];
+    let (expected_name_pda, name_bump) = find_program_address(name_seeds, program_id);
+    if name_registry.key() != &expected_name_pda {
         return Err(ProgramError::InvalidSeeds);
     }
 
-    // Check if account already exists
-    let account_data_len = name_registry.data_len();
+    // Verify reverse registry PDA (seeded by spending_pubkey)
+    let reverse_seeds: &[&[u8]] = &[ReverseRegistry::SEED, &ix_data.spending_pubkey];
+    let (expected_reverse_pda, reverse_bump) = find_program_address(reverse_seeds, program_id);
+    if reverse_registry.key() != &expected_reverse_pda {
+        return Err(ProgramError::InvalidSeeds);
+    }
 
-    if account_data_len > 0 {
+    // Check if name already exists
+    let name_account_len = name_registry.data_len();
+    if name_account_len > 0 {
         let reg_data = name_registry.try_borrow_data()?;
         if reg_data[0] == NAME_REGISTRY_DISCRIMINATOR {
-            // Name already registered
             return Err(ProgramError::AccountAlreadyInitialized);
         }
-    } else {
-        // Create the PDA account
-        let rent = Rent::get()?;
-        let lamports = rent.minimum_balance(NameRegistry::SIZE);
+    }
 
-        let bump_bytes = [bump];
-        let signer_seeds: &[&[u8]] = &[
+    // Check if spending key already has a name (one name per key)
+    let reverse_account_len = reverse_registry.data_len();
+    if reverse_account_len > 0 {
+        let rev_data = reverse_registry.try_borrow_data()?;
+        if rev_data[0] == REVERSE_REGISTRY_DISCRIMINATOR {
+            // This spending key already has a registered name
+            return Err(ProgramError::AccountAlreadyInitialized);
+        }
+    }
+
+    let rent = Rent::get()?;
+    let clock = Clock::get()?;
+
+    // Create name registry account
+    if name_account_len == 0 {
+        let lamports = rent.minimum_balance(NameRegistry::SIZE);
+        let name_bump_bytes = [name_bump];
+        let name_signer_seeds: &[&[u8]] = &[
             NameRegistry::SEED,
             &ix_data.name_hash,
-            &bump_bytes,
+            &name_bump_bytes,
         ];
 
         create_pda_account(
@@ -162,24 +190,52 @@ pub fn process_register_name(
             program_id,
             lamports,
             NameRegistry::SIZE as u64,
-            signer_seeds,
+            name_signer_seeds,
         )?;
     }
 
-    let clock = Clock::get()?;
+    // Create reverse registry account
+    if reverse_account_len == 0 {
+        let lamports = rent.minimum_balance(ReverseRegistry::SIZE);
+        let reverse_bump_bytes = [reverse_bump];
+        let reverse_signer_seeds: &[&[u8]] = &[
+            ReverseRegistry::SEED,
+            &ix_data.spending_pubkey,
+            &reverse_bump_bytes,
+        ];
+
+        create_pda_account(
+            owner,
+            reverse_registry,
+            program_id,
+            lamports,
+            ReverseRegistry::SIZE as u64,
+            reverse_signer_seeds,
+        )?;
+    }
 
     // Initialize name registry
     {
         let mut reg_data = name_registry.try_borrow_mut_data()?;
         let registry = NameRegistry::init(&mut reg_data)?;
 
-        registry.bump = bump;
+        registry.bump = name_bump;
         registry.name_hash = ix_data.name_hash;
         registry.owner.copy_from_slice(owner.key().as_ref());
         registry.spending_pubkey = ix_data.spending_pubkey;
         registry.viewing_pubkey = ix_data.viewing_pubkey;
         registry.set_created_at(clock.unix_timestamp);
         registry.set_updated_at(clock.unix_timestamp);
+    }
+
+    // Initialize reverse registry (stores actual name for lookup)
+    {
+        let mut rev_data = reverse_registry.try_borrow_mut_data()?;
+        let reverse = ReverseRegistry::init(&mut rev_data)?;
+
+        reverse.bump = reverse_bump;
+        reverse.spending_pubkey = ix_data.spending_pubkey;
+        reverse.set_name(&ix_data.name)?;
     }
 
     Ok(())
