@@ -104,7 +104,7 @@ fn test_pool_deposit_unified_circuit() {
     // Compute root
     let mut current = input_commitment;
     for _i in 0..20 {
-        current = std::hash::poseidon::bn254::hash_2([current, zero]);
+        current = dep::poseidon::poseidon::bn254::hash_2([current, zero]);
     }
     let input_merkle_root = current;
 
@@ -151,7 +151,7 @@ fn test_pool_deposit_zero_pool_key() {
 
     let mut current = input_commitment;
     for _i in 0..20 {
-        current = std::hash::poseidon::bn254::hash_2([current, zero]);
+        current = dep::poseidon::poseidon::bn254::hash_2([current, zero]);
     }
     let input_merkle_root = current;
 
@@ -196,7 +196,7 @@ fn test_pool_deposit_zero_amount() {
 
     let mut current = input_commitment;
     for _i in 0..20 {
-        current = std::hash::poseidon::bn254::hash_2([current, zero]);
+        current = dep::poseidon::poseidon::bn254::hash_2([current, zero]);
     }
     let input_merkle_root = current;
 
@@ -241,7 +241,7 @@ fn test_pool_deposit_zero_priv_key() {
 
     let mut current = input_commitment;
     for _i in 0..20 {
-        current = std::hash::poseidon::bn254::hash_2([current, zero]);
+        current = dep::poseidon::poseidon::bn254::hash_2([current, zero]);
     }
     let input_merkle_root = current;
 

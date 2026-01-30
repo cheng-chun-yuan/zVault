@@ -152,7 +152,7 @@ fn test_pool_claim_yield_unified_circuit() {
 
     let mut current = old_pool_commitment;
     for _i in 0..20 {
-        current = std::hash::poseidon::bn254::hash_2([current, zero]);
+        current = dep::poseidon::poseidon::bn254::hash_2([current, zero]);
     }
     let pool_merkle_root = current;
 
@@ -220,7 +220,7 @@ fn test_pool_claim_yield_same_pool_key() {
 
     let mut current = old_pool_commitment;
     for _i in 0..20 {
-        current = std::hash::poseidon::bn254::hash_2([current, zero]);
+        current = dep::poseidon::poseidon::bn254::hash_2([current, zero]);
     }
     let pool_merkle_root = current;
 
@@ -285,7 +285,7 @@ fn test_pool_claim_yield_zero_priv_key() {
 
     let mut current = old_pool_commitment;
     for _i in 0..20 {
-        current = std::hash::poseidon::bn254::hash_2([current, zero]);
+        current = dep::poseidon::poseidon::bn254::hash_2([current, zero]);
     }
     let pool_merkle_root = current;
 
@@ -350,7 +350,7 @@ fn test_pool_claim_yield_zero_new_key() {
 
     let mut current = old_pool_commitment;
     for _i in 0..20 {
-        current = std::hash::poseidon::bn254::hash_2([current, zero]);
+        current = dep::poseidon::poseidon::bn254::hash_2([current, zero]);
     }
     let pool_merkle_root = current;
 
@@ -415,7 +415,7 @@ fn test_pool_claim_yield_zero_yield_key() {
 
     let mut current = old_pool_commitment;
     for _i in 0..20 {
-        current = std::hash::poseidon::bn254::hash_2([current, zero]);
+        current = dep::poseidon::poseidon::bn254::hash_2([current, zero]);
     }
     let pool_merkle_root = current;
 
