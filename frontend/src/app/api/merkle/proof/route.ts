@@ -1,7 +1,11 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getMerkleProof, getTreeStatus } from "@/lib/commitment-index";
+import { getMerkleProof, getTreeStatus, syncFromOnChain } from "@/lib/commitment-index";
 
 export const runtime = "nodejs";
+
+// Track last sync time to avoid syncing too frequently
+let lastSyncTime = 0;
+const SYNC_COOLDOWN_MS = 10000; // 10 seconds
 
 /**
  * GET /api/merkle/proof?commitment=xxx&root=xxx (optional)
@@ -45,7 +49,23 @@ export async function GET(request: NextRequest) {
       );
     }
 
-    const proof = getMerkleProof(commitmentBigInt);
+    let proof = getMerkleProof(commitmentBigInt);
+
+    // If not found locally, try syncing from on-chain
+    if (!proof) {
+      const now = Date.now();
+      if (now - lastSyncTime > SYNC_COOLDOWN_MS) {
+        console.log("[Merkle Proof API] Commitment not found, syncing from on-chain...");
+        try {
+          await syncFromOnChain();
+          lastSyncTime = now;
+          // Try again after sync
+          proof = getMerkleProof(commitmentBigInt);
+        } catch (syncError) {
+          console.error("[Merkle Proof API] Sync failed:", syncError);
+        }
+      }
+    }
 
     if (!proof) {
       return NextResponse.json(

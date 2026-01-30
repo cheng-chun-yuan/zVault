@@ -1,48 +1,45 @@
 import { NextRequest, NextResponse } from "next/server";
-import { checkSyncStatus, fetchOnChainTreeState } from "@/lib/commitment-index";
+import { checkSyncStatus, syncFromOnChain, getTreeStatus } from "@/lib/commitment-index";
 
 export const runtime = "nodejs";
 
 /**
  * POST /api/merkle/sync
  *
- * Trigger sync from on-chain commitment tree.
- * Currently just reports sync status - full sync requires
- * parsing on-chain commitment events.
- *
- * Future: Will parse deposit events to rebuild local index.
+ * Sync local commitment tree index from on-chain stealth announcements.
+ * Fetches all stealth announcements and rebuilds the local merkle tree.
  */
 export async function POST(request: NextRequest) {
   try {
-    // Fetch on-chain state
-    const onChainState = await fetchOnChainTreeState();
+    // Check if already synced
+    const beforeStatus = await checkSyncStatus();
 
-    // Check sync status
-    const syncStatus = await checkSyncStatus();
-
-    if (syncStatus.synced) {
+    if (beforeStatus.synced) {
       return NextResponse.json({
         success: true,
         message: "Already synced",
-        localRoot: syncStatus.localRoot,
-        onChainRoot: syncStatus.onChainRoot,
-        localSize: syncStatus.localSize,
-        onChainNextIndex: syncStatus.onChainNextIndex.toString(),
+        localRoot: beforeStatus.localRoot,
+        onChainRoot: beforeStatus.onChainRoot,
+        localSize: beforeStatus.localSize,
+        onChainNextIndex: beforeStatus.onChainNextIndex.toString(),
         synced: true,
       });
     }
 
-    // TODO: Implement full sync by parsing on-chain deposit events
-    // For now, just report the mismatch
+    // Perform sync from on-chain stealth announcements
+    console.log("[Merkle Sync API] Starting sync from on-chain...");
+    const syncResult = await syncFromOnChain();
+
+    // Check status after sync
+    const afterStatus = getTreeStatus();
+
     return NextResponse.json({
       success: true,
-      message: "Sync check complete - manual commitment addition required",
-      localRoot: syncStatus.localRoot,
-      onChainRoot: syncStatus.onChainRoot,
-      localSize: syncStatus.localSize,
-      onChainNextIndex: syncStatus.onChainNextIndex.toString(),
-      synced: false,
-      hint: "Add missing commitments via POST /api/merkle/commitment",
+      message: `Synced ${syncResult.synced} commitments from on-chain`,
+      synced: syncResult.synced,
+      skipped: syncResult.skipped,
+      localRoot: afterStatus.root,
+      localSize: afterStatus.size,
     });
   } catch (error) {
     console.error("[Merkle Sync API] Error:", error);

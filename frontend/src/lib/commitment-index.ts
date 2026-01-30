@@ -11,12 +11,17 @@ import {
   CommitmentTreeIndex,
   DEVNET_CONFIG,
   parseCommitmentTreeData,
+  parseStealthAnnouncement,
+  STEALTH_ANNOUNCEMENT_SIZE,
   COMMITMENT_TREE_DISCRIMINATOR,
   ROOT_HISTORY_SIZE,
 } from "@zvault/sdk";
 import { readFileSync, writeFileSync, existsSync, mkdirSync } from "fs";
 import { PublicKey } from "@solana/web3.js";
 import { getHeliusConnection } from "./helius-server";
+
+// zVault Program ID from SDK
+const ZVAULT_PROGRAM_ID = new PublicKey(DEVNET_CONFIG.zvaultProgramId);
 
 // Storage path for the commitment index
 const DATA_DIR = process.cwd() + "/data";
@@ -166,4 +171,84 @@ export async function checkSyncStatus(): Promise<{
     onChainNextIndex: onChain.nextIndex,
     synced: local.root === onChain.currentRoot,
   };
+}
+
+/**
+ * Sync local index from on-chain stealth announcements
+ *
+ * Fetches all stealth announcement accounts and rebuilds the local index.
+ * This ensures the local index matches on-chain state.
+ */
+export async function syncFromOnChain(): Promise<{
+  synced: number;
+  skipped: number;
+  root: string;
+}> {
+  const connection = getHeliusConnection("devnet");
+
+  console.log("[CommitmentIndex] Fetching stealth announcements from chain...");
+
+  // Fetch all stealth announcement accounts
+  const accounts = await connection.getProgramAccounts(ZVAULT_PROGRAM_ID, {
+    filters: [{ dataSize: STEALTH_ANNOUNCEMENT_SIZE }],
+  });
+
+  console.log(`[CommitmentIndex] Found ${accounts.length} stealth announcements`);
+
+  // Parse announcements and collect commitments with leaf indices
+  const commitments: Array<{ commitment: bigint; leafIndex: number; amount: bigint }> = [];
+
+  for (const account of accounts) {
+    try {
+      const parsed = parseStealthAnnouncement(new Uint8Array(account.account.data));
+      if (parsed) {
+        const commitmentBigInt = BigInt(
+          "0x" +
+            Array.from(parsed.commitment)
+              .map((b) => b.toString(16).padStart(2, "0"))
+              .join("")
+        );
+        commitments.push({
+          commitment: commitmentBigInt,
+          leafIndex: parsed.leafIndex,
+          amount: 0n, // Amount is encrypted, we don't need it for merkle proofs
+        });
+      }
+    } catch (e) {
+      console.warn("[CommitmentIndex] Failed to parse announcement:", e);
+    }
+  }
+
+  // Sort by leaf index to ensure correct order
+  commitments.sort((a, b) => a.leafIndex - b.leafIndex);
+
+  console.log(`[CommitmentIndex] Parsed ${commitments.length} valid commitments`);
+
+  // Reset and rebuild index
+  serverIndex = new CommitmentTreeIndex();
+  let synced = 0;
+  let skipped = 0;
+
+  for (const { commitment, leafIndex, amount } of commitments) {
+    try {
+      const addedIndex = serverIndex.addCommitment(commitment, amount);
+      if (Number(addedIndex) === leafIndex) {
+        synced++;
+      } else {
+        console.warn(`[CommitmentIndex] Leaf index mismatch: expected ${leafIndex}, got ${addedIndex}`);
+        skipped++;
+      }
+    } catch (e) {
+      console.warn("[CommitmentIndex] Failed to add commitment:", e);
+      skipped++;
+    }
+  }
+
+  // Save to disk
+  saveServerCommitmentIndex();
+
+  const root = serverIndex.getRoot().toString(16).padStart(64, "0");
+  console.log(`[CommitmentIndex] Synced ${synced} commitments, root: ${root.slice(0, 16)}...`);
+
+  return { synced, skipped, root };
 }
