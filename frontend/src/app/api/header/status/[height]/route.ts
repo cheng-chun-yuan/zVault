@@ -1,12 +1,11 @@
 import { NextRequest, NextResponse } from "next/server";
 import { Connection, PublicKey } from "@solana/web3.js";
+import { DEVNET_CONFIG } from "@zvault/sdk";
 
 export const runtime = "nodejs";
 
-// zVault Program ID (Devnet)
-const PROGRAM_ID = new PublicKey(
-  process.env.NEXT_PUBLIC_PROGRAM_ID || "DjnryiDxMsUY8pzYCgynVUGDgv45J9b3XbSDnp4qDYrq"
-);
+// zVault Program ID from SDK (single source of truth)
+const PROGRAM_ID = new PublicKey(DEVNET_CONFIG.zvaultProgramId);
 
 // Derive block header PDA
 function deriveBlockHeaderPDA(blockHeight: number): [PublicKey, number] {

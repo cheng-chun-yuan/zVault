@@ -1,11 +1,12 @@
 import { NextRequest, NextResponse } from "next/server";
 import { PublicKey } from "@solana/web3.js";
 import { getHeliusConnection, isHeliusConfigured } from "@/lib/helius-server";
+import { DEVNET_CONFIG } from "@zvault/sdk";
 
 export const runtime = "nodejs";
 
-// Commitment tree PDA from constants
-const COMMITMENT_TREE_ADDRESS = process.env.NEXT_PUBLIC_COMMITMENT_TREE || "J4jWzZRyv8CLyDqSJJ1diN5vXc9Ry2i6Y6WL3zgjUEci";
+// Commitment tree PDA from SDK (single source of truth)
+const COMMITMENT_TREE_ADDRESS = DEVNET_CONFIG.commitmentTreePda;
 
 // Discriminator for CommitmentTree account
 const COMMITMENT_TREE_DISCRIMINATOR = 0x05;

@@ -35,10 +35,10 @@ function getRelayerKeypair(): Keypair | null {
   }
 }
 
-// zVault Program ID (Devnet)
-const PROGRAM_ID = new PublicKey(
-  process.env.NEXT_PUBLIC_PROGRAM_ID || "DjnryiDxMsUY8pzYCgynVUGDgv45J9b3XbSDnp4qDYrq"
-);
+import { DEVNET_CONFIG } from "@zvault/sdk";
+
+// zVault Program ID from SDK (single source of truth)
+const PROGRAM_ID = new PublicKey(DEVNET_CONFIG.zvaultProgramId);
 
 // Derive light client PDA (v2 for correct byte order)
 function deriveLightClientPDA(): [PublicKey, number] {

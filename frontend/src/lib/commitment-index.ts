@@ -7,7 +7,7 @@
  * This module is server-only (runs in Next.js API routes).
  */
 
-import { CommitmentTreeIndex } from "@zvault/sdk";
+import { CommitmentTreeIndex, DEVNET_CONFIG } from "@zvault/sdk";
 import { readFileSync, writeFileSync, existsSync, mkdirSync } from "fs";
 import { dirname } from "path";
 import { PublicKey } from "@solana/web3.js";
@@ -17,10 +17,8 @@ import { getHeliusConnection } from "./helius-server";
 const DATA_DIR = process.cwd() + "/data";
 const INDEX_FILE = DATA_DIR + "/commitment-index.json";
 
-// Commitment tree PDA
-const COMMITMENT_TREE_ADDRESS =
-  process.env.NEXT_PUBLIC_COMMITMENT_TREE ||
-  "J4jWzZRyv8CLyDqSJJ1diN5vXc9Ry2i6Y6WL3zgjUEci";
+// Commitment tree PDA - from SDK config (single source of truth)
+const COMMITMENT_TREE_ADDRESS = DEVNET_CONFIG.commitmentTreePda;
 
 // Discriminator for CommitmentTree account
 const COMMITMENT_TREE_DISCRIMINATOR = 0x05;

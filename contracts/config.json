@@ -1,8 +1,8 @@
 {
   "programs": {
     "devnet": {
-      "zVault": "DjnryiDxMsUY8pzYCgynVUGDgv45J9b3XbSDnp4qDYrq",
-      "btc_light_client": "AvXLG43quQpc9aaE1fUxXdd1UFVBCMBkX9vFgjZSShrn"
+      "zVault": "AorrjgAcJFHzAXcCTejhJT9p93HHMqYLLqZ4NKKE8nsv",
+      "btc_light_client": "S6rgPjCeBhkYBejWyDR1zzU3sYCMob36LAf8tjwj8pn"
     },
     "localnet": {
       "zVault": "3mr1UrVKftimqB5rBEmKiGFBMAo9VUZuJLRDMdac42JV",

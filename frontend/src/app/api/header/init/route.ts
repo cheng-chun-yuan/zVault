@@ -27,10 +27,10 @@ function getRelayerKeypair(): Keypair | null {
   }
 }
 
-// zVault Program ID (Devnet)
-const PROGRAM_ID = new PublicKey(
-  process.env.NEXT_PUBLIC_PROGRAM_ID || "DjnryiDxMsUY8pzYCgynVUGDgv45J9b3XbSDnp4qDYrq"
-);
+import { DEVNET_CONFIG } from "@zvault/sdk";
+
+// zVault Program ID from SDK (single source of truth)
+const PROGRAM_ID = new PublicKey(DEVNET_CONFIG.zvaultProgramId);
 
 // Bitcoin testnet genesis block hash (in internal byte order / little-endian)
 // Block 0 display: 000000000933ea01ad0ee984209779baaec3ced90fa3f408719526f8d77f4943

@@ -111,28 +111,27 @@ export const CHADBUFFER_PROGRAM_ID: Address = address(
 // =============================================================================
 
 /**
- * Devnet Configuration (v1.0.2)
+ * Devnet Configuration (v1.0.4)
  *
- * Current deployment as of 2025-01-29:
- * - Contract rebuilt with `devnet` feature
- * - Mint authority transferred to pool PDA
- * - Demo stealth deposit working
+ * Current deployment as of 2025-01-30:
+ * - Fresh clean deployment for demo
+ * - New program IDs and accounts
  */
 export const DEVNET_CONFIG: NetworkConfig = {
   network: "devnet",
 
   // Program IDs
-  zvaultProgramId: address("DjnryiDxMsUY8pzYCgynVUGDgv45J9b3XbSDnp4qDYrq"),
-  btcLightClientProgramId: address("AvXLG43quQpc9aaE1fUxXdd1UFVBCMBkX9vFgjZSShrn"),
+  zvaultProgramId: address("AorrjgAcJFHzAXcCTejhJT9p93HHMqYLLqZ4NKKE8nsv"),
+  btcLightClientProgramId: address("S6rgPjCeBhkYBejWyDR1zzU3sYCMob36LAf8tjwj8pn"),
   chadbufferProgramId: CHADBUFFER_PROGRAM_ID,
   token2022ProgramId: TOKEN_2022_PROGRAM_ID,
   ataProgramId: ATA_PROGRAM_ID,
 
   // Deployed Accounts
-  poolStatePda: address("ASgByRooB2piAA7qAeERvPCFS1sqjzShdx1hXGg35TUq"),
-  commitmentTreePda: address("2M5F53Z9Pd7sYFiWaDKfpwYvPan1g44bV7D2sAeaVtHP"),
-  zbtcMint: address("BdUFQhqKpzYVHVg8cQoh7JdpSoHFtwKM4A48AFAjKFAK"),
-  poolVault: address("HNe2SvmQzHPHzRcLwfp1vQVwJq9ELeMZ3dJSbKyMkNdD"),
+  poolStatePda: address("6w44R8FZhX4F7akWL6UXZr13K2Q9pGmyDiAoTXfxgR7i"),
+  commitmentTreePda: address("43b5j5HEwHkDP35CX78KwszKX2rFdkQQfTA1JG6bzyS4"),
+  zbtcMint: address("2LmCSgq5jTtfnHe5YF6Sii6Pyc33xrPLJAYjtHhsCDPi"),
+  poolVault: address("DKpjj5ygnJwGZfXMWrZaPf3ZdxtxSgvHg2Kk8HhGhdXV"),
 
   // RPC Endpoints
   solanaRpcUrl: "https://api.devnet.solana.com",
@@ -285,12 +284,12 @@ export const BTC_LIGHT_CLIENT_PROGRAM_ID: Address = DEVNET_CONFIG.btcLightClient
 // Version Info
 // =============================================================================
 
-export const SDK_VERSION = "1.0.3";
+export const SDK_VERSION = "1.4.0";
 
 export const DEPLOYMENT_INFO = {
   version: SDK_VERSION,
-  deployedAt: "2025-01-29",
+  deployedAt: "2025-01-30",
   network: "devnet" as NetworkType,
-  features: ["demo-stealth", "name-registry", "stealth-addresses"],
-  notes: "Contract rebuilt with devnet feature, mint authority transferred to pool PDA",
+  features: ["demo-stealth", "name-registry", "stealth-addresses", "reverse-lookup"],
+  notes: "Clean fresh deployment for demo",
 };

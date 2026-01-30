@@ -1,11 +1,12 @@
 import { NextRequest, NextResponse } from "next/server";
 import { PublicKey } from "@solana/web3.js";
 import { getHeliusConnection, isHeliusConfigured } from "@/lib/helius-server";
+import { DEVNET_CONFIG } from "@zvault/sdk";
 
 export const runtime = "nodejs";
 
-// Pool state PDA from constants
-const POOL_STATE_ADDRESS = process.env.NEXT_PUBLIC_POOL_STATE || "BWFTGsxcQrVyvvHJx6wwkRvLtgM1J3BimuaxMf2NjSE3";
+// Pool state PDA from SDK (single source of truth)
+const POOL_STATE_ADDRESS = DEVNET_CONFIG.poolStatePda;
 
 // Discriminator for PoolState account
 const POOL_STATE_DISCRIMINATOR = 0x01;

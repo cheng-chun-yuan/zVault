@@ -14,25 +14,24 @@ import {
   Transaction,
   SystemProgram,
 } from "@solana/web3.js";
-import { ZVAULT_PROGRAM_ID as SDK_PROGRAM_ID } from "@zvault/sdk";
+import { DEVNET_CONFIG } from "@zvault/sdk";
 import { getPriorityFeeInstructions } from "@/lib/helius";
 
 // =============================================================================
-// Constants
+// Constants - ALL from SDK (single source of truth)
 // =============================================================================
 
-/** zVault Program ID (from SDK - single source of truth) */
-export const ZVAULT_PROGRAM_ID = new PublicKey(SDK_PROGRAM_ID);
+/** zVault Program ID (from SDK) */
+export const ZVAULT_PROGRAM_ID = new PublicKey(DEVNET_CONFIG.zvaultProgramId);
 
-/** BTC Light Client Program ID */
-export const BTC_LIGHT_CLIENT_PROGRAM_ID = new PublicKey(
-  process.env.NEXT_PUBLIC_BTC_LIGHT_CLIENT || "95vWurTc9BhjBvEbBdUKoTZHMPPyB1iQZEuXEaR7wPpd"
-);
+/** BTC Light Client Program ID (from SDK) */
+export const BTC_LIGHT_CLIENT_PROGRAM_ID = new PublicKey(DEVNET_CONFIG.btcLightClientProgramId);
 
-/** Token-2022 Program ID */
-export const TOKEN_2022_PROGRAM_ID = new PublicKey(
-  "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb"
-);
+/** Token-2022 Program ID (from SDK) */
+export const TOKEN_2022_PROGRAM_ID = new PublicKey(DEVNET_CONFIG.token2022ProgramId);
+
+/** zBTC Mint Address (from SDK) */
+export const ZBTC_MINT_ADDRESS = new PublicKey(DEVNET_CONFIG.zbtcMint);
 
 /** Instruction discriminators */
 export const INSTRUCTION_DISCRIMINATORS = {
@@ -120,21 +119,21 @@ export function deriveBlockHeaderPDA(
 }
 
 /**
- * Derive zBTC Mint PDA
- * Uses NEXT_PUBLIC_ZBTC_MINT env var if set, otherwise derives from program
+ * Get zBTC Mint address from SDK config
+ */
+export function getzBTCMintAddress(): PublicKey {
+  return ZBTC_MINT_ADDRESS;
+}
+
+/**
+ * Derive zBTC Mint PDA (for compatibility - returns SDK address)
+ * @deprecated Use getzBTCMintAddress() instead
  */
 export function derivezBTCMintPDA(
-  programId: PublicKey = ZVAULT_PROGRAM_ID
+  _programId: PublicKey = ZVAULT_PROGRAM_ID
 ): [PublicKey, number] {
-  // Use env variable if available (for deployed contracts with non-PDA mints)
-  if (process.env.NEXT_PUBLIC_ZBTC_MINT) {
-    return [new PublicKey(process.env.NEXT_PUBLIC_ZBTC_MINT), 0];
-  }
-  // Fallback to PDA derivation
-  return PublicKey.findProgramAddressSync(
-    [Buffer.from("zkbtc_mint")],
-    programId
-  );
+  // Always return SDK config address (not a PDA derivation anymore)
+  return [ZBTC_MINT_ADDRESS, 0];
 }
 
 // =============================================================================

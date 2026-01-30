@@ -203,9 +203,11 @@ function deriveCommitmentTreePda(): [PublicKey, number] {
   return PublicKey.findProgramAddressSync([Seeds.COMMITMENT_TREE], PROGRAM_ID);
 }
 
-function deriveStealthAnnouncementPda(ephemeralViewPub: Uint8Array): [PublicKey, number] {
+function deriveStealthAnnouncementPda(ephemeralPub: Uint8Array): [PublicKey, number] {
+  // Contract uses bytes 1-32 of ephemeral_pub (skip prefix byte for 32-byte seed limit)
+  const seed = ephemeralPub.length === 33 ? ephemeralPub.slice(1, 33) : ephemeralPub;
   return PublicKey.findProgramAddressSync(
-    [Seeds.STEALTH, ephemeralViewPub],
+    [Seeds.STEALTH, seed],
     PROGRAM_ID
   );
 }
@@ -282,31 +284,45 @@ function buildAddDemoNoteInstruction(
 
 /**
  * Build ADD_DEMO_STEALTH instruction
- * Adds commitment to tree + creates stealth announcement
+ * Adds commitment to tree + creates stealth announcement + mints zBTC
+ *
+ * Contract expects 8 accounts:
+ * 0. pool_state - Pool state PDA (writable)
+ * 1. commitment_tree - Commitment tree PDA (writable)
+ * 2. stealth_announcement - Stealth announcement PDA (to create, writable)
+ * 3. authority - Pool authority (signer, pays for announcement)
+ * 4. system_program - System program
+ * 5. zbtc_mint - zBTC Token-2022 mint (writable)
+ * 6. pool_vault - Pool vault token account (writable)
+ * 7. token_program - Token-2022 program
+ *
+ * Data format (74 bytes):
+ * - discriminator (1)
+ * - ephemeral_pub (33) - Grumpkin compressed
+ * - commitment (32)
+ * - encrypted_amount (8) - XOR encrypted
  */
 function buildAddDemoStealthInstruction(
   poolState: PublicKey,
   commitmentTree: PublicKey,
   stealthAnnouncement: PublicKey,
   authority: PublicKey,
-  ephemeralViewPub: Uint8Array,
-  ephemeralSpendPub: Uint8Array,
+  zbtcMint: PublicKey,
+  poolVault: PublicKey,
+  ephemeralPub: Uint8Array,  // 33-byte Grumpkin compressed
   commitment: Uint8Array,
-  amount: bigint,
+  encryptedAmount: Uint8Array,  // 8 bytes XOR encrypted
 ): TransactionInstruction {
-  // Data: discriminator (1) + ephemeral_view_pub (32) + ephemeral_spend_pub (33)
-  //       + commitment (32) + amount (8) = 106 bytes
-  const data = Buffer.alloc(106);
+  // Data: discriminator (1) + ephemeral_pub (33) + commitment (32) + encrypted_amount (8) = 74 bytes
+  const data = Buffer.alloc(74);
   let offset = 0;
 
   data[offset++] = Instruction.ADD_DEMO_STEALTH;
-  data.set(ephemeralViewPub, offset);
-  offset += 32;
-  data.set(ephemeralSpendPub, offset);
+  data.set(ephemeralPub, offset);
   offset += 33;
   data.set(commitment, offset);
   offset += 32;
-  data.writeBigUInt64LE(amount, offset);
+  data.set(encryptedAmount, offset);
 
   return new TransactionInstruction({
     keys: [
@@ -315,6 +331,9 @@ function buildAddDemoStealthInstruction(
       { pubkey: stealthAnnouncement, isSigner: false, isWritable: true },
       { pubkey: authority, isSigner: true, isWritable: true },
       { pubkey: SystemProgram.programId, isSigner: false, isWritable: false },
+      { pubkey: zbtcMint, isSigner: false, isWritable: true },
+      { pubkey: poolVault, isSigner: false, isWritable: true },
+      { pubkey: TOKEN_2022_PROGRAM_ID, isSigner: false, isWritable: false },
     ],
     programId: PROGRAM_ID,
     data,
@@ -383,38 +402,46 @@ function generateDemoNote(): DemoNote {
 }
 
 interface StealthDeposit {
-  ephemeralViewPub: Uint8Array;
-  ephemeralSpendPub: Uint8Array;
-  commitment: Uint8Array;
+  ephemeralPub: Uint8Array;      // 33-byte Grumpkin compressed
+  commitment: Uint8Array;        // 32-byte
+  encryptedAmount: Uint8Array;   // 8-byte XOR encrypted
   amount: bigint;
   // For recipient
   sharedSecret: Uint8Array;
 }
 
 /**
- * Generate a stealth deposit for a recipient
+ * Generate a stealth deposit for a recipient (single ephemeral key, EIP-5564 pattern)
  */
 function generateStealthDeposit(
   recipientMeta: StealthMetaAddress,
   amount: bigint,
 ): StealthDeposit {
-  // Generate ephemeral keypairs
-  const ephemeralView = generateX25519Keypair();
-  const ephemeralSpend = generateGrumpkinKeypair();
+  // Generate single ephemeral Grumpkin keypair
+  const ephemeral = generateGrumpkinKeypair();
 
   // Compute shared secret (simplified - in production use proper ECDH)
   const sharedSecret = sha256(
-    Buffer.concat([ephemeralView.privateKey, recipientMeta.viewingPubKey])
+    Buffer.concat([ephemeral.privateKey, recipientMeta.viewingPubKey])
   );
 
   // Derive note public key and commitment (simplified)
   const notePubKey = sha256(Buffer.concat([sharedSecret, Buffer.from("note")]));
   const commitment = sha256(Buffer.concat([notePubKey, Buffer.from(amount.toString())]));
 
+  // Encrypt amount with XOR (first 8 bytes of sha256(sharedSecret || "amount"))
+  const amountKey = sha256(Buffer.concat([sharedSecret, Buffer.from("amount")])).slice(0, 8);
+  const amountBytes = Buffer.alloc(8);
+  amountBytes.writeBigUInt64LE(amount);
+  const encryptedAmount = new Uint8Array(8);
+  for (let i = 0; i < 8; i++) {
+    encryptedAmount[i] = amountBytes[i] ^ amountKey[i];
+  }
+
   return {
-    ephemeralViewPub: ephemeralView.publicKey,
-    ephemeralSpendPub: ephemeralSpend.publicKey,
+    ephemeralPub: ephemeral.publicKey,  // 33 bytes compressed
     commitment,
+    encryptedAmount,
     amount,
     sharedSecret,
   };
@@ -449,8 +476,9 @@ async function main() {
       console.log("Failed to parse RELAYER_KEYPAIR, using generated keypair");
     }
   } else {
-    // Fallback to default keypair
-    const keypairPath = process.env.HOME + "/.config/solana/id.json";
+    // Use wallet from config.json (same as deploy script)
+    const walletPath = config.wallet?.path || "~/.config/solana/id.json";
+    const keypairPath = walletPath.replace("~", process.env.HOME || "");
     try {
       const keypairData = JSON.parse(fs.readFileSync(keypairPath, "utf8"));
       authority = Keypair.fromSecretKey(new Uint8Array(keypairData));
@@ -591,26 +619,10 @@ async function main() {
   console.log("  Secret:", Buffer.from(note2.secret).toString("hex").slice(0, 20) + "...");
   console.log("  Commitment:", Buffer.from(note2.commitment).toString("hex").slice(0, 20) + "...");
 
-  if (poolAccount) {
-    try {
-      const noteIx = buildAddDemoNoteInstruction(
-        poolStatePda,
-        commitmentTreePda,
-        authority.publicKey,
-        note1.secret,
-      );
-
-      const tx = new Transaction().add(noteIx);
-      const sig = await sendAndConfirmTransaction(connection, tx, [authority]);
-      console.log("\n✓ Demo note added:", sig.slice(0, 20) + "...");
-
-      // Create claim link
-      const claimLink = `secret=${Buffer.from(note1.secret).toString("hex")}&amount=${note1.amount}`;
-      console.log("Claim link data:", claimLink.slice(0, 50) + "...");
-    } catch (e: any) {
-      console.log("Failed to add demo note:", e.message?.slice(0, 80));
-    }
-  }
+  // Note: ADD_DEMO_NOTE instruction was removed in favor of unified stealth model
+  // Use ADD_DEMO_STEALTH in TEST 4 instead
+  console.log("\nNote: Use ADD_DEMO_STEALTH (TEST 4) to create claimable deposits");
+  console.log("Claim link data for Note 1:", `secret=${Buffer.from(note1.secret).toString("hex").slice(0, 40)}...`);
 
   // ============================================================================
   // TEST 4: ADD_DEMO_STEALTH - Create Stealth Deposits
@@ -619,29 +631,46 @@ async function main() {
   console.log("TEST 4: ADD_DEMO_STEALTH - Create Stealth Deposits");
   console.log("-".repeat(60));
 
+  // Load devnet config for mint and vault addresses
+  const devnetConfigPath = path.join(__dirname, "..", ".devnet-config.json");
+  let zbtcMint: PublicKey | null = null;
+  let poolVault: PublicKey | null = null;
+
+  try {
+    const devnetConfig = JSON.parse(fs.readFileSync(devnetConfigPath, "utf-8"));
+    zbtcMint = new PublicKey(devnetConfig.accounts.zkbtcMint);
+    poolVault = new PublicKey(devnetConfig.accounts.poolVault);
+    console.log("\nLoaded devnet config:");
+    console.log("  zBTC Mint:", zbtcMint.toString());
+    console.log("  Pool Vault:", poolVault.toString());
+  } catch (e) {
+    console.log("Warning: Could not load .devnet-config.json");
+  }
+
   // Create stealth deposit for Alice
   const stealthDeposit = generateStealthDeposit(alice, 50_000n);
 
   console.log("\nStealth deposit for Alice:");
   console.log("  Amount:", stealthDeposit.amount.toString(), "sats");
-  console.log("  Ephemeral view pub:", Buffer.from(stealthDeposit.ephemeralViewPub).toString("hex").slice(0, 20) + "...");
-  console.log("  Ephemeral spend pub:", Buffer.from(stealthDeposit.ephemeralSpendPub).toString("hex").slice(0, 20) + "...");
+  console.log("  Ephemeral pub:", Buffer.from(stealthDeposit.ephemeralPub).toString("hex").slice(0, 20) + "...");
   console.log("  Commitment:", Buffer.from(stealthDeposit.commitment).toString("hex").slice(0, 20) + "...");
+  console.log("  Encrypted amount:", Buffer.from(stealthDeposit.encryptedAmount).toString("hex"));
 
-  const [stealthAnnouncementPda] = deriveStealthAnnouncementPda(stealthDeposit.ephemeralViewPub);
+  const [stealthAnnouncementPda] = deriveStealthAnnouncementPda(stealthDeposit.ephemeralPub);
   console.log("  Announcement PDA:", stealthAnnouncementPda.toString());
 
-  if (poolAccount) {
+  if (poolAccount && zbtcMint && poolVault) {
     try {
       const stealthIx = buildAddDemoStealthInstruction(
         poolStatePda,
         commitmentTreePda,
         stealthAnnouncementPda,
         authority.publicKey,
-        stealthDeposit.ephemeralViewPub,
-        stealthDeposit.ephemeralSpendPub,
+        zbtcMint,
+        poolVault,
+        stealthDeposit.ephemeralPub,
         stealthDeposit.commitment,
-        stealthDeposit.amount,
+        stealthDeposit.encryptedAmount,
       );
 
       const tx = new Transaction().add(stealthIx);
@@ -650,6 +679,8 @@ async function main() {
     } catch (e: any) {
       console.log("Failed to add stealth deposit:", e.message?.slice(0, 80));
     }
+  } else {
+    console.log("Skipping on-chain test - missing devnet config or pool not initialized");
   }
 
   // ============================================================================
@@ -662,9 +693,9 @@ async function main() {
   console.log("\nSimulating scanning for Alice's deposits...");
   console.log("(In production, scan all stealth announcements and try ECDH)");
 
-  // Simulate ECDH check
+  // Simulate ECDH check (using ephemeral pub from deposit)
   const checkSharedSecret = sha256(
-    Buffer.concat([alice.viewingPrivKey, stealthDeposit.ephemeralViewPub])
+    Buffer.concat([alice.viewingPrivKey, stealthDeposit.ephemeralPub])
   );
 
   // In a real implementation, compare derived values
