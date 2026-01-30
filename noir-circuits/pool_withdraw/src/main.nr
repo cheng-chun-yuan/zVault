@@ -125,7 +125,7 @@ fn test_pool_withdraw_unified_circuit() {
 
     let mut current = pool_commitment;
     for _i in 0..20 {
-        current = std::hash::poseidon::bn254::hash_2([current, zero]);
+        current = dep::poseidon::poseidon::bn254::hash_2([current, zero]);
     }
     let pool_merkle_root = current;
 
@@ -197,7 +197,7 @@ fn test_pool_withdraw_wrong_amount() {
 
     let mut current = pool_commitment;
     for _i in 0..20 {
-        current = std::hash::poseidon::bn254::hash_2([current, zero]);
+        current = dep::poseidon::poseidon::bn254::hash_2([current, zero]);
     }
     let pool_merkle_root = current;
 
@@ -254,7 +254,7 @@ fn test_pool_withdraw_zero_priv_key() {
 
     let mut current = pool_commitment;
     for _i in 0..20 {
-        current = std::hash::poseidon::bn254::hash_2([current, zero]);
+        current = dep::poseidon::poseidon::bn254::hash_2([current, zero]);
     }
     let pool_merkle_root = current;
 
@@ -311,7 +311,7 @@ fn test_pool_withdraw_zero_output_key() {
 
     let mut current = pool_commitment;
     for _i in 0..20 {
-        current = std::hash::poseidon::bn254::hash_2([current, zero]);
+        current = dep::poseidon::poseidon::bn254::hash_2([current, zero]);
     }
     let pool_merkle_root = current;
 

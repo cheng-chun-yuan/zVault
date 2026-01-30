@@ -4,7 +4,7 @@
 // Use noir_js to execute this and get the computed values.
 
 use dep::zvault_utils;
-use std::hash::poseidon::bn254::hash_2;
+use dep::poseidon::poseidon::bn254::hash_2;
 
 // Compute Merkle root from leaf with zero siblings (all-left path)
 fn compute_merkle_root(leaf: Field) -> Field {

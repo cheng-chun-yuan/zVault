@@ -16,9 +16,9 @@ use std::embedded_curve_ops::{
     embedded_curve_add,
     multi_scalar_mul,
 };
-use std::hash::poseidon::bn254::hash_1;
-use std::hash::poseidon::bn254::hash_2;
-use std::hash::poseidon::bn254::hash_3;
+use dep::poseidon::poseidon::bn254::hash_1;
+use dep::poseidon::poseidon::bn254::hash_2;
+use dep::poseidon::poseidon::bn254::hash_3;
 
 // Domain separators
 global DOMAIN_NPK: Field = 0x6e706b;     // "npk" - note public key

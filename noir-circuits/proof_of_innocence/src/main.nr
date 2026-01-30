@@ -21,7 +21,7 @@
 
 use dep::zvault_utils;
 use dep::zvault_utils::grumpkin;
-use std::hash::poseidon::bn254::hash_2;
+use dep::poseidon::poseidon::bn254::hash_2;
 
 // Merkle tree depth for innocence tree
 global TREE_DEPTH: u32 = 20;

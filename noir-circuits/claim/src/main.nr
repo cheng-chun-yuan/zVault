@@ -15,7 +15,7 @@
 // - Stealth balances (ECDH-derived keys)
 
 use dep::zvault_utils;
-use std::hash::poseidon::bn254::hash_2;
+use dep::poseidon::poseidon::bn254::hash_2;
 
 fn main(
     // Private inputs
