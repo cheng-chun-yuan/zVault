@@ -137,9 +137,13 @@ export function useZkeyName(): UseZkeyNameReturn {
   }, []);
 
   // Derive reverse registry PDA for a spending pubkey (SNS pattern)
+  // Compress 33-byte key to 32 bytes (Solana PDA seed limit): first 32 bytes XOR'd with byte 33
   const deriveReversePDA = useCallback((spendingPubKey: Uint8Array): [PublicKey, number] => {
+    const seed = new Uint8Array(32);
+    seed.set(spendingPubKey.slice(0, 32));
+    seed[0] ^= spendingPubKey[32]; // XOR the 33rd byte into first byte
     return PublicKey.findProgramAddressSync(
-      [Buffer.from(REVERSE_REGISTRY_SEED), Buffer.from(spendingPubKey)],
+      [Buffer.from(REVERSE_REGISTRY_SEED), Buffer.from(seed)],
       PROGRAM_ID
     );
   }, []);

@@ -145,8 +145,12 @@ pub fn process_register_name(
         return Err(ProgramError::InvalidSeeds);
     }
 
-    // Verify reverse registry PDA (seeded by spending_pubkey)
-    let reverse_seeds: &[&[u8]] = &[ReverseRegistry::SEED, &ix_data.spending_pubkey];
+    // Verify reverse registry PDA (seeded by compressed spending_pubkey)
+    // Compress 33-byte key to 32 bytes: first 32 bytes XOR'd with byte 33
+    let mut spending_key_seed = [0u8; 32];
+    spending_key_seed.copy_from_slice(&ix_data.spending_pubkey[..32]);
+    spending_key_seed[0] ^= ix_data.spending_pubkey[32];
+    let reverse_seeds: &[&[u8]] = &[ReverseRegistry::SEED, &spending_key_seed];
     let (expected_reverse_pda, reverse_bump) = find_program_address(reverse_seeds, program_id);
     if reverse_registry.key() != &expected_reverse_pda {
         return Err(ProgramError::InvalidSeeds);

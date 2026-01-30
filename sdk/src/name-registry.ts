@@ -443,10 +443,13 @@ export async function reverseLookupZkeyName(
   try {
     const { address, getProgramDerivedAddress } = await import("@solana/kit");
 
+    // Compress 33-byte key to 32 bytes (Solana PDA seed limit)
+    const seed = compressSpendingKey(spendingPubKey);
+
     const [pda] = await getProgramDerivedAddress({
       seeds: [
         new TextEncoder().encode(REVERSE_REGISTRY_SEED),
-        spendingPubKey,
+        seed,
       ],
       programAddress: address(programId),
     });
@@ -464,6 +467,17 @@ export async function reverseLookupZkeyName(
 }
 
 /**
+ * Compress a 33-byte spending key to 32 bytes for PDA seed
+ * Uses XOR of the 33rd byte into the first byte
+ */
+function compressSpendingKey(spendingPubKey: Uint8Array): Uint8Array {
+  const seed = new Uint8Array(32);
+  seed.set(spendingPubKey.slice(0, 32));
+  seed[0] ^= spendingPubKey[32]; // XOR the 33rd byte into first byte
+  return seed;
+}
+
+/**
  * Derive the reverse registry PDA for a spending public key
  *
  * @param spendingPubKey - 33-byte compressed Grumpkin spending public key
@@ -476,10 +490,13 @@ export async function deriveReverseRegistryPDA(
 ): Promise<string> {
   const { address, getProgramDerivedAddress } = await import("@solana/kit");
 
+  // Compress 33-byte key to 32 bytes (Solana PDA seed limit)
+  const seed = compressSpendingKey(spendingPubKey);
+
   const [pda] = await getProgramDerivedAddress({
     seeds: [
       new TextEncoder().encode(REVERSE_REGISTRY_SEED),
-      spendingPubKey,
+      seed,
     ],
     programAddress: address(programId),
   });
