@@ -3,6 +3,12 @@
  *
  * Common test utilities for E2E tests.
  * Provides mock data generation, note creation, and assertion helpers.
+ *
+ * NOTE: For full stealth flow with real proofs, use stealth-helpers.ts:
+ * - generateTestKeys() - Deterministic key generation
+ * - createAndSubmitStealthDeposit() - Full stealth deposit flow
+ * - scanAndPrepareClaim() - Scan + prepare claim inputs
+ * - checkNullifierExists() - Verify nullifier spent
  */
 
 import { Connection, PublicKey, Keypair, Transaction, sendAndConfirmTransaction } from "@solana/web3.js";
@@ -22,7 +28,10 @@ import {
   generateGrumpkinKeyPair,
   pointToCompressedBytes,
 } from "../../src/crypto";
-import { MOCK_PROOF_SIZE } from "./setup";
+import { REAL_PROOF_SIZE } from "./setup";
+
+/** @deprecated Use REAL_PROOF_SIZE from setup.ts */
+export const MOCK_PROOF_SIZE = REAL_PROOF_SIZE;
 
 // =============================================================================
 // Types
@@ -141,9 +150,14 @@ export function createTestNotes(
  * Create mock UltraHonk proof bytes
  *
  * Generates deterministic pseudo-random bytes for testing.
- * Real proofs would come from the Noir prover.
+ *
+ * @deprecated For real proof tests, use the prover:
+ * ```typescript
+ * import { generateClaimProof, generateSpendSplitProof } from "../../src/prover/web";
+ * const proof = await generateClaimProof(inputs);
+ * ```
  */
-export function generateMockProof(size: number = MOCK_PROOF_SIZE): Uint8Array {
+export function generateMockProof(size: number = REAL_PROOF_SIZE): Uint8Array {
   const proof = new Uint8Array(size);
   for (let i = 0; i < size; i++) {
     proof[i] = (i * 17 + 31) % 256;
