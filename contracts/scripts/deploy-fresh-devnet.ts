@@ -1,44 +1,38 @@
 #!/usr/bin/env bun
 /**
- * Initialize Fresh zVault Devnet Program
+ * Deploy Fresh zVault to Devnet
  *
- * For the new program ID: GFV24P4Ne3AMcuZJELaKQeuFQzCe7T3Ne8CdKPL7X7mM
+ * Creates a completely new deployment with:
+ * - New program ID (fresh keypair)
+ * - New pool state, commitment tree, mint, vault
+ * - Keeps existing chadbuffer and verifier program IDs
+ *
+ * This is needed because the current devnet deployment has
+ * an outdated commitment tree account size (3312 vs 3952 bytes).
  */
 
-import {
-  Connection,
-  Keypair,
-  PublicKey,
-  SystemProgram,
-  Transaction,
-  TransactionInstruction,
-  sendAndConfirmTransaction,
-} from "@solana/web3.js";
-import {
-  TOKEN_2022_PROGRAM_ID,
-  createMint,
-  getOrCreateAssociatedTokenAccount,
-} from "@solana/spl-token";
+import { Connection, Keypair, PublicKey, SystemProgram, Transaction, TransactionInstruction, sendAndConfirmTransaction } from "@solana/web3.js";
+import { TOKEN_2022_PROGRAM_ID, createMint, getOrCreateAssociatedTokenAccount } from "@solana/spl-token";
 import * as fs from "fs";
 import * as path from "path";
+import { execSync } from "child_process";
 import { fileURLToPath } from "url";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-// Fresh program ID (zKey vanity address)
-const ZVAULT_PROGRAM_ID = new PublicKey("zKeyrLmpT8W9o8iRvhizuSihLAFLhfAGBvfM638Pbw8");
-const ULTRAHONK_VERIFIER_ID = new PublicKey("5uAoTLSexeKKLU3ZXniWFE2CsCWGPzMiYPpKiywCGqsd");
-const CHADBUFFER_ID = new PublicKey("C5RpjtTMFXKVZCtXSzKXD4CDNTaWBg3dVeMfYvjZYHDF");
-
 const RPC_URL = "https://solana-devnet.g.alchemy.com/v2/y1zYW-ovVofq7OzZo0Z6IHenRnyq_Pbd";
+
+// Keep these existing programs
+const CHADBUFFER_ID = new PublicKey("C5RpjtTMFXKVZCtXSzKXD4CDNTaWBg3dVeMfYvjZYHDF");
+const ULTRAHONK_VERIFIER_ID = new PublicKey("5uAoTLSexeKKLU3ZXniWFE2CsCWGPzMiYPpKiywCGqsd");
 
 const SEEDS = {
   POOL_STATE: "pool_state",
   COMMITMENT_TREE: "commitment_tree",
 };
 
-async function loadKeypair(keyPath: string): Promise<Keypair> {
+function loadKeypair(keyPath: string): Keypair {
   const absolutePath = keyPath.replace("~", process.env.HOME || "");
   const secretKey = JSON.parse(fs.readFileSync(absolutePath, "utf-8"));
   return Keypair.fromSecretKey(Uint8Array.from(secretKey));
@@ -92,75 +86,92 @@ function buildInitializeIx(
 }
 
 async function main() {
-  console.log("============================================================");
-  console.log("Initialize Fresh zVault on Devnet");
-  console.log("============================================================\n");
+  console.log("=".repeat(60));
+  console.log("Deploy Fresh zVault to Devnet");
+  console.log("=".repeat(60));
+  console.log();
+  console.log("This will:");
+  console.log("1. Generate a new program keypair");
+  console.log("2. Build the program with devnet features");
+  console.log("3. Deploy to devnet with new program ID");
+  console.log("4. Initialize pool state, commitment tree, mint, vault");
+  console.log();
 
   const connection = new Connection(RPC_URL, "confirmed");
 
-  // Load wallet
-  const authority = await loadKeypair("~/.config/solana/johnny.json");
+  // Load authority keypair (johnny.json)
+  const authority = loadKeypair("~/.config/solana/johnny.json");
   console.log(`Authority: ${authority.publicKey.toBase58()}`);
-  console.log(`Program ID: ${ZVAULT_PROGRAM_ID.toBase58()}`);
 
   // Check balance
   const balance = await connection.getBalance(authority.publicKey);
   console.log(`Balance: ${balance / 1e9} SOL`);
 
+  if (balance < 5 * 1e9) {
+    console.log("\n⚠️  Low balance! Need at least 5 SOL for deployment.");
+    console.log("Request airdrop or transfer SOL to continue.");
+    return;
+  }
+
+  // Generate new program keypair
+  const programKeypair = Keypair.generate();
+  const programKeypairPath = path.join(__dirname, "..", "target", "deploy", "zvault-new-keypair.json");
+
+  console.log(`\nNew Program ID: ${programKeypair.publicKey.toBase58()}`);
+
+  // Save program keypair
+  fs.writeFileSync(
+    programKeypairPath,
+    JSON.stringify(Array.from(programKeypair.secretKey))
+  );
+  console.log(`Saved keypair to: ${programKeypairPath}`);
+
+  // Build program
+  console.log("\nBuilding program with devnet features...");
+  try {
+    execSync(
+      "cargo build-sbf --features devnet",
+      { cwd: path.join(__dirname, ".."), stdio: "inherit" }
+    );
+  } catch (error) {
+    console.error("Build failed!");
+    return;
+  }
+
+  // Deploy program
+  console.log("\nDeploying program...");
+  try {
+    execSync(
+      `solana program deploy ` +
+      `--url ${RPC_URL} ` +
+      `--program-id ${programKeypairPath} ` +
+      `--keypair ~/.config/solana/johnny.json ` +
+      `target/deploy/zvault_pinocchio.so`,
+      { cwd: path.join(__dirname, ".."), stdio: "inherit" }
+    );
+  } catch (error) {
+    console.error("Deployment failed!");
+    return;
+  }
+
+  const programId = programKeypair.publicKey;
+  console.log(`\n✓ Program deployed: ${programId.toBase58()}`);
+
   // Derive PDAs
-  const [poolStatePda, poolBump] = derivePoolStatePDA(ZVAULT_PROGRAM_ID);
-  const [commitmentTreePda, treeBump] = deriveCommitmentTreePDA(ZVAULT_PROGRAM_ID);
+  const [poolStatePda, poolBump] = derivePoolStatePDA(programId);
+  const [commitmentTreePda, treeBump] = deriveCommitmentTreePDA(programId);
 
   console.log(`\nPool State PDA: ${poolStatePda.toBase58()} (bump: ${poolBump})`);
   console.log(`Commitment Tree PDA: ${commitmentTreePda.toBase58()} (bump: ${treeBump})`);
-
-  // Check if already initialized
-  const poolAccount = await connection.getAccountInfo(poolStatePda);
-  if (poolAccount) {
-    console.log("\n✓ Pool already initialized!");
-
-    // Parse existing state
-    const mintPubkey = new PublicKey(poolAccount.data.subarray(36, 68));
-    const vaultPubkey = new PublicKey(poolAccount.data.subarray(68, 100));
-
-    console.log(`  zkBTC Mint: ${mintPubkey.toBase58()}`);
-    console.log(`  Pool Vault: ${vaultPubkey.toBase58()}`);
-
-    // Save config
-    const config = {
-      network: "devnet",
-      rpcUrl: RPC_URL,
-      programs: {
-        zVault: ZVAULT_PROGRAM_ID.toBase58(),
-        ultrahonkVerifier: ULTRAHONK_VERIFIER_ID.toBase58(),
-        chadbuffer: CHADBUFFER_ID.toBase58(),
-      },
-      accounts: {
-        poolState: poolStatePda.toBase58(),
-        commitmentTree: commitmentTreePda.toBase58(),
-        zkbtcMint: mintPubkey.toBase58(),
-        poolVault: vaultPubkey.toBase58(),
-        authority: authority.publicKey.toBase58(),
-      },
-      createdAt: new Date().toISOString(),
-    };
-
-    fs.writeFileSync(
-      path.join(__dirname, "..", ".devnet-config.json"),
-      JSON.stringify(config, null, 2) + "\n"
-    );
-    console.log("\n✓ Updated .devnet-config.json");
-    return;
-  }
 
   // Create zkBTC Token-2022 mint
   console.log("\nCreating zkBTC Token-2022 mint...");
   const zkbtcMint = await createMint(
     connection,
     authority,
-    authority.publicKey,
+    poolStatePda, // Mint authority is pool PDA
     null,
-    8, // 8 decimals
+    8, // 8 decimals like BTC
     Keypair.generate(),
     undefined,
     TOKEN_2022_PROGRAM_ID
@@ -181,7 +192,7 @@ async function main() {
   );
   console.log(`✓ Pool Vault: ${poolVaultAccount.address.toBase58()}`);
 
-  // Create frost vault
+  // Create frost vault (authority's token account for now)
   console.log("Creating frost vault...");
   const frostVaultAccount = await getOrCreateAssociatedTokenAccount(
     connection,
@@ -208,7 +219,7 @@ async function main() {
     frostVaultAccount.address,
     privacyCashPool,
     authority.publicKey,
-    ZVAULT_PROGRAM_ID,
+    programId,
     poolBump,
     treeBump
   );
@@ -219,12 +230,16 @@ async function main() {
   });
   console.log(`✓ zVault initialized: ${sig}`);
 
-  // Save devnet config
+  // Verify commitment tree size
+  const treeInfo = await connection.getAccountInfo(commitmentTreePda);
+  console.log(`\nCommitment Tree size: ${treeInfo?.data.length} bytes (expected: 3952)`);
+
+  // Save new devnet config
   const devnetConfig = {
     network: "devnet",
     rpcUrl: RPC_URL,
     programs: {
-      zVault: ZVAULT_PROGRAM_ID.toBase58(),
+      zVault: programId.toBase58(),
       ultrahonkVerifier: ULTRAHONK_VERIFIER_ID.toBase58(),
       chadbuffer: CHADBUFFER_ID.toBase58(),
     },
@@ -244,14 +259,16 @@ async function main() {
   );
   console.log("\n✓ Saved .devnet-config.json");
 
-  console.log("\n============================================================");
-  console.log("Initialization Complete!");
-  console.log("============================================================");
-  console.log(`  Program ID:    ${ZVAULT_PROGRAM_ID.toBase58()}`);
+  console.log("\n" + "=".repeat(60));
+  console.log("Deployment Complete!");
+  console.log("=".repeat(60));
+  console.log(`  Program ID:    ${programId.toBase58()}`);
   console.log(`  Pool State:    ${poolStatePda.toBase58()}`);
   console.log(`  Commit Tree:   ${commitmentTreePda.toBase58()}`);
   console.log(`  zkBTC Mint:    ${zkbtcMint.toBase58()}`);
   console.log(`  Pool Vault:    ${poolVaultAccount.address.toBase58()}`);
+  console.log();
+  console.log("IMPORTANT: Update sdk/src/config.ts with the new addresses!");
 }
 
 main().catch((err) => {
