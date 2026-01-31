@@ -6,6 +6,10 @@
 //! Output: Public transfer + Change Commitment = Poseidon2(change_pub_key_x, change_amount)
 //!
 //! ZK Proof: UltraHonk (generated in browser via bb.js or mobile via mopro)
+//!
+//! ## Proof Sources
+//! - **Inline (proof_source=0)**: Proof data included directly in instruction data
+//! - **Buffer (proof_source=1)**: Proof read from ChadBuffer account (for large proofs)
 
 use pinocchio::{
     account_info::AccountInfo,
@@ -28,9 +32,34 @@ use crate::utils::{
     validate_token_program_key, MAX_ULTRAHONK_PROOF_SIZE,
 };
 
+/// ChadBuffer authority size (first 32 bytes of account data)
+const CHADBUFFER_AUTHORITY_SIZE: usize = 32;
+
+/// Proof source indicator
+#[repr(u8)]
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub enum PartialPublicProofSource {
+    /// Proof data is included inline in instruction data
+    Inline = 0,
+    /// Proof data is read from a ChadBuffer account
+    Buffer = 1,
+}
+
+impl PartialPublicProofSource {
+    pub fn from_u8(value: u8) -> Option<Self> {
+        match value {
+            0 => Some(PartialPublicProofSource::Inline),
+            1 => Some(PartialPublicProofSource::Buffer),
+            _ => None,
+        }
+    }
+}
+
 /// Spend partial public instruction data (UltraHonk proof - variable size)
 ///
+/// ## Inline Mode (proof_source=0)
 /// Layout:
+/// - proof_source: u8 (0)
 /// - proof_len: u32 (4 bytes, LE)
 /// - proof: [u8; proof_len] - UltraHonk proof
 /// - root: [u8; 32]
@@ -39,64 +68,127 @@ use crate::utils::{
 /// - change_commitment: [u8; 32]
 /// - recipient: [u8; 32]
 /// - vk_hash: [u8; 32]
+///
+/// ## Buffer Mode (proof_source=1)
+/// Layout:
+/// - proof_source: u8 (1)
+/// - root: [u8; 32]
+/// - nullifier_hash: [u8; 32]
+/// - public_amount: u64
+/// - change_commitment: [u8; 32]
+/// - recipient: [u8; 32]
+/// - vk_hash: [u8; 32]
+/// (proof is read from ChadBuffer account passed as additional account)
 pub struct SpendPartialPublicData<'a> {
-    pub proof: &'a [u8],
-    pub root: [u8; 32],
-    pub nullifier_hash: [u8; 32],
+    pub proof_source: PartialPublicProofSource,
+    pub proof: Option<&'a [u8]>,
+    pub root: &'a [u8; 32],
+    pub nullifier_hash: &'a [u8; 32],
     pub public_amount: u64,
-    pub change_commitment: [u8; 32],
-    pub recipient: [u8; 32],
-    pub vk_hash: [u8; 32],
+    pub change_commitment: &'a [u8; 32],
+    pub recipient: &'a [u8; 32],
+    pub vk_hash: &'a [u8; 32],
 }
 
 impl<'a> SpendPartialPublicData<'a> {
-    /// Minimum size: proof_len(4) + root(32) + nullifier(32) + amount(8) + change(32) + recipient(32) + vk_hash(32) = 172 bytes + proof
-    pub const MIN_SIZE: usize = 4 + 32 + 32 + 8 + 32 + 32 + 32;
+    /// Minimum size for inline mode: proof_source(1) + proof_len(4) + root(32) + nullifier(32) + amount(8) + change(32) + recipient(32) + vk_hash(32) = 173 bytes + proof
+    pub const MIN_SIZE_INLINE: usize = 1 + 4 + 32 + 32 + 8 + 32 + 32 + 32;
+
+    /// Minimum size for buffer mode: proof_source(1) + root(32) + nullifier(32) + amount(8) + change(32) + recipient(32) + vk_hash(32) = 169 bytes
+    pub const MIN_SIZE_BUFFER: usize = 1 + 32 + 32 + 8 + 32 + 32 + 32;
 
     pub fn from_bytes(data: &'a [u8]) -> Result<Self, ProgramError> {
-        if data.len() < Self::MIN_SIZE {
+        if data.is_empty() {
             return Err(ProgramError::InvalidInstructionData);
         }
 
-        // Parse proof length
-        let proof_len = u32::from_le_bytes([data[0], data[1], data[2], data[3]]) as usize;
+        let proof_source = PartialPublicProofSource::from_u8(data[0]).ok_or_else(|| {
+            pinocchio::msg!("Invalid proof source");
+            ProgramError::InvalidInstructionData
+        })?;
+
+        match proof_source {
+            PartialPublicProofSource::Inline => Self::parse_inline(data),
+            PartialPublicProofSource::Buffer => Self::parse_buffer(data),
+        }
+    }
+
+    fn parse_inline(data: &'a [u8]) -> Result<Self, ProgramError> {
+        if data.len() < Self::MIN_SIZE_INLINE {
+            return Err(ProgramError::InvalidInstructionData);
+        }
+
+        // Parse proof length (after proof_source byte)
+        let proof_len = u32::from_le_bytes([data[1], data[2], data[3], data[4]]) as usize;
 
         if proof_len > MAX_ULTRAHONK_PROOF_SIZE {
             return Err(ProgramError::InvalidInstructionData);
         }
 
-        let expected_size = 4 + proof_len + 32 + 32 + 8 + 32 + 32 + 32;
+        let expected_size = 1 + 4 + proof_len + 32 + 32 + 8 + 32 + 32 + 32;
         if data.len() < expected_size {
             return Err(ProgramError::InvalidInstructionData);
         }
 
-        let proof = &data[4..4 + proof_len];
-        let mut offset = 4 + proof_len;
+        let proof = &data[5..5 + proof_len];
+        let mut offset = 5 + proof_len;
 
-        let mut root = [0u8; 32];
-        root.copy_from_slice(&data[offset..offset + 32]);
+        let root: &[u8; 32] = data[offset..offset + 32].try_into().unwrap();
         offset += 32;
 
-        let mut nullifier_hash = [0u8; 32];
-        nullifier_hash.copy_from_slice(&data[offset..offset + 32]);
+        let nullifier_hash: &[u8; 32] = data[offset..offset + 32].try_into().unwrap();
         offset += 32;
 
         let public_amount = u64::from_le_bytes(data[offset..offset + 8].try_into().unwrap());
         offset += 8;
 
-        let mut change_commitment = [0u8; 32];
-        change_commitment.copy_from_slice(&data[offset..offset + 32]);
+        let change_commitment: &[u8; 32] = data[offset..offset + 32].try_into().unwrap();
         offset += 32;
 
-        let mut recipient = [0u8; 32];
-        recipient.copy_from_slice(&data[offset..offset + 32]);
+        let recipient: &[u8; 32] = data[offset..offset + 32].try_into().unwrap();
         offset += 32;
 
-        let mut vk_hash = [0u8; 32];
-        vk_hash.copy_from_slice(&data[offset..offset + 32]);
+        let vk_hash: &[u8; 32] = data[offset..offset + 32].try_into().unwrap();
 
         Ok(Self {
-            proof,
+            proof_source: PartialPublicProofSource::Inline,
+            proof: Some(proof),
+            root,
+            nullifier_hash,
+            public_amount,
+            change_commitment,
+            recipient,
+            vk_hash,
+        })
+    }
+
+    fn parse_buffer(data: &'a [u8]) -> Result<Self, ProgramError> {
+        if data.len() < Self::MIN_SIZE_BUFFER {
+            return Err(ProgramError::InvalidInstructionData);
+        }
+
+        let mut offset = 1; // Skip proof_source byte
+
+        let root: &[u8; 32] = data[offset..offset + 32].try_into().unwrap();
+        offset += 32;
+
+        let nullifier_hash: &[u8; 32] = data[offset..offset + 32].try_into().unwrap();
+        offset += 32;
+
+        let public_amount = u64::from_le_bytes(data[offset..offset + 8].try_into().unwrap());
+        offset += 8;
+
+        let change_commitment: &[u8; 32] = data[offset..offset + 32].try_into().unwrap();
+        offset += 32;
+
+        let recipient: &[u8; 32] = data[offset..offset + 32].try_into().unwrap();
+        offset += 32;
+
+        let vk_hash: &[u8; 32] = data[offset..offset + 32].try_into().unwrap();
+
+        Ok(Self {
+            proof_source: PartialPublicProofSource::Buffer,
+            proof: None,
             root,
             nullifier_hash,
             public_amount,
@@ -109,6 +201,7 @@ impl<'a> SpendPartialPublicData<'a> {
 
 /// Spend partial public accounts
 ///
+/// ## Inline Mode (10 accounts)
 /// 0. pool_state (writable)
 /// 1. commitment_tree (writable)
 /// 2. nullifier_record (writable)
@@ -119,6 +212,9 @@ impl<'a> SpendPartialPublicData<'a> {
 /// 7. token_program
 /// 8. system_program
 /// 9. ultrahonk_verifier - UltraHonk verifier program
+///
+/// ## Buffer Mode (11 accounts - adds proof_buffer)
+/// 10. proof_buffer (readonly) - ChadBuffer account containing proof data
 pub struct SpendPartialPublicAccounts<'a> {
     pub pool_state: &'a AccountInfo,
     pub commitment_tree: &'a AccountInfo,
@@ -130,11 +226,16 @@ pub struct SpendPartialPublicAccounts<'a> {
     pub token_program: &'a AccountInfo,
     pub system_program: &'a AccountInfo,
     pub ultrahonk_verifier: &'a AccountInfo,
+    pub proof_buffer: Option<&'a AccountInfo>,
 }
 
 impl<'a> SpendPartialPublicAccounts<'a> {
-    pub fn from_accounts(accounts: &'a [AccountInfo]) -> Result<Self, ProgramError> {
-        if accounts.len() < 10 {
+    pub fn from_accounts(
+        accounts: &'a [AccountInfo],
+        use_buffer: bool,
+    ) -> Result<Self, ProgramError> {
+        let min_accounts = if use_buffer { 11 } else { 10 };
+        if accounts.len() < min_accounts {
             return Err(ProgramError::NotEnoughAccountKeys);
         }
 
@@ -148,6 +249,11 @@ impl<'a> SpendPartialPublicAccounts<'a> {
         let token_program = &accounts[7];
         let system_program = &accounts[8];
         let ultrahonk_verifier = &accounts[9];
+        let proof_buffer = if use_buffer {
+            Some(&accounts[10])
+        } else {
+            None
+        };
 
         // Validate user is signer (fee payer)
         if !user.is_signer() {
@@ -165,6 +271,7 @@ impl<'a> SpendPartialPublicAccounts<'a> {
             token_program,
             system_program,
             ultrahonk_verifier,
+            proof_buffer,
         })
     }
 }
@@ -173,12 +280,20 @@ impl<'a> SpendPartialPublicAccounts<'a> {
 ///
 /// Claims part of a commitment to a public wallet, with change returned as a new commitment.
 /// Amount conservation: input_amount == public_amount + change_amount (enforced by ZK proof)
+///
+/// Supports both inline proofs and ChadBuffer references.
 pub fn process_spend_partial_public(
     program_id: &Pubkey,
     accounts: &[AccountInfo],
     data: &[u8],
 ) -> ProgramResult {
-    let accounts = SpendPartialPublicAccounts::from_accounts(accounts)?;
+    // Parse instruction data first to determine proof source
+    if data.is_empty() {
+        return Err(ProgramError::InvalidInstructionData);
+    }
+    let use_buffer = data[0] == PartialPublicProofSource::Buffer as u8;
+
+    let accounts = SpendPartialPublicAccounts::from_accounts(accounts, use_buffer)?;
     let ix_data = SpendPartialPublicData::from_bytes(data)?;
 
     // SECURITY: Validate account owners BEFORE deserializing any data
@@ -226,13 +341,13 @@ pub fn process_spend_partial_public(
         let tree_data = accounts.commitment_tree.try_borrow_data()?;
         let tree = CommitmentTree::from_bytes(&tree_data)?;
 
-        if !tree.is_valid_root(&ix_data.root) {
+        if !tree.is_valid_root(ix_data.root) {
             return Err(ZVaultError::InvalidRoot.into());
         }
     }
 
     // Verify nullifier PDA
-    let nullifier_seeds: &[&[u8]] = &[NullifierRecord::SEED, &ix_data.nullifier_hash];
+    let nullifier_seeds: &[&[u8]] = &[NullifierRecord::SEED, ix_data.nullifier_hash];
     let (expected_nullifier_pda, nullifier_bump) = find_program_address(nullifier_seeds, program_id);
     if accounts.nullifier_record.key() != &expected_nullifier_pda {
         return Err(ProgramError::InvalidSeeds);
@@ -268,30 +383,73 @@ pub fn process_spend_partial_public(
     .invoke_signed(&nullifier_signer)?;
 
     // Verify UltraHonk proof via CPI (after nullifier is claimed)
-    pinocchio::msg!("Verifying UltraHonk partial public proof via CPI...");
+    // Get proof bytes and verify (either inline or from ChadBuffer)
+    match ix_data.proof_source {
+        PartialPublicProofSource::Inline => {
+            let proof = ix_data.proof.ok_or(ProgramError::InvalidInstructionData)?;
 
-    verify_ultrahonk_spend_partial_public_proof(
-        accounts.ultrahonk_verifier,
-        ix_data.proof,
-        &ix_data.root,
-        &ix_data.nullifier_hash,
-        ix_data.public_amount,
-        &ix_data.change_commitment,
-        &ix_data.recipient,
-        &ix_data.vk_hash,
-    ).map_err(|_| {
-        pinocchio::msg!("UltraHonk proof verification failed");
-        ZVaultError::ZkVerificationFailed
-    })?;
+            pinocchio::msg!("Verifying UltraHonk partial public proof (inline) via CPI...");
+
+            verify_ultrahonk_spend_partial_public_proof(
+                accounts.ultrahonk_verifier,
+                proof,
+                ix_data.root,
+                ix_data.nullifier_hash,
+                ix_data.public_amount,
+                ix_data.change_commitment,
+                ix_data.recipient,
+                ix_data.vk_hash,
+            ).map_err(|_| {
+                pinocchio::msg!("UltraHonk proof verification failed");
+                ZVaultError::ZkVerificationFailed
+            })?;
+        }
+        PartialPublicProofSource::Buffer => {
+            let proof_buffer_account = accounts
+                .proof_buffer
+                .ok_or(ProgramError::NotEnoughAccountKeys)?;
+
+            // Read proof from ChadBuffer (data starts after 32-byte authority)
+            let buffer_data = proof_buffer_account.try_borrow_data()?;
+
+            if buffer_data.len() <= CHADBUFFER_AUTHORITY_SIZE {
+                pinocchio::msg!("ChadBuffer too small");
+                return Err(ProgramError::InvalidAccountData);
+            }
+
+            let proof = &buffer_data[CHADBUFFER_AUTHORITY_SIZE..];
+
+            if proof.len() > MAX_ULTRAHONK_PROOF_SIZE {
+                pinocchio::msg!("Proof in buffer too large");
+                return Err(ZVaultError::InvalidProofLength.into());
+            }
+
+            pinocchio::msg!("Verifying UltraHonk partial public proof (buffer) via CPI...");
+
+            verify_ultrahonk_spend_partial_public_proof(
+                accounts.ultrahonk_verifier,
+                proof,
+                ix_data.root,
+                ix_data.nullifier_hash,
+                ix_data.public_amount,
+                ix_data.change_commitment,
+                ix_data.recipient,
+                ix_data.vk_hash,
+            ).map_err(|_| {
+                pinocchio::msg!("UltraHonk proof verification failed");
+                ZVaultError::ZkVerificationFailed
+            })?;
+        }
+    }
 
     // Initialize nullifier record
     {
         let mut nullifier_data = accounts.nullifier_record.try_borrow_mut_data()?;
         let nullifier = NullifierRecord::init(&mut nullifier_data)?;
 
-        nullifier.nullifier_hash.copy_from_slice(&ix_data.nullifier_hash);
+        nullifier.nullifier_hash.copy_from_slice(ix_data.nullifier_hash);
         nullifier.set_spent_at(clock.unix_timestamp);
-        nullifier.spent_by.copy_from_slice(&ix_data.recipient);
+        nullifier.spent_by.copy_from_slice(ix_data.recipient);
         nullifier.set_operation_type(NullifierOperationType::Transfer);
     }
 
@@ -304,7 +462,7 @@ pub fn process_spend_partial_public(
             return Err(ZVaultError::TreeFull.into());
         }
 
-        tree.insert_leaf(&ix_data.change_commitment)?;
+        tree.insert_leaf(ix_data.change_commitment)?;
     }
 
     // Transfer public amount from pool vault to recipient's ATA

@@ -33,6 +33,7 @@ pub const ULTRAHONK_VERIFIER_PROGRAM_ID: Pubkey = [
 pub mod ultrahonk_instruction {
     pub const VERIFY: u8 = 0;
     pub const VERIFY_WITH_VK_ACCOUNT: u8 = 1;
+    pub const VERIFY_FROM_BUFFER: u8 = 3;
 }
 
 /// Maximum UltraHonk proof size (typically 8-16KB)
@@ -236,19 +237,21 @@ pub fn verify_ultrahonk_proof_with_vk_cpi(
 /// Verify claim proof for UltraHonk (browser/mobile generated)
 ///
 /// Public inputs: [root, nullifier_hash, amount, recipient]
+/// Recipient is bound to the proof - it cannot be changed after signing
 pub fn verify_ultrahonk_claim_proof(
     verifier_program: &AccountInfo,
     proof_bytes: &[u8],
     root: &[u8; 32],
     nullifier_hash: &[u8; 32],
     amount: u64,
-    recipient: &[u8; 32],
+    recipient: &[u8; 32], // Bound to proof - prevents fund redirection attacks
     vk_hash: &[u8; 32],
 ) -> Result<(), ProgramError> {
     // Encode amount as 32-byte field element (big-endian)
     let mut amount_bytes = [0u8; 32];
     amount_bytes[24..32].copy_from_slice(&amount.to_be_bytes());
 
+    // Circuit public inputs: [merkle_root, nullifier_hash, amount_pub, recipient]
     let public_inputs = [
         *root,
         *nullifier_hash,
@@ -257,6 +260,70 @@ pub fn verify_ultrahonk_claim_proof(
     ];
 
     verify_ultrahonk_proof_cpi(verifier_program, proof_bytes, &public_inputs, vk_hash)
+}
+
+/// Verify claim proof from buffer (for large proofs > 10KB)
+///
+/// Uses VERIFY_FROM_BUFFER instruction which reads proof from a buffer account.
+/// This avoids CPI data size limits for large UltraHonk proofs.
+///
+/// Public inputs: [root, nullifier_hash, amount, recipient]
+/// Recipient is bound to the proof - it cannot be changed after signing
+pub fn verify_ultrahonk_claim_proof_from_buffer(
+    verifier_program: &AccountInfo,
+    proof_buffer: &AccountInfo,
+    root: &[u8; 32],
+    nullifier_hash: &[u8; 32],
+    amount: u64,
+    recipient: &[u8; 32], // Bound to proof - prevents fund redirection attacks
+    vk_hash: &[u8; 32],
+) -> Result<(), ProgramError> {
+    // Encode amount as 32-byte field element (big-endian)
+    let mut amount_bytes = [0u8; 32];
+    amount_bytes[24..32].copy_from_slice(&amount.to_be_bytes());
+
+    // Circuit public inputs: [merkle_root, nullifier_hash, amount_pub, recipient]
+    let public_inputs = [
+        *root,
+        *nullifier_hash,
+        amount_bytes,
+        *recipient,
+    ];
+
+    // Build instruction data for VERIFY_FROM_BUFFER
+    // Format: [discriminator(1)] [pi_count(4)] [public_inputs(N*32)] [vk_hash(32)]
+    let pi_count = public_inputs.len();
+    let total_size = 1 + 4 + (pi_count * 32) + 32;
+    let mut ix_data = Vec::with_capacity(total_size);
+
+    // Discriminator
+    ix_data.push(ultrahonk_instruction::VERIFY_FROM_BUFFER);
+
+    // Public inputs count (little-endian)
+    ix_data.extend_from_slice(&(pi_count as u32).to_le_bytes());
+
+    // Public inputs
+    for pi in &public_inputs {
+        ix_data.extend_from_slice(pi);
+    }
+
+    // VK hash
+    ix_data.extend_from_slice(vk_hash);
+
+    // Account meta for proof buffer
+    let account_metas = [AccountMeta::readonly(proof_buffer.key())];
+
+    // Create CPI instruction
+    let instruction = Instruction {
+        program_id: verifier_program.key(),
+        accounts: &account_metas,
+        data: &ix_data,
+    };
+
+    // Invoke with proof buffer account
+    invoke(&instruction, &[proof_buffer])?;
+
+    Ok(())
 }
 
 /// Verify split proof for UltraHonk
