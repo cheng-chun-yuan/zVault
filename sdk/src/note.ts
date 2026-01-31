@@ -11,7 +11,8 @@
  * accepts pre-computed hash values.
  */
 
-import { randomFieldElement, bigintToBytes, sha256Hash, bytesToBigint, BN254_FIELD_PRIME } from "./crypto";
+import { randomFieldElement, bigintToBytes, sha256Hash, bytesToBigint, BN254_FIELD_PRIME, pointMul, GRUMPKIN_GENERATOR } from "./crypto";
+import { computeUnifiedCommitmentSync, computeNullifierSync, hashNullifierSync } from "./poseidon";
 
 /**
  * Note structure for shielded amounts
@@ -196,6 +197,68 @@ export function parseBtc(btcString: string): bigint {
  */
 export function noteHasComputedHashes(note: Note): boolean {
   return note.commitment !== 0n && note.nullifierHash !== 0n;
+}
+
+// ============================================================================
+// Note Commitment/Nullifier Helpers
+// ============================================================================
+
+/**
+ * Get the public key X coordinate from a note's nullifier (used as private key)
+ *
+ * In the unified model: pubKey = nullifier * G (on Grumpkin curve)
+ * Returns pubKey.x for commitment computation
+ */
+export function getNotePublicKeyX(note: Note): bigint {
+  const pubKey = pointMul(note.nullifier, GRUMPKIN_GENERATOR);
+  return pubKey.x;
+}
+
+/**
+ * Compute the commitment for a note
+ *
+ * commitment = Poseidon(pubKeyX, amount)
+ * where pubKeyX = (nullifier * G).x
+ *
+ * Returns the note with commitment fields populated
+ */
+export function computeNoteCommitment(note: Note): Note {
+  const pubKeyX = getNotePublicKeyX(note);
+  const commitment = computeUnifiedCommitmentSync(pubKeyX, note.amount);
+  const commitmentBytes = bigintToBytes(commitment);
+
+  return {
+    ...note,
+    commitment,
+    commitmentBytes,
+  };
+}
+
+/**
+ * Compute the nullifier and nullifier hash for a note at a given leaf index
+ *
+ * nullifier = Poseidon(privKey, leafIndex)
+ * nullifierHash = Poseidon(nullifier)
+ *
+ * @returns Object with computed nullifier values
+ */
+export function computeNoteNullifier(
+  note: Note,
+  leafIndex: bigint
+): {
+  nullifier: bigint;
+  nullifierHash: bigint;
+  nullifierHashBytes: Uint8Array;
+} {
+  const nullifier = computeNullifierSync(note.nullifier, leafIndex);
+  const nullifierHash = hashNullifierSync(nullifier);
+  const nullifierHashBytes = bigintToBytes(nullifierHash);
+
+  return {
+    nullifier,
+    nullifierHash,
+    nullifierHashBytes,
+  };
 }
 
 // ============================================================================
