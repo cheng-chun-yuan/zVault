@@ -126,3 +126,30 @@ export {
   type RelaySpendSplitParams,
   type RelayResult,
 } from "../relay";
+
+// Priority fee estimation
+export {
+  estimatePriorityFee,
+  buildPriorityFeeInstructionData,
+  encodeSetComputeUnitLimit,
+  encodeSetComputeUnitPrice,
+  getHeliusRpcUrl,
+  DEFAULT_COMPUTE_UNITS,
+  DEFAULT_PRIORITY_FEE,
+  COMPUTE_BUDGET_DISCRIMINATORS,
+  type PriorityFeeConfig,
+  type PriorityFeeEstimate,
+  type PriorityFeeInstructions,
+} from "./priority-fee";
+
+// Connection adapter factory
+export {
+  createFetchConnectionAdapter,
+  createConnectionAdapterFromWeb3,
+  createConnectionAdapterFromKit,
+  getConnectionAdapter,
+  clearConnectionAdapterCache,
+  type RpcConfig,
+  type Web3Connection,
+  type KitRpc,
+} from "./connection";
