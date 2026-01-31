@@ -617,3 +617,13 @@ export {
   type RelaySpendSplitParams,
   type RelayResult,
 } from "./relay";
+
+// ==========================================================================
+// Demo Instructions (devnet/localnet only)
+// ==========================================================================
+
+export {
+  DEMO_INSTRUCTION,
+  buildAddDemoStealthData,
+  parseAddDemoStealthData,
+} from "./demo";
