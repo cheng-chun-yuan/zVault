@@ -260,9 +260,13 @@ describe("NULLIFIER GUARD E2E", () => {
   // ===========================================================================
 
   describe("On-Chain Tests", () => {
-    it.skipIf(ctx?.skipOnChain !== false)(
+    it(
       "should verify nullifier PDA creation prevents re-use",
       async () => {
+        if (ctx.skipOnChain) {
+          console.log("⚠️  Skipping: validator not available");
+          return;
+        }
         // In a real on-chain test:
         // 1. First spend creates nullifier PDA
         // 2. Second spend with same nullifier fails because PDA exists
