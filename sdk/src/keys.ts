@@ -53,7 +53,7 @@ import {
   pubKeyFromBytes,
   scalarToBytes,
   type GrumpkinPoint,
-} from "./grumpkin";
+} from "./crypto";
 
 // ========== Types ==========
 

@@ -49,10 +49,12 @@ export const STEALTH_ANNOUNCEMENT_DISCRIMINATOR = 0x08;
 // ========== Imports ==========
 
 import { sha256 } from "@noble/hashes/sha2.js";
-import { bigintToBytes, bytesToBigint, BN254_FIELD_PRIME } from "./crypto";
 import {
-  generateKeyPair as generateGrumpkinKeyPair,
-  ecdh as grumpkinEcdh,
+  bigintToBytes,
+  bytesToBigint,
+  BN254_FIELD_PRIME,
+  generateGrumpkinKeyPair,
+  grumpkinEcdh,
   pointToCompressedBytes,
   pointFromCompressedBytes,
   scalarFromBytes,
@@ -62,7 +64,7 @@ import {
   GRUMPKIN_GENERATOR,
   GRUMPKIN_ORDER,
   type GrumpkinPoint,
-} from "./grumpkin";
+} from "./crypto";
 import type { StealthMetaAddress, ZVaultKeys, WalletSignerAdapter } from "./keys";
 import { deriveKeysFromWallet, parseStealthMetaAddress, constantTimeCompare } from "./keys";
 import { lookupZkeyName, type ZkeyStealthAddress } from "./name-registry";

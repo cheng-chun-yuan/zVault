@@ -40,17 +40,19 @@ import {
 } from "@solana/kit";
 import { sha256 } from "@noble/hashes/sha2.js";
 
-import { bytesToBigint, bigintToBytes, BN254_FIELD_PRIME } from "./crypto";
 import {
-  generateKeyPair as generateGrumpkinKeyPair,
-  ecdh as grumpkinEcdh,
+  bytesToBigint,
+  bigintToBytes,
+  BN254_FIELD_PRIME,
+  generateGrumpkinKeyPair,
+  grumpkinEcdh,
   pointToCompressedBytes,
   pointFromCompressedBytes,
   scalarFromBytes,
   pointMul,
   pointAdd,
   GRUMPKIN_GENERATOR,
-} from "./grumpkin";
+} from "./crypto";
 import type { StealthMetaAddress } from "./keys";
 import { parseStealthMetaAddress } from "./keys";
 import { deriveTaprootAddress } from "./taproot";
