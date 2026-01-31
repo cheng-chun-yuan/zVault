@@ -171,11 +171,37 @@ export const CHADBUFFER_PROGRAM_ID: Address = address("CHADufvk3AGLCVG1Pk76xUHZJ
 /** ChadBuffer authority offset (first 32 bytes) */
 const CHADBUFFER_AUTHORITY_SIZE = 32;
 
-/** Maximum chunk size for uploading
- * Overhead: signature (64) + msg header (3) + 2 account keys (66) + ix header (4) + disc (1) + u24 offset (3) = 141 bytes
- * Using 176 bytes for safety margin: 1232 - 176 = 1056 bytes max
+/**
+ * Solana transaction size limit (raw bytes)
  */
-const MAX_CHUNK_SIZE = 1056;
+const SOLANA_TX_SIZE_LIMIT = 1232;
+
+/**
+ * Calculate transaction overhead for ChadBuffer write (versioned v0 transaction)
+ *
+ * Structure:
+ * - Signatures: 1 (compact-u16) + 64 = 65 bytes
+ * - Message version: 1 byte
+ * - Header: 3 bytes
+ * - Account keys: 1 (compact-u16) + 3*32 = 97 bytes (payer, buffer, program)
+ * - Recent blockhash: 32 bytes
+ * - Instructions: 1 (compact-u16) + instruction
+ *   - program_id_index: 1 byte
+ *   - accounts: 1 (compact-u16) + 2 = 3 bytes
+ *   - data length: 2 bytes (compact-u16 for >127 bytes)
+ *   - data header: 1 (disc) + 3 (u24 offset) = 4 bytes
+ * - Address lookup tables: 1 byte (empty count)
+ *
+ * Total fixed overhead: 65 + 1 + 3 + 97 + 32 + 1 + 1 + 3 + 2 + 4 + 1 = 210 bytes
+ */
+const CHADBUFFER_WRITE_TX_OVERHEAD = 210;
+
+/**
+ * Maximum chunk size for uploading
+ * Calculated: 1232 - 210 = 1022 bytes max
+ * Using 1020 for slight safety margin
+ */
+const MAX_CHUNK_SIZE = SOLANA_TX_SIZE_LIMIT - CHADBUFFER_WRITE_TX_OVERHEAD - 2; // 1020 bytes
 
 /** ChadBuffer instruction discriminators (from ChadBuffer lib.rs) */
 const CHADBUFFER_INIT = 0;    // Create/Init with initial data
