@@ -2,7 +2,7 @@
 
 import { Suspense } from "react";
 import { Send, Shield, Loader2 } from "lucide-react";
-import { FlowPageLayout } from "@/components/ui";
+import { FlowPageLayout } from "@/components/ui/flow-page-layout";
 import { StealthSendFlow } from "@/components/stealth-send-flow";
 
 function StealthSendFlowWrapper() {

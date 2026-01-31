@@ -7,7 +7,7 @@ import { PublicKey, sendAndConfirmTransaction } from "@solana/web3.js";
 import { CheckCircle2, Send, Wallet, Shield, Clock, AlertCircle, Key, Copy, Check, Pencil, X, Loader2, Zap } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { parseSats, validateWithdrawalAmount } from "@/lib/utils/validation";
-import { WalletButton } from "@/components/ui";
+import { WalletButton } from "@/components/ui/wallet-button";
 import { StealthRecipientInput } from "@/components/ui/stealth-recipient-input";
 import { formatBtc, truncateMiddle } from "@/lib/utils/formatting";
 import { useZVault, type InboxNote } from "@/hooks/use-zvault";

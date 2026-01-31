@@ -17,7 +17,7 @@ import {
   LogOut,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { FeatureCard, type FeatureCardColor } from "@/components/ui";
+import { FeatureCard, type FeatureCardColor } from "@/components/ui/feature-card";
 import { BitcoinIcon } from "@/components/bitcoin-wallet-selector";
 import { useWallet } from "@solana/wallet-adapter-react";
 import { useWalletModal } from "@solana/wallet-adapter-react-ui";

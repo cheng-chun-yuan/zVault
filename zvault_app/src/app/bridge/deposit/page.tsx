@@ -1,7 +1,7 @@
 "use client";
 
 import { ArrowDownToLine } from "lucide-react";
-import { FlowPageLayout } from "@/components/ui";
+import { FlowPageLayout } from "@/components/ui/flow-page-layout";
 import { DepositFlow } from "@/components/btc-widget/deposit-flow";
 import { BitcoinIcon } from "@/components/bitcoin-wallet-selector";
 

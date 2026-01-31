@@ -8,7 +8,8 @@ import {
 } from "lucide-react";
 import { useConnection } from "@solana/wallet-adapter-react";
 import { cn } from "@/lib/utils";
-import { Spinner, WalletButton } from "@/components/ui";
+import { Spinner } from "@/components/ui/spinner";
+import { WalletButton } from "@/components/ui/wallet-button";
 import { BitcoinIcon } from "@/components/bitcoin-wallet-selector";
 import {
   getTransactionInfo,

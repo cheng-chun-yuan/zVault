@@ -8,7 +8,7 @@ import {
   Key, ExternalLink
 } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { WalletButton } from "@/components/ui";
+import { WalletButton } from "@/components/ui/wallet-button";
 import { formatBtc } from "@/lib/utils/formatting";
 import {
   parseClaimLinkData,
