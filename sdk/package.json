@@ -1,6 +1,6 @@
 {
   "name": "@zvault/sdk",
-  "version": "1.4.2",
+  "version": "2.0.0",
   "description": "ZVault SDK - Privacy-preserving Bitcoin to Solana bridge",
   "type": "module",
   "main": "dist/index.js",
@@ -12,10 +12,65 @@
       "import": "./dist/index.js",
       "default": "./dist/index.js"
     },
-    "./*": {
-      "types": "./dist/*.d.ts",
-      "import": "./dist/*.js",
-      "default": "./dist/*.js"
+    "./prover": {
+      "types": "./dist/prover/index.d.ts",
+      "import": "./dist/prover/index.js",
+      "default": "./dist/prover/index.js"
+    },
+    "./prover/web": {
+      "types": "./dist/prover/web.d.ts",
+      "import": "./dist/prover/web.js",
+      "default": "./dist/prover/web.js"
+    },
+    "./prover/mobile": {
+      "types": "./dist/prover/mobile.d.ts",
+      "import": "./dist/prover/mobile.js",
+      "default": "./dist/prover/mobile.js"
+    },
+    "./stealth": {
+      "types": "./dist/stealth/index.d.ts",
+      "import": "./dist/stealth/index.js",
+      "default": "./dist/stealth/index.js"
+    },
+    "./pool": {
+      "types": "./dist/pool/index.d.ts",
+      "import": "./dist/pool/index.js",
+      "default": "./dist/pool/index.js"
+    },
+    "./bitcoin": {
+      "types": "./dist/bitcoin/index.d.ts",
+      "import": "./dist/bitcoin/index.js",
+      "default": "./dist/bitcoin/index.js"
+    },
+    "./solana": {
+      "types": "./dist/solana/index.d.ts",
+      "import": "./dist/solana/index.js",
+      "default": "./dist/solana/index.js"
+    },
+    "./watcher": {
+      "types": "./dist/watcher/index.d.ts",
+      "import": "./dist/watcher/index.js",
+      "default": "./dist/watcher/index.js"
+    },
+    "./watcher/web": {
+      "types": "./dist/watcher/web.d.ts",
+      "import": "./dist/watcher/web.js",
+      "default": "./dist/watcher/web.js"
+    },
+    "./watcher/native": {
+      "types": "./dist/watcher/native.d.ts",
+      "import": "./dist/watcher/native.js",
+      "default": "./dist/watcher/native.js"
+    },
+    "./react": {
+      "types": "./dist/react/index.d.ts",
+      "import": "./dist/react/index.js",
+      "default": "./dist/react/index.js"
+    },
+    "./registry": {
+      "types": "./dist/registry/index.d.ts",
+      "import": "./dist/registry/index.js",
+      "default": "./dist/registry/index.js"
     }
   },
   "files": [
