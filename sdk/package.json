@@ -91,9 +91,9 @@
     "test:e2e:nullifier": "bun test test/e2e/nullifier.test.ts",
     "test:e2e:tree": "bun test test/e2e/tree-consistency.test.ts",
     "copy-circuits": "mkdir -p circuits && cp ../noir-circuits/target/zvault_*.json circuits/",
-    "e2e": "bun run scripts/localnet-e2e.ts",
-    "e2e:localnet": "NETWORK=localnet bun run scripts/localnet-e2e.ts",
-    "e2e:devnet": "NETWORK=devnet bun run scripts/localnet-e2e.ts"
+    "e2e": "bun run scripts/e2e-instructions.ts",
+    "e2e:localnet": "NETWORK=localnet bun run scripts/e2e-instructions.ts",
+    "e2e:devnet": "NETWORK=devnet bun run scripts/e2e-instructions.ts"
   },
   "dependencies": {
     "@aztec/bb.js": "3.0.0-nightly.20251104",
