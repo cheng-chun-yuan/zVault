@@ -1,9 +1,15 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
-import { Connection, PublicKey } from "@solana/web3.js";
-import { getAssociatedTokenAddressSync } from "@solana/spl-token";
-import { ZVAULT_PROGRAM_ID, TOKEN_2022_PROGRAM_ID, derivezBTCMintPDA } from "@/lib/solana/instructions";
+/**
+ * Pool Statistics Hook
+ *
+ * Fetches zVault pool statistics using @solana/kit for efficient RPC calls.
+ * Uses SWR for automatic caching, deduplication, and stale-while-revalidate.
+ */
+
+import useSWR from "swr";
+import { DEVNET_CONFIG } from "@zvault/sdk";
+import { fetchAccountInfo } from "@/lib/adapters/connection-adapter";
 
 export interface PoolStats {
   depositCount: number;
@@ -12,84 +18,69 @@ export interface PoolStats {
 }
 
 /**
- * Derive Pool State PDA
+ * Pre-computed static addresses from SDK config.
+ * Avoids recalculating on every poll.
  */
-function derivePoolStatePDA(programId: PublicKey = ZVAULT_PROGRAM_ID): [PublicKey, number] {
-  return PublicKey.findProgramAddressSync(
-    [Buffer.from("pool_state")],
-    programId
-  );
+const POOL_STATE_ADDRESS = DEVNET_CONFIG.poolStatePda;
+const POOL_VAULT_ADDRESS = DEVNET_CONFIG.poolVault;
+
+/**
+ * Fetch pool stats using @solana/kit RPC.
+ * Extracted as a standalone function for SWR.
+ */
+async function fetchPoolStats(): Promise<PoolStats> {
+  let depositCount = 0;
+  let pendingRedemptions = 0;
+  let vaultBalance = 0n;
+
+  // Fetch pool state for counts
+  const poolInfo = await fetchAccountInfo(POOL_STATE_ADDRESS);
+
+  if (poolInfo && poolInfo.data.length >= 196 && poolInfo.data[0] === 0x01) {
+    const view = new DataView(poolInfo.data.buffer, poolInfo.data.byteOffset, poolInfo.data.byteLength);
+    depositCount = Number(view.getBigUint64(164, true));
+    pendingRedemptions = Number(view.getBigUint64(188, true));
+  }
+
+  // Fetch vault balance
+  try {
+    const vaultInfo = await fetchAccountInfo(POOL_VAULT_ADDRESS);
+
+    if (vaultInfo && vaultInfo.data.length >= 72) {
+      const view = new DataView(vaultInfo.data.buffer, vaultInfo.data.byteOffset, vaultInfo.data.byteLength);
+      vaultBalance = view.getBigUint64(64, true);
+    }
+  } catch {
+    // Vault may not exist yet
+  }
+
+  return { depositCount, vaultBalance, pendingRedemptions };
 }
 
 /**
- * Derive Pool Vault ATA (where zBTC is held)
+ * Hook to fetch pool statistics with automatic caching and deduplication.
+ * Uses SWR for:
+ * - Request deduplication (multiple components share one request)
+ * - Stale-while-revalidate (show cached data while fetching fresh)
+ * - Automatic polling every 30 seconds
+ * - Error retry with exponential backoff
  */
-function derivePoolVaultATA(programId: PublicKey = ZVAULT_PROGRAM_ID): PublicKey {
-  const [poolState] = derivePoolStatePDA(programId);
-  const [zbtcMint] = derivezBTCMintPDA(programId);
-
-  return getAssociatedTokenAddressSync(
-    zbtcMint,
-    poolState,
-    true,
-    TOKEN_2022_PROGRAM_ID
-  );
-}
-
 export function usePoolStats() {
-  const [stats, setStats] = useState<PoolStats | null>(null);
-  const [isLoading, setIsLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
-
-  const fetchStats = useCallback(async () => {
-    try {
-      setIsLoading(true);
-      setError(null);
-
-      const rpcUrl = process.env.NEXT_PUBLIC_SOLANA_RPC_URL || "https://api.devnet.solana.com";
-      const connection = new Connection(rpcUrl, "confirmed");
-
-      let depositCount = 0;
-      let pendingRedemptions = 0;
-      let vaultBalance = 0n;
-
-      // Fetch pool state for counts
-      const [poolStatePDA] = derivePoolStatePDA();
-      const poolInfo = await connection.getAccountInfo(poolStatePDA);
-
-      if (poolInfo && poolInfo.data.length >= 196 && poolInfo.data[0] === 0x01) {
-        const view = new DataView(poolInfo.data.buffer, poolInfo.data.byteOffset, poolInfo.data.byteLength);
-        depositCount = Number(view.getBigUint64(164, true));
-        pendingRedemptions = Number(view.getBigUint64(188, true));
-      }
-
-      // Fetch vault balance
-      try {
-        const poolVault = derivePoolVaultATA();
-        const vaultInfo = await connection.getAccountInfo(poolVault);
-
-        if (vaultInfo && vaultInfo.data.length >= 72) {
-          const view = new DataView(vaultInfo.data.buffer, vaultInfo.data.byteOffset, vaultInfo.data.byteLength);
-          vaultBalance = view.getBigUint64(64, true);
-        }
-      } catch {
-        // Vault may not exist yet
-      }
-
-      setStats({ depositCount, vaultBalance, pendingRedemptions });
-    } catch (err) {
-      console.error("Error fetching pool stats:", err);
-      setError(err instanceof Error ? err.message : "Failed to fetch stats");
-    } finally {
-      setIsLoading(false);
+  const { data: stats, error, isLoading, mutate } = useSWR<PoolStats>(
+    "pool-stats",
+    fetchPoolStats,
+    {
+      refreshInterval: 30000, // Poll every 30 seconds
+      dedupingInterval: 5000, // Dedupe requests within 5 seconds
+      revalidateOnFocus: false, // Don't refetch on tab focus
+      errorRetryCount: 3, // Retry 3 times on error
     }
-  }, []);
+  );
 
-  useEffect(() => {
-    fetchStats();
-    const interval = setInterval(fetchStats, 30000);
-    return () => clearInterval(interval);
-  }, [fetchStats]);
-
-  return { stats, isLoading, error, refresh: fetchStats };
+  return {
+    stats: stats ?? null,
+    isLoading,
+    error: error ? (error instanceof Error ? error.message : "Failed to fetch stats") : null,
+    refresh: () => mutate(),
+  };
 }
