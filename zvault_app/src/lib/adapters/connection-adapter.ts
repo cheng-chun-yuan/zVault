@@ -5,20 +5,20 @@
  * 1. @solana/kit Rpc for pure RPC reads (modern, efficient)
  * 2. @solana/web3.js Connection for wallet adapter compatibility
  *
- * Use @solana/kit Rpc for:
- * - Fetching account data
- * - Reading on-chain state
- * - API routes
- *
- * Use @solana/web3.js Connection for:
- * - Wallet adapter integration
- * - Transaction signing flows
+ * Uses SDK's connection adapter factory with app-specific configuration.
  */
 
 import { createSolanaRpc, type Rpc, type SolanaRpcApi } from "@solana/kit";
 import { Connection, PublicKey } from "@solana/web3.js";
-import type { ConnectionAdapter } from "@zvault/sdk";
+import {
+  createFetchConnectionAdapter,
+  createConnectionAdapterFromWeb3 as sdkCreateConnectionAdapterFromWeb3,
+  type ConnectionAdapter,
+} from "@zvault/sdk";
 import { HELIUS_RPC_DEVNET } from "@/lib/helius";
+
+// Re-export ConnectionAdapter type
+export type { ConnectionAdapter };
 
 // =============================================================================
 // RPC URL Configuration
@@ -100,9 +100,7 @@ export function getConnection(): Connection {
  * for use with @zvault/sdk functions.
  */
 export function createConnectionAdapter(): ConnectionAdapter {
-  return {
-    getAccountInfo: fetchAccountInfo,
-  };
+  return createFetchConnectionAdapter(getRpcUrl());
 }
 
 /**
@@ -110,13 +108,13 @@ export function createConnectionAdapter(): ConnectionAdapter {
  * Use this when you already have a Connection instance.
  */
 export function createConnectionAdapterFromWeb3(connection: Connection): ConnectionAdapter {
-  return {
-    getAccountInfo: async (pubkey: string) => {
-      const pk = new PublicKey(pubkey);
+  return sdkCreateConnectionAdapterFromWeb3({
+    getAccountInfo: async (publicKey: string) => {
+      const pk = new PublicKey(publicKey);
       const info = await connection.getAccountInfo(pk);
       return info ? { data: new Uint8Array(info.data) } : null;
     },
-  };
+  });
 }
 
 /**

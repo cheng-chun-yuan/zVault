@@ -25,7 +25,12 @@ import {
   DEVNET_CONFIG,
   type ClaimInputs,
 } from "@zvault/sdk";
-import { buildClaimTransaction } from "@/lib/solana/instructions";
+import {
+  buildClaimTransaction,
+  ZBTC_MINT_ADDRESS,
+  TOKEN_2022_PROGRAM_ID,
+} from "@/lib/solana/instructions";
+import { getAssociatedTokenAddressSync } from "@solana/spl-token";
 import { ZVAULT_PROGRAM_ID } from "@/lib/constants";
 import { useFlowState } from "@/features/shared/hooks";
 import type {
@@ -281,10 +286,7 @@ export function useClaimFlow(initialNote?: string) {
       const nullifierHashBytes = new Uint8Array(Buffer.from(nullifierHashHex, "hex"));
       const merkleRootBytes = new Uint8Array(Buffer.from(merkleRootHex.slice(2), "hex"));
 
-      const { getAssociatedTokenAddressSync } = await import("@solana/spl-token");
-      const { derivezBTCMintPDA } = await import("@/lib/solana/instructions");
-      const [zbtcMint] = derivezBTCMintPDA();
-      const userTokenAccount = getAssociatedTokenAddressSync(zbtcMint, publicKey, false);
+      const userTokenAccount = getAssociatedTokenAddressSync(ZBTC_MINT_ADDRESS, publicKey, false, TOKEN_2022_PROGRAM_ID);
 
       const vkHash = hexToBytes(DEVNET_CONFIG.vkHashes.claim);
 

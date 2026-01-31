@@ -2,36 +2,27 @@
  * Helius SDK Configuration
  *
  * Provides Helius RPC endpoints and priority fee estimation utilities.
- * Falls back to public Solana RPC if API key is not configured.
+ * Uses SDK's priority fee module with app-specific configuration.
  */
 
 import {
   ComputeBudgetProgram,
   TransactionInstruction,
 } from "@solana/web3.js";
+import {
+  estimatePriorityFee,
+  getHeliusRpcUrl,
+  DEFAULT_COMPUTE_UNITS,
+  DEFAULT_PRIORITY_FEE,
+} from "@zvault/sdk";
 
 const HELIUS_API_KEY = process.env.NEXT_PUBLIC_HELIUS_API_KEY || "";
 
 /** Helius RPC endpoint for devnet */
-export const HELIUS_RPC_DEVNET = HELIUS_API_KEY
-  ? `https://devnet.helius-rpc.com/?api-key=${HELIUS_API_KEY}`
-  : "https://api.devnet.solana.com";
+export const HELIUS_RPC_DEVNET = getHeliusRpcUrl("devnet", HELIUS_API_KEY || undefined);
 
 /** Helius RPC endpoint for mainnet */
-export const HELIUS_RPC_MAINNET = HELIUS_API_KEY
-  ? `https://mainnet.helius-rpc.com/?api-key=${HELIUS_API_KEY}`
-  : "https://api.mainnet-beta.solana.com";
-
-/** Default compute unit limit for zVault transactions */
-const DEFAULT_COMPUTE_UNITS = 200_000;
-
-/** Default priority fee in microLamports when estimation fails */
-const DEFAULT_PRIORITY_FEE = 1000;
-
-/** Helius Priority Fee API endpoint */
-const PRIORITY_FEE_API = HELIUS_API_KEY
-  ? `https://mainnet.helius-rpc.com/?api-key=${HELIUS_API_KEY}`
-  : null;
+export const HELIUS_RPC_MAINNET = getHeliusRpcUrl("mainnet", HELIUS_API_KEY || undefined);
 
 /**
  * Get priority fee instructions for a transaction
@@ -45,40 +36,21 @@ const PRIORITY_FEE_API = HELIUS_API_KEY
 export async function getPriorityFeeInstructions(
   accountKeys: string[]
 ): Promise<TransactionInstruction[]> {
-  if (!PRIORITY_FEE_API) {
-    // Fallback: return minimal compute budget without priority fee
-    return [
-      ComputeBudgetProgram.setComputeUnitLimit({ units: DEFAULT_COMPUTE_UNITS }),
-    ];
+  const estimate = await estimatePriorityFee(accountKeys, {
+    heliusApiKey: HELIUS_API_KEY || undefined,
+    defaultComputeUnits: DEFAULT_COMPUTE_UNITS,
+    defaultPriorityFee: DEFAULT_PRIORITY_FEE,
+  });
+
+  const instructions: TransactionInstruction[] = [
+    ComputeBudgetProgram.setComputeUnitLimit({ units: estimate.computeUnits }),
+  ];
+
+  if (estimate.priorityFee > 0) {
+    instructions.push(
+      ComputeBudgetProgram.setComputeUnitPrice({ microLamports: estimate.priorityFee })
+    );
   }
 
-  try {
-    // Use Helius JSON-RPC method for priority fee estimation
-    const response = await fetch(PRIORITY_FEE_API, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        jsonrpc: "2.0",
-        id: "priority-fee",
-        method: "getPriorityFeeEstimate",
-        params: [{
-          accountKeys,
-          options: { recommended: true },
-        }],
-      }),
-    });
-
-    const data = await response.json();
-    const priorityFee = data?.result?.priorityFeeEstimate || DEFAULT_PRIORITY_FEE;
-
-    return [
-      ComputeBudgetProgram.setComputeUnitLimit({ units: DEFAULT_COMPUTE_UNITS }),
-      ComputeBudgetProgram.setComputeUnitPrice({ microLamports: Math.round(priorityFee) }),
-    ];
-  } catch (error) {
-    console.warn("Failed to get priority fee estimate:", error);
-    return [
-      ComputeBudgetProgram.setComputeUnitLimit({ units: DEFAULT_COMPUTE_UNITS }),
-    ];
-  }
+  return instructions;
 }

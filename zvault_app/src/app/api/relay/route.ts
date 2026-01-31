@@ -4,6 +4,8 @@
  * Relays ZK proofs for privacy-preserving transactions.
  * Uploads proofs to ChadBuffer and submits transactions so users
  * don't need to expose their addresses on-chain.
+ *
+ * Uses @zvault/sdk for consistent PDA derivation and constants.
  */
 
 import { NextRequest, NextResponse } from "next/server";
@@ -16,24 +18,33 @@ import {
   SystemProgram,
   sendAndConfirmTransaction,
 } from "@solana/web3.js";
-import {
-  getAssociatedTokenAddressSync,
-  TOKEN_2022_PROGRAM_ID,
-} from "@solana/spl-token";
+import { getAssociatedTokenAddressSync } from "@solana/spl-token";
 import bs58 from "bs58";
+import {
+  CHADBUFFER_PROGRAM_ID as SDK_CHADBUFFER_PROGRAM_ID,
+  DEVNET_CONFIG,
+  INSTRUCTION_DISCRIMINATORS,
+  hexToBytes,
+} from "@zvault/sdk";
+
+// Import PDA functions from instructions.ts (single source of truth)
+import {
+  ZVAULT_PROGRAM_ID,
+  TOKEN_2022_PROGRAM_ID,
+  ZBTC_MINT_ADDRESS,
+  ULTRAHONK_VERIFIER_PROGRAM_ID,
+  derivePoolStatePDA,
+  deriveCommitmentTreePDA,
+  deriveNullifierPDA,
+  derivePoolVaultATA,
+} from "@/lib/solana/instructions";
 
 // ChadBuffer program ID (devnet)
-const CHADBUFFER_PROGRAM_ID = new PublicKey("CHADufvk3AGLCVG1Pk76xUHZJZjEAj1YLNCgDA1P4YX9");
+const CHADBUFFER_PROGRAM_ID = new PublicKey(SDK_CHADBUFFER_PROGRAM_ID);
 
-// zVault program ID (devnet)
-const ZVAULT_PROGRAM_ID = new PublicKey("5S5ynMni8Pgd6tKkpYaXiPJiEXgw927s7T2txDtDivRK");
-
-// UltraHonk verifier program ID
-const ULTRAHONK_VERIFIER_ID = new PublicKey("FEWxbQXHsEqYqp67LScB3RggQ3DctfuFi35X2fqZWvDi");
-
-// Instruction discriminators
-const SPEND_PARTIAL_PUBLIC = 10;
-const SPEND_SPLIT = 4;
+// Instruction discriminators from SDK
+const SPEND_PARTIAL_PUBLIC = INSTRUCTION_DISCRIMINATORS.SPEND_PARTIAL_PUBLIC;
+const SPEND_SPLIT = INSTRUCTION_DISCRIMINATORS.SPEND_SPLIT;
 const PROOF_SOURCE_BUFFER = 1;
 
 // ChadBuffer instructions
@@ -71,36 +82,6 @@ function getRelayerKeypair(): Keypair {
     const bytes = JSON.parse(privateKey);
     return Keypair.fromSecretKey(new Uint8Array(bytes));
   }
-}
-
-// Derive PDAs
-function derivePoolStatePDA(): PublicKey {
-  return PublicKey.findProgramAddressSync([Buffer.from("pool")], ZVAULT_PROGRAM_ID)[0];
-}
-
-function deriveCommitmentTreePDA(): PublicKey {
-  return PublicKey.findProgramAddressSync([Buffer.from("commitment_tree")], ZVAULT_PROGRAM_ID)[0];
-}
-
-function deriveNullifierPDA(nullifierHash: Uint8Array): PublicKey {
-  return PublicKey.findProgramAddressSync(
-    [Buffer.from("nullifier"), nullifierHash],
-    ZVAULT_PROGRAM_ID
-  )[0];
-}
-
-function deriveZbtcMintPDA(): PublicKey {
-  return PublicKey.findProgramAddressSync([Buffer.from("zbtc_mint")], ZVAULT_PROGRAM_ID)[0];
-}
-
-// Convert hex to bytes
-function hexToBytes(hex: string): Uint8Array {
-  const cleanHex = hex.startsWith("0x") ? hex.slice(2) : hex;
-  const bytes = new Uint8Array(cleanHex.length / 2);
-  for (let i = 0; i < bytes.length; i++) {
-    bytes[i] = parseInt(cleanHex.slice(i * 2, i * 2 + 2), 16);
-  }
-  return bytes;
 }
 
 export async function POST(request: NextRequest) {
@@ -193,13 +174,12 @@ export async function POST(request: NextRequest) {
       recipientPubkey.toBuffer().copy(ixData, offset); offset += 32;
       Buffer.from(vkHashBytes).copy(ixData, offset);
 
-      // Build accounts
-      const poolState = derivePoolStatePDA();
-      const commitmentTree = deriveCommitmentTreePDA();
-      const nullifierPDA = deriveNullifierPDA(nullifierHashBytes);
-      const zbtcMint = deriveZbtcMintPDA();
-      const poolVault = getAssociatedTokenAddressSync(zbtcMint, poolState, true, TOKEN_2022_PROGRAM_ID);
-      const recipientAta = getAssociatedTokenAddressSync(zbtcMint, recipientPubkey, false, TOKEN_2022_PROGRAM_ID);
+      // Build accounts using consolidated PDA functions
+      const [poolState] = derivePoolStatePDA();
+      const [commitmentTree] = deriveCommitmentTreePDA();
+      const [nullifierPDA] = deriveNullifierPDA(nullifierHashBytes);
+      const poolVault = derivePoolVaultATA();
+      const recipientAta = getAssociatedTokenAddressSync(ZBTC_MINT_ADDRESS, recipientPubkey, false, TOKEN_2022_PROGRAM_ID);
 
       zVaultIx = new TransactionInstruction({
         programId: ZVAULT_PROGRAM_ID,
@@ -207,13 +187,13 @@ export async function POST(request: NextRequest) {
           { pubkey: poolState, isSigner: false, isWritable: true },
           { pubkey: commitmentTree, isSigner: false, isWritable: true },
           { pubkey: nullifierPDA, isSigner: false, isWritable: true },
-          { pubkey: zbtcMint, isSigner: false, isWritable: true },
+          { pubkey: ZBTC_MINT_ADDRESS, isSigner: false, isWritable: true },
           { pubkey: poolVault, isSigner: false, isWritable: true },
           { pubkey: recipientAta, isSigner: false, isWritable: true },
           { pubkey: relayer.publicKey, isSigner: true, isWritable: true },
           { pubkey: TOKEN_2022_PROGRAM_ID, isSigner: false, isWritable: false },
           { pubkey: SystemProgram.programId, isSigner: false, isWritable: false },
-          { pubkey: ULTRAHONK_VERIFIER_ID, isSigner: false, isWritable: false },
+          { pubkey: ULTRAHONK_VERIFIER_PROGRAM_ID, isSigner: false, isWritable: false },
           { pubkey: bufferKeypair.publicKey, isSigner: false, isWritable: false },
         ],
         data: ixData,
@@ -240,10 +220,10 @@ export async function POST(request: NextRequest) {
       Buffer.from(output2Bytes).copy(ixData, offset); offset += 32;
       Buffer.from(vkHashBytes).copy(ixData, offset);
 
-      // Build accounts
-      const poolState = derivePoolStatePDA();
-      const commitmentTree = deriveCommitmentTreePDA();
-      const nullifierPDA = deriveNullifierPDA(nullifierHashBytes);
+      // Build accounts using consolidated PDA functions
+      const [poolState] = derivePoolStatePDA();
+      const [commitmentTree] = deriveCommitmentTreePDA();
+      const [nullifierPDA] = deriveNullifierPDA(nullifierHashBytes);
 
       zVaultIx = new TransactionInstruction({
         programId: ZVAULT_PROGRAM_ID,
@@ -253,7 +233,7 @@ export async function POST(request: NextRequest) {
           { pubkey: nullifierPDA, isSigner: false, isWritable: true },
           { pubkey: relayer.publicKey, isSigner: true, isWritable: true },
           { pubkey: SystemProgram.programId, isSigner: false, isWritable: false },
-          { pubkey: ULTRAHONK_VERIFIER_ID, isSigner: false, isWritable: false },
+          { pubkey: ULTRAHONK_VERIFIER_PROGRAM_ID, isSigner: false, isWritable: false },
           { pubkey: bufferKeypair.publicKey, isSigner: false, isWritable: false },
         ],
         data: ixData,

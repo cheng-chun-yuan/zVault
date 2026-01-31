@@ -1,42 +1,41 @@
 /**
  * Mempool.space API helpers for SPV verification
  *
- * Fetches block headers and merkle proofs for Bitcoin transactions
+ * Re-exports SDK's MempoolClient with backward-compatible function wrappers.
  */
 
-const MEMPOOL_API_TESTNET = "https://mempool.space/testnet/api";
-const MEMPOOL_API_MAINNET = "https://mempool.space/api";
+import {
+  MempoolClient,
+  mempoolTestnet,
+  mempoolMainnet,
+  reverseBytes as sdkReverseBytes,
+  type BlockHeader as SdkBlockHeader,
+  type TransactionInfo as SdkTransactionInfo,
+} from "@zvault/sdk";
 
-export interface BlockHeader {
-  height: number;
-  hash: string;
-  version: number;
-  previousBlockHash: string;
-  merkleRoot: string;
-  timestamp: number;
-  bits: number;
-  nonce: number;
-  // Raw 80-byte header in hex
-  rawHeader: string;
-}
+// Re-export SDK types and utilities
+export type BlockHeader = SdkBlockHeader;
+export type TransactionInfo = SdkTransactionInfo;
+export { MempoolClient, mempoolTestnet, mempoolMainnet };
+export { hexToBytes, bytesToHex } from "@zvault/sdk";
+export const reverseBytes = sdkReverseBytes;
 
+// Local interface for merkle proof (matches original API)
 export interface MerkleProof {
   blockHeight: number;
   blockHash: string;
   txIndex: number;
-  merkleProof: string[]; // Array of 32-byte hashes in hex
+  merkleProof: string[];
 }
 
-export interface TransactionInfo {
-  txid: string;
-  confirmed: boolean;
-  blockHeight?: number;
-  blockHash?: string;
-  blockTime?: number;
-}
+// Cache clients per network
+const clients: Record<string, MempoolClient> = {};
 
-function getApiBase(network: "mainnet" | "testnet" = "testnet"): string {
-  return network === "mainnet" ? MEMPOOL_API_MAINNET : MEMPOOL_API_TESTNET;
+function getClient(network: "mainnet" | "testnet"): MempoolClient {
+  if (!clients[network]) {
+    clients[network] = new MempoolClient(network);
+  }
+  return clients[network];
 }
 
 /**
@@ -46,22 +45,8 @@ export async function getTransactionInfo(
   txid: string,
   network: "mainnet" | "testnet" = "testnet"
 ): Promise<TransactionInfo> {
-  const baseUrl = getApiBase(network);
-  const response = await fetch(`${baseUrl}/tx/${txid}`);
-
-  if (!response.ok) {
-    throw new Error(`Failed to fetch transaction: ${response.statusText}`);
-  }
-
-  const data = await response.json();
-
-  return {
-    txid: data.txid,
-    confirmed: data.status.confirmed,
-    blockHeight: data.status.block_height,
-    blockHash: data.status.block_hash,
-    blockTime: data.status.block_time,
-  };
+  const client = getClient(network);
+  return client.getTransactionInfo(txid);
 }
 
 /**
@@ -71,33 +56,8 @@ export async function getBlockHeader(
   blockHash: string,
   network: "mainnet" | "testnet" = "testnet"
 ): Promise<BlockHeader> {
-  const baseUrl = getApiBase(network);
-
-  // Fetch block info
-  const blockRes = await fetch(`${baseUrl}/block/${blockHash}`);
-  if (!blockRes.ok) {
-    throw new Error(`Failed to fetch block: ${blockRes.statusText}`);
-  }
-  const blockInfo = await blockRes.json();
-
-  // Fetch raw header (80 bytes hex)
-  const headerRes = await fetch(`${baseUrl}/block/${blockHash}/header`);
-  if (!headerRes.ok) {
-    throw new Error(`Failed to fetch block header: ${headerRes.statusText}`);
-  }
-  const rawHeader = await headerRes.text();
-
-  return {
-    height: blockInfo.height,
-    hash: blockHash,
-    version: blockInfo.version,
-    previousBlockHash: blockInfo.previousblockhash,
-    merkleRoot: blockInfo.merkle_root,
-    timestamp: blockInfo.timestamp,
-    bits: blockInfo.bits,
-    nonce: blockInfo.nonce,
-    rawHeader,
-  };
+  const client = getClient(network);
+  return client.getBlockHeaderFull(blockHash);
 }
 
 /**
@@ -107,16 +67,8 @@ export async function getBlockHeaderByHeight(
   height: number,
   network: "mainnet" | "testnet" = "testnet"
 ): Promise<BlockHeader> {
-  const baseUrl = getApiBase(network);
-
-  // Get block hash at height
-  const hashRes = await fetch(`${baseUrl}/block-height/${height}`);
-  if (!hashRes.ok) {
-    throw new Error(`Failed to get block hash at height ${height}`);
-  }
-  const blockHash = await hashRes.text();
-
-  return getBlockHeader(blockHash, network);
+  const client = getClient(network);
+  return client.getBlockHeaderByHeight(height);
 }
 
 /**
@@ -126,20 +78,13 @@ export async function getMerkleProof(
   txid: string,
   network: "mainnet" | "testnet" = "testnet"
 ): Promise<MerkleProof> {
-  const baseUrl = getApiBase(network);
-
-  const response = await fetch(`${baseUrl}/tx/${txid}/merkle-proof`);
-  if (!response.ok) {
-    throw new Error(`Failed to fetch merkle proof: ${response.statusText}`);
-  }
-
-  const data = await response.json();
-
+  const client = getClient(network);
+  const proof = await client.getTxMerkleProof(txid);
   return {
-    blockHeight: data.block_height,
-    blockHash: "", // Not provided by this endpoint, fetch separately if needed
-    txIndex: data.pos,
-    merkleProof: data.merkle,
+    blockHeight: proof.block_height,
+    blockHash: "", // Not provided by this endpoint
+    txIndex: proof.pos,
+    merkleProof: proof.merkle,
   };
 }
 
@@ -149,14 +94,8 @@ export async function getMerkleProof(
 export async function getTipHeight(
   network: "mainnet" | "testnet" = "testnet"
 ): Promise<number> {
-  const baseUrl = getApiBase(network);
-
-  const response = await fetch(`${baseUrl}/blocks/tip/height`);
-  if (!response.ok) {
-    throw new Error(`Failed to get tip height: ${response.statusText}`);
-  }
-
-  return parseInt(await response.text(), 10);
+  const client = getClient(network);
+  return client.getBlockHeight();
 }
 
 /**
@@ -171,42 +110,18 @@ export async function getSPVProofData(
   merkleProof: MerkleProof;
   confirmations: number;
 }> {
-  // Get transaction info
-  const txInfo = await getTransactionInfo(txid, network);
-
-  if (!txInfo.confirmed || !txInfo.blockHash) {
-    throw new Error("Transaction not confirmed yet");
-  }
-
-  // Get block header
-  const blockHeader = await getBlockHeader(txInfo.blockHash, network);
-
-  // Get merkle proof
-  const merkleProof = await getMerkleProof(txid, network);
-  merkleProof.blockHash = txInfo.blockHash;
-
-  // Get confirmations
-  const tipHeight = await getTipHeight(network);
-  const confirmations = tipHeight - txInfo.blockHeight! + 1;
+  const client = getClient(network);
+  const spvData = await client.getSPVProofData(txid);
 
   return {
-    txInfo,
-    blockHeader,
-    merkleProof,
-    confirmations,
+    txInfo: spvData.txInfo,
+    blockHeader: spvData.blockHeader,
+    merkleProof: {
+      blockHeight: spvData.merkleProof.block_height,
+      blockHash: spvData.merkleProof.blockHash,
+      txIndex: spvData.merkleProof.pos,
+      merkleProof: spvData.merkleProof.merkle,
+    },
+    confirmations: spvData.confirmations,
   };
-}
-
-// Re-export byte conversion utilities from SDK (single source of truth)
-export { hexToBytes, bytesToHex } from "@zvault/sdk";
-
-/**
- * Reverse bytes (for Bitcoin internal byte order)
- */
-export function reverseBytes(bytes: Uint8Array): Uint8Array {
-  const reversed = new Uint8Array(bytes.length);
-  for (let i = 0; i < bytes.length; i++) {
-    reversed[i] = bytes[bytes.length - 1 - i];
-  }
-  return reversed;
 }
