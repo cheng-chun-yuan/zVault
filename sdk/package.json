@@ -93,25 +93,17 @@
     "copy-circuits": "mkdir -p circuits && cp ../noir-circuits/target/zvault_*.json circuits/",
     "e2e": "bun run scripts/localnet-e2e.ts",
     "e2e:localnet": "NETWORK=localnet bun run scripts/localnet-e2e.ts",
-    "e2e:devnet": "NETWORK=devnet bun run scripts/localnet-e2e.ts",
-    "test:buffer": "bun run scripts/test-buffer-claim.ts",
-    "test:relay": "bun run scripts/test-relay.ts",
-    "test:relay:devnet": "TEST_NETWORK=devnet bun run scripts/test-relay.ts"
+    "e2e:devnet": "NETWORK=devnet bun run scripts/localnet-e2e.ts"
   },
   "dependencies": {
     "@aztec/bb.js": "3.0.0-nightly.20251104",
-    "@noble/curves": "^1.8.2",
     "@noble/hashes": "^1.8.0",
     "@noir-lang/acvm_js": "1.0.0-beta.15",
     "@noir-lang/noir_js": "1.0.0-beta.15",
     "@noir-lang/noirc_abi": "1.0.0-beta.15",
     "@solana-program/system": "^0.10.0",
-    "@solana-program/token": "^0.9.0",
     "@solana/kit": "^5.5.0",
-    "@solana/web3.js": "^1.98.0",
-    "@zkpassport/poseidon2": "^0.6.2",
     "bech32": "^2.0.0",
-    "bs58": "^5.0.0",
     "circomlibjs": "^0.1.7"
   },
   "devDependencies": {
