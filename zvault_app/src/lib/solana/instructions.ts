@@ -1,10 +1,11 @@
 /**
- * Solana Transaction Builders
+ * Solana Transaction Builders for zVault
  *
- * Build transactions for zVault Pinocchio program.
- * Instructions: CLAIM, SPLIT_COMMITMENT, REQUEST_REDEMPTION
+ * Thin wrapper around @zvault/sdk that adds:
+ * - @solana/web3.js Transaction construction
+ * - Helius priority fee optimization
  *
- * Program uses discriminators (first byte) to identify instruction type.
+ * All instruction data building and PDA derivation comes from SDK.
  */
 
 import {
@@ -14,40 +15,54 @@ import {
   Transaction,
   SystemProgram,
 } from "@solana/web3.js";
-import {
-  DEVNET_CONFIG,
-  buildSplitInstructionData as sdkBuildSplitInstructionData,
-  buildSpendPartialPublicInstructionData as sdkBuildSpendPartialPublicInstructionData,
-} from "@zvault/sdk";
+import { getAssociatedTokenAddressSync } from "@solana/spl-token";
 import { address } from "@solana/kit";
 import { getPriorityFeeInstructions } from "@/lib/helius";
 
 // =============================================================================
-// Constants - ALL from SDK (single source of truth)
+// Re-export from SDK (single source of truth)
 // =============================================================================
 
-/** zVault Program ID (from SDK) */
+import {
+  DEVNET_CONFIG,
+  INSTRUCTION_DISCRIMINATORS,
+  // Instruction data builders
+  buildClaimInstructionData as sdkBuildClaimInstructionData,
+  buildSplitInstructionData as sdkBuildSplitInstructionData,
+  buildSpendPartialPublicInstructionData as sdkBuildSpendPartialPublicInstructionData,
+  buildRedemptionRequestInstructionData as sdkBuildRedemptionRequestInstructionData,
+  // PDA helpers
+  PDA_SEEDS,
+  // Utilities
+  bigintTo32Bytes,
+  hexToBytes,
+  bytesToHex,
+} from "@zvault/sdk";
+
+// Re-export for consumers
+export { INSTRUCTION_DISCRIMINATORS, bigintTo32Bytes, hexToBytes, bytesToHex };
+
+// =============================================================================
+// Constants - All from SDK config
+// =============================================================================
+
+/** zVault Program ID */
 export const ZVAULT_PROGRAM_ID = new PublicKey(DEVNET_CONFIG.zvaultProgramId);
 
-/** BTC Light Client Program ID (from SDK) */
+/** BTC Light Client Program ID */
 export const BTC_LIGHT_CLIENT_PROGRAM_ID = new PublicKey(DEVNET_CONFIG.btcLightClientProgramId);
 
-/** Token-2022 Program ID (from SDK) */
+/** Token-2022 Program ID */
 export const TOKEN_2022_PROGRAM_ID = new PublicKey(DEVNET_CONFIG.token2022ProgramId);
 
-/** zBTC Mint Address (from SDK) */
+/** zBTC Mint Address */
 export const ZBTC_MINT_ADDRESS = new PublicKey(DEVNET_CONFIG.zbtcMint);
 
-/** Instruction discriminators */
-export const INSTRUCTION_DISCRIMINATORS = {
-  CLAIM: 9,
-  SPLIT_COMMITMENT: 4,
-  SPEND_PARTIAL_PUBLIC: 10,
-  REQUEST_REDEMPTION: 5,
-} as const;
+/** UltraHonk Verifier Program ID */
+export const ULTRAHONK_VERIFIER_PROGRAM_ID = new PublicKey(DEVNET_CONFIG.ultrahonkVerifierProgramId);
 
 // =============================================================================
-// PDA Derivation
+// PDA Derivation (using SDK seeds)
 // =============================================================================
 
 /**
@@ -56,7 +71,10 @@ export const INSTRUCTION_DISCRIMINATORS = {
 export function derivePoolStatePDA(
   programId: PublicKey = ZVAULT_PROGRAM_ID
 ): [PublicKey, number] {
-  return PublicKey.findProgramAddressSync([Buffer.from("pool_state")], programId);
+  return PublicKey.findProgramAddressSync(
+    [Buffer.from(PDA_SEEDS.POOL_STATE)],
+    programId
+  );
 }
 
 /**
@@ -66,33 +84,33 @@ export function deriveCommitmentTreePDA(
   programId: PublicKey = ZVAULT_PROGRAM_ID
 ): [PublicKey, number] {
   return PublicKey.findProgramAddressSync(
-    [Buffer.from("commitment_tree")],
+    [Buffer.from(PDA_SEEDS.COMMITMENT_TREE)],
     programId
   );
 }
 
 /**
- * Derive Deposit Record PDA from Bitcoin txid
- */
-export function deriveDepositRecordPDA(
-  txidBytes: Uint8Array,
-  programId: PublicKey = ZVAULT_PROGRAM_ID
-): [PublicKey, number] {
-  return PublicKey.findProgramAddressSync(
-    [Buffer.from("deposit"), txidBytes],
-    programId
-  );
-}
-
-/**
- * Derive Nullifier PDA (to check if claimed)
+ * Derive Nullifier PDA
  */
 export function deriveNullifierPDA(
   nullifierHash: Uint8Array,
   programId: PublicKey = ZVAULT_PROGRAM_ID
 ): [PublicKey, number] {
   return PublicKey.findProgramAddressSync(
-    [Buffer.from("nullifier"), nullifierHash],
+    [Buffer.from(PDA_SEEDS.NULLIFIER), nullifierHash],
+    programId
+  );
+}
+
+/**
+ * Derive Deposit Record PDA
+ */
+export function deriveDepositRecordPDA(
+  txidBytes: Uint8Array,
+  programId: PublicKey = ZVAULT_PROGRAM_ID
+): [PublicKey, number] {
+  return PublicKey.findProgramAddressSync(
+    [Buffer.from(PDA_SEEDS.DEPOSIT), txidBytes],
     programId
   );
 }
@@ -104,7 +122,7 @@ export function deriveLightClientPDA(
   programId: PublicKey = BTC_LIGHT_CLIENT_PROGRAM_ID
 ): [PublicKey, number] {
   return PublicKey.findProgramAddressSync(
-    [Buffer.from("btc_light_client")],
+    [Buffer.from(PDA_SEEDS.LIGHT_CLIENT)],
     programId
   );
 }
@@ -119,275 +137,59 @@ export function deriveBlockHeaderPDA(
   const heightBuffer = Buffer.alloc(8);
   heightBuffer.writeBigUInt64LE(BigInt(blockHeight));
   return PublicKey.findProgramAddressSync(
-    [Buffer.from("block_header"), heightBuffer],
+    [Buffer.from(PDA_SEEDS.BLOCK_HEADER), heightBuffer],
     programId
   );
 }
 
 /**
- * Get zBTC Mint address from SDK config
+ * Get zBTC Mint address
  */
 export function getzBTCMintAddress(): PublicKey {
   return ZBTC_MINT_ADDRESS;
 }
 
 /**
- * Derive zBTC Mint PDA (for compatibility - returns SDK address)
+ * Derive zBTC Mint PDA (returns SDK config address)
  * @deprecated Use getzBTCMintAddress() instead
  */
 export function derivezBTCMintPDA(
   _programId: PublicKey = ZVAULT_PROGRAM_ID
 ): [PublicKey, number] {
-  // Always return SDK config address (not a PDA derivation anymore)
   return [ZBTC_MINT_ADDRESS, 0];
 }
 
-// =============================================================================
-// Instruction Data Builders
-// =============================================================================
-
 /**
- * Build instruction data for CLAIM
- *
- * @param zkProof - Groth16 proof bytes (typically 256 bytes)
- * @param nullifierHash - 32-byte nullifier hash
- * @param commitment - 32-byte commitment
- * @param merkleRoot - 32-byte merkle root
- * @param amountSats - Amount in satoshis (8 bytes LE)
+ * Derive Pool Vault ATA
  */
-export function buildClaimInstructionData(
-  zkProof: Uint8Array,
-  nullifierHash: Uint8Array,
-  commitment: Uint8Array,
-  merkleRoot: Uint8Array,
-  amountSats: bigint
-): Uint8Array {
-  // Layout: discriminator(1) + proof_len(4) + proof + nullifier_hash(32) + commitment(32) + root(32) + amount(8)
-  const proofLen = zkProof.length;
-  const totalLen = 1 + 4 + proofLen + 32 + 32 + 32 + 8;
-
-  const data = new Uint8Array(totalLen);
-  let offset = 0;
-
-  // Discriminator
-  data[offset++] = INSTRUCTION_DISCRIMINATORS.CLAIM;
-
-  // Proof length (4 bytes LE)
-  const lenView = new DataView(data.buffer, offset);
-  lenView.setUint32(0, proofLen, true);
-  offset += 4;
-
-  // ZK Proof
-  data.set(zkProof, offset);
-  offset += proofLen;
-
-  // Nullifier hash
-  data.set(nullifierHash, offset);
-  offset += 32;
-
-  // Commitment
-  data.set(commitment, offset);
-  offset += 32;
-
-  // Merkle root
-  data.set(merkleRoot, offset);
-  offset += 32;
-
-  // Amount (8 bytes LE)
-  const amountView = new DataView(data.buffer, offset);
-  amountView.setBigUint64(0, amountSats, true);
-
-  return data;
-}
-
-/**
- * Build instruction data for SPLIT_COMMITMENT (UltraHonk format)
- *
- * @param zkProof - UltraHonk proof bytes
- * @param inputNullifierHash - 32-byte input nullifier hash
- * @param outputCommitment1 - 32-byte first output commitment
- * @param outputCommitment2 - 32-byte second output commitment
- * @param merkleRoot - 32-byte merkle root
- * @param vkHash - 32-byte verification key hash
- */
-export function buildSplitInstructionData(
-  zkProof: Uint8Array,
-  inputNullifierHash: Uint8Array,
-  outputCommitment1: Uint8Array,
-  outputCommitment2: Uint8Array,
-  merkleRoot: Uint8Array,
-  vkHash: Uint8Array
-): Uint8Array {
-  const proofLen = zkProof.length;
-  // Layout: discriminator(1) + proof_source(1) + proof_len(4) + proof + root(32) + nullifier(32) + out1(32) + out2(32) + vk_hash(32)
-  const totalLen = 1 + 1 + 4 + proofLen + 32 + 32 + 32 + 32 + 32;
-
-  const data = new Uint8Array(totalLen);
-  const view = new DataView(data.buffer);
-  let offset = 0;
-
-  // Discriminator
-  data[offset++] = INSTRUCTION_DISCRIMINATORS.SPLIT_COMMITMENT;
-
-  // Proof source (inline = 0)
-  data[offset++] = 0;
-
-  // Proof length (4 bytes, LE)
-  view.setUint32(offset, proofLen, true);
-  offset += 4;
-
-  // Proof bytes
-  data.set(zkProof, offset);
-  offset += proofLen;
-
-  // Merkle root (32 bytes)
-  data.set(merkleRoot, offset);
-  offset += 32;
-
-  // Nullifier hash (32 bytes)
-  data.set(inputNullifierHash, offset);
-  offset += 32;
-
-  // Output commitment 1 (32 bytes)
-  data.set(outputCommitment1, offset);
-  offset += 32;
-
-  // Output commitment 2 (32 bytes)
-  data.set(outputCommitment2, offset);
-  offset += 32;
-
-  // VK hash (32 bytes)
-  data.set(vkHash, offset);
-
-  return data;
-}
-
-/**
- * Build instruction data for SPEND_PARTIAL_PUBLIC (UltraHonk format)
- *
- * @param zkProof - UltraHonk proof bytes
- * @param merkleRoot - 32-byte merkle root
- * @param nullifierHash - 32-byte input nullifier hash
- * @param publicAmount - Amount to claim publicly (8 bytes)
- * @param changeCommitment - 32-byte change commitment
- * @param recipient - 32-byte recipient Solana address
- * @param vkHash - 32-byte verification key hash
- */
-export function buildSpendPartialPublicInstructionData(
-  zkProof: Uint8Array,
-  merkleRoot: Uint8Array,
-  nullifierHash: Uint8Array,
-  publicAmount: bigint,
-  changeCommitment: Uint8Array,
-  recipient: Uint8Array,
-  vkHash: Uint8Array
-): Uint8Array {
-  const proofLen = zkProof.length;
-  // Layout: discriminator(1) + proof_source(1) + proof_len(4) + proof(N) + root(32) + nullifier_hash(32) + public_amount(8) + change_commitment(32) + recipient(32) + vk_hash(32)
-  const totalLen = 1 + 1 + 4 + proofLen + 32 + 32 + 8 + 32 + 32 + 32;
-
-  const data = new Uint8Array(totalLen);
-  const view = new DataView(data.buffer);
-  let offset = 0;
-
-  // Discriminator
-  data[offset++] = INSTRUCTION_DISCRIMINATORS.SPEND_PARTIAL_PUBLIC;
-
-  // Proof source (inline = 0)
-  data[offset++] = 0;
-
-  // Proof length (4 bytes, LE)
-  view.setUint32(offset, proofLen, true);
-  offset += 4;
-
-  // Proof bytes
-  data.set(zkProof, offset);
-  offset += proofLen;
-
-  // Merkle root (32 bytes)
-  data.set(merkleRoot, offset);
-  offset += 32;
-
-  // Nullifier hash (32 bytes)
-  data.set(nullifierHash, offset);
-  offset += 32;
-
-  // Public amount (8 bytes, LE)
-  view.setBigUint64(offset, publicAmount, true);
-  offset += 8;
-
-  // Change commitment (32 bytes)
-  data.set(changeCommitment, offset);
-  offset += 32;
-
-  // Recipient (32 bytes)
-  data.set(recipient, offset);
-  offset += 32;
-
-  // VK hash (32 bytes)
-  data.set(vkHash, offset);
-
-  return data;
-}
-
-/**
- * Build instruction data for REQUEST_REDEMPTION
- *
- * @param amountSats - Amount to redeem
- * @param btcAddress - Bitcoin address for withdrawal (max 62 bytes)
- */
-export function buildRedemptionRequestData(
-  amountSats: bigint,
-  btcAddress: string
-): Uint8Array {
-  const btcAddrBytes = new TextEncoder().encode(btcAddress);
-  if (btcAddrBytes.length > 62) {
-    throw new Error("BTC address too long (max 62 bytes)");
-  }
-
-  // Layout: discriminator(1) + amount(8) + addr_len(1) + addr
-  const totalLen = 1 + 8 + 1 + btcAddrBytes.length;
-  const data = new Uint8Array(totalLen);
-
-  let offset = 0;
-  data[offset++] = INSTRUCTION_DISCRIMINATORS.REQUEST_REDEMPTION;
-
-  const amountView = new DataView(data.buffer, offset);
-  amountView.setBigUint64(0, amountSats, true);
-  offset += 8;
-
-  data[offset++] = btcAddrBytes.length;
-  data.set(btcAddrBytes, offset);
-
-  return data;
+export function derivePoolVaultATA(
+  programId: PublicKey = ZVAULT_PROGRAM_ID
+): PublicKey {
+  const [poolState] = derivePoolStatePDA(programId);
+  return getAssociatedTokenAddressSync(
+    ZBTC_MINT_ADDRESS,
+    poolState,
+    true,
+    TOKEN_2022_PROGRAM_ID
+  );
 }
 
 // =============================================================================
-// Transaction Builders
+// Transaction Builders (with Helius priority fees)
 // =============================================================================
 
 export interface ClaimParams {
-  /** User's Solana public key (payer and recipient) */
   userPubkey: PublicKey;
-  /** ZK proof bytes */
   zkProof: Uint8Array;
-  /** Nullifier hash (32 bytes) */
   nullifierHash: Uint8Array;
-  /** Commitment (32 bytes) */
-  commitment: Uint8Array;
-  /** Current Merkle root (32 bytes) */
   merkleRoot: Uint8Array;
-  /** Amount in satoshis */
   amountSats: bigint;
-  /** User's zBTC token account */
   userTokenAccount: PublicKey;
+  vkHash: Uint8Array;
 }
 
 /**
- * Build CLAIM transaction
- *
- * Claims zBTC tokens by proving knowledge of nullifier + secret
- * for a previously recorded deposit commitment.
+ * Build CLAIM transaction with Helius priority fees
  */
 export async function buildClaimTransaction(
   connection: Connection,
@@ -397,49 +199,50 @@ export async function buildClaimTransaction(
     userPubkey,
     zkProof,
     nullifierHash,
-    commitment,
     merkleRoot,
     amountSats,
     userTokenAccount,
+    vkHash,
   } = params;
 
-  // Derive PDAs
   const [poolState] = derivePoolStatePDA();
   const [commitmentTree] = deriveCommitmentTreePDA();
   const [nullifierPDA] = deriveNullifierPDA(nullifierHash);
-  const [zbtcMint] = derivezBTCMintPDA();
+  const poolVault = derivePoolVaultATA();
 
-  // Build instruction data
-  const instructionData = buildClaimInstructionData(
-    zkProof,
+  // Use SDK instruction data builder
+  const instructionData = sdkBuildClaimInstructionData({
+    proofSource: "inline",
+    proofBytes: zkProof,
+    root: merkleRoot,
     nullifierHash,
-    commitment,
-    merkleRoot,
-    amountSats
-  );
+    amountSats,
+    recipient: address(userPubkey.toBase58()),
+    vkHash,
+  });
 
-  // Build instruction
   const instruction = new TransactionInstruction({
     programId: ZVAULT_PROGRAM_ID,
     keys: [
       { pubkey: poolState, isSigner: false, isWritable: true },
-      { pubkey: commitmentTree, isSigner: false, isWritable: true },
+      { pubkey: commitmentTree, isSigner: false, isWritable: false },
       { pubkey: nullifierPDA, isSigner: false, isWritable: true },
-      { pubkey: zbtcMint, isSigner: false, isWritable: true },
+      { pubkey: ZBTC_MINT_ADDRESS, isSigner: false, isWritable: true },
+      { pubkey: poolVault, isSigner: false, isWritable: true },
       { pubkey: userTokenAccount, isSigner: false, isWritable: true },
       { pubkey: userPubkey, isSigner: true, isWritable: true },
-      { pubkey: SystemProgram.programId, isSigner: false, isWritable: false },
       { pubkey: TOKEN_2022_PROGRAM_ID, isSigner: false, isWritable: false },
+      { pubkey: SystemProgram.programId, isSigner: false, isWritable: false },
+      { pubkey: ULTRAHONK_VERIFIER_PROGRAM_ID, isSigner: false, isWritable: false },
     ],
     data: Buffer.from(instructionData),
   });
 
-  // Get priority fee instructions for better transaction landing
+  // Helius priority fees for better tx landing
   const priorityFeeIxs = await getPriorityFeeInstructions([
     ZVAULT_PROGRAM_ID.toBase58(),
   ]);
 
-  // Build transaction with priority fees first
   const transaction = new Transaction();
   transaction.add(...priorityFeeIxs);
   transaction.add(instruction);
@@ -462,10 +265,7 @@ export interface SplitParams {
 }
 
 /**
- * Build SPLIT transaction
- *
- * Splits one commitment into two output commitments.
- * Used for partial withdrawals or sending.
+ * Build SPLIT transaction with Helius priority fees
  */
 export async function buildSplitTransaction(
   connection: Connection,
@@ -485,7 +285,7 @@ export async function buildSplitTransaction(
   const [commitmentTree] = deriveCommitmentTreePDA();
   const [nullifierPDA] = deriveNullifierPDA(inputNullifierHash);
 
-  // Use SDK instruction data builder (properly formatted for UltraHonk)
+  // Use SDK instruction data builder
   const instructionData = sdkBuildSplitInstructionData({
     proofSource: "inline",
     proofBytes: zkProof,
@@ -496,9 +296,6 @@ export async function buildSplitTransaction(
     vkHash,
   });
 
-  // UltraHonk verifier program ID
-  const ultrahonkVerifierProgramId = new PublicKey(DEVNET_CONFIG.ultrahonkVerifierProgramId);
-
   const instruction = new TransactionInstruction({
     programId: ZVAULT_PROGRAM_ID,
     keys: [
@@ -507,12 +304,11 @@ export async function buildSplitTransaction(
       { pubkey: nullifierPDA, isSigner: false, isWritable: true },
       { pubkey: userPubkey, isSigner: true, isWritable: true },
       { pubkey: SystemProgram.programId, isSigner: false, isWritable: false },
-      { pubkey: ultrahonkVerifierProgramId, isSigner: false, isWritable: false },
+      { pubkey: ULTRAHONK_VERIFIER_PROGRAM_ID, isSigner: false, isWritable: false },
     ],
     data: Buffer.from(instructionData),
   });
 
-  // Get priority fee instructions for better transaction landing
   const priorityFeeIxs = await getPriorityFeeInstructions([
     ZVAULT_PROGRAM_ID.toBase58(),
   ]);
@@ -529,30 +325,19 @@ export async function buildSplitTransaction(
 }
 
 export interface SpendPartialPublicParams {
-  /** User's Solana public key (payer) */
   userPubkey: PublicKey;
-  /** ZK proof bytes */
   zkProof: Uint8Array;
-  /** Merkle root (32 bytes) */
   merkleRoot: Uint8Array;
-  /** Nullifier hash (32 bytes) */
   nullifierHash: Uint8Array;
-  /** Amount to claim publicly */
   publicAmount: bigint;
-  /** Change commitment (32 bytes) */
   changeCommitment: Uint8Array;
-  /** Recipient Solana public key */
   recipient: PublicKey;
-  /** Recipient's zBTC token account */
   recipientTokenAccount: PublicKey;
-  /** VK hash (32 bytes) - verification key hash for the circuit */
   vkHash: Uint8Array;
 }
 
 /**
- * Build SPEND_PARTIAL_PUBLIC transaction
- *
- * Claims part of a commitment to a public wallet, with change returned as a new commitment.
+ * Build SPEND_PARTIAL_PUBLIC transaction with Helius priority fees
  */
 export async function buildSpendPartialPublicTransaction(
   connection: Connection,
@@ -573,18 +358,9 @@ export async function buildSpendPartialPublicTransaction(
   const [poolState] = derivePoolStatePDA();
   const [commitmentTree] = deriveCommitmentTreePDA();
   const [nullifierPDA] = deriveNullifierPDA(nullifierHash);
-  const [zbtcMint] = derivezBTCMintPDA();
+  const poolVault = derivePoolVaultATA();
 
-  // Pool vault ATA
-  const { getAssociatedTokenAddressSync } = await import("@solana/spl-token");
-  const poolVault = getAssociatedTokenAddressSync(
-    zbtcMint,
-    poolState,
-    true,
-    TOKEN_2022_PROGRAM_ID
-  );
-
-  // Use SDK instruction data builder (properly formatted for UltraHonk)
+  // Use SDK instruction data builder
   const instructionData = sdkBuildSpendPartialPublicInstructionData({
     proofSource: "inline",
     proofBytes: zkProof,
@@ -596,27 +372,23 @@ export async function buildSpendPartialPublicTransaction(
     vkHash,
   });
 
-  // UltraHonk verifier program ID
-  const ultrahonkVerifierProgramId = new PublicKey(DEVNET_CONFIG.ultrahonkVerifierProgramId);
-
   const instruction = new TransactionInstruction({
     programId: ZVAULT_PROGRAM_ID,
     keys: [
       { pubkey: poolState, isSigner: false, isWritable: true },
       { pubkey: commitmentTree, isSigner: false, isWritable: true },
       { pubkey: nullifierPDA, isSigner: false, isWritable: true },
-      { pubkey: zbtcMint, isSigner: false, isWritable: true },
+      { pubkey: ZBTC_MINT_ADDRESS, isSigner: false, isWritable: true },
       { pubkey: poolVault, isSigner: false, isWritable: true },
       { pubkey: recipientTokenAccount, isSigner: false, isWritable: true },
       { pubkey: userPubkey, isSigner: true, isWritable: true },
       { pubkey: TOKEN_2022_PROGRAM_ID, isSigner: false, isWritable: false },
       { pubkey: SystemProgram.programId, isSigner: false, isWritable: false },
-      { pubkey: ultrahonkVerifierProgramId, isSigner: false, isWritable: false },
+      { pubkey: ULTRAHONK_VERIFIER_PROGRAM_ID, isSigner: false, isWritable: false },
     ],
     data: Buffer.from(instructionData),
   });
 
-  // Get priority fee instructions for better transaction landing
   const priorityFeeIxs = await getPriorityFeeInstructions([
     ZVAULT_PROGRAM_ID.toBase58(),
   ]);
@@ -640,10 +412,7 @@ export interface RedeemParams {
 }
 
 /**
- * Build REQUEST_REDEMPTION transaction
- *
- * Burns zBTC and creates a RedemptionRequest PDA that the
- * backend redemption processor will pick up.
+ * Build REQUEST_REDEMPTION transaction with Helius priority fees
  */
 export async function buildRedeemTransaction(
   connection: Connection,
@@ -652,15 +421,15 @@ export async function buildRedeemTransaction(
   const { userPubkey, userTokenAccount, amountSats, btcAddress } = params;
 
   const [poolState] = derivePoolStatePDA();
-  const [zbtcMint] = derivezBTCMintPDA();
 
-  const instructionData = buildRedemptionRequestData(amountSats, btcAddress);
+  // Use SDK instruction data builder
+  const instructionData = sdkBuildRedemptionRequestInstructionData(amountSats, btcAddress);
 
   const instruction = new TransactionInstruction({
     programId: ZVAULT_PROGRAM_ID,
     keys: [
       { pubkey: poolState, isSigner: false, isWritable: true },
-      { pubkey: zbtcMint, isSigner: false, isWritable: true },
+      { pubkey: ZBTC_MINT_ADDRESS, isSigner: false, isWritable: true },
       { pubkey: userTokenAccount, isSigner: false, isWritable: true },
       { pubkey: userPubkey, isSigner: true, isWritable: true },
       { pubkey: SystemProgram.programId, isSigner: false, isWritable: false },
@@ -669,7 +438,6 @@ export async function buildRedeemTransaction(
     data: Buffer.from(instructionData),
   });
 
-  // Get priority fee instructions for better transaction landing
   const priorityFeeIxs = await getPriorityFeeInstructions([
     ZVAULT_PROGRAM_ID.toBase58(),
   ]);
@@ -690,24 +458,15 @@ export async function buildRedeemTransaction(
 // =============================================================================
 
 /**
- * Get user's zBTC token account (creates if needed)
+ * Get user's zBTC token account address
  */
-export async function getOrCreateTokenAccount(
-  connection: Connection,
-  userPubkey: PublicKey
-): Promise<PublicKey> {
-  const [zbtcMint] = derivezBTCMintPDA();
-
-  // Derive associated token account
-  const { getAssociatedTokenAddressSync } = await import("@solana/spl-token");
-  const tokenAccount = getAssociatedTokenAddressSync(
-    zbtcMint,
+export function getTokenAccountAddress(userPubkey: PublicKey): PublicKey {
+  return getAssociatedTokenAddressSync(
+    ZBTC_MINT_ADDRESS,
     userPubkey,
     false,
     TOKEN_2022_PROGRAM_ID
   );
-
-  return tokenAccount;
 }
 
 /**
@@ -718,7 +477,6 @@ export async function isNullifierUsed(
   nullifierHash: Uint8Array
 ): Promise<boolean> {
   const [nullifierPDA] = deriveNullifierPDA(nullifierHash);
-
   try {
     const account = await connection.getAccountInfo(nullifierPDA);
     return account !== null;
@@ -734,27 +492,12 @@ export async function getMerkleRoot(
   connection: Connection
 ): Promise<Uint8Array | null> {
   const [commitmentTree] = deriveCommitmentTreePDA();
-
   try {
     const account = await connection.getAccountInfo(commitmentTree);
     if (!account) return null;
-
     // Root is at offset 8 (after discriminator), 32 bytes
-    // This depends on the actual account layout
     return account.data.slice(8, 40);
   } catch {
     return null;
   }
-}
-
-/**
- * Bigint to 32-byte Uint8Array (big-endian)
- */
-export function bigintTo32Bytes(value: bigint): Uint8Array {
-  const hex = value.toString(16).padStart(64, "0");
-  const bytes = new Uint8Array(32);
-  for (let i = 0; i < 32; i++) {
-    bytes[i] = parseInt(hex.slice(i * 2, i * 2 + 2), 16);
-  }
-  return bytes;
 }
