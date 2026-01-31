@@ -44,10 +44,11 @@ import {
   DEVNET_CONFIG,
 } from "../src/config";
 import {
-  computeUnifiedCommitment,
-  computeNullifier,
-  hashNullifier,
-} from "../src/poseidon2";
+  computeUnifiedCommitmentSync,
+  computeNullifierSync,
+  hashNullifierSync,
+  initPoseidon,
+} from "../src/poseidon";
 import {
   randomFieldElement,
   bigintToBytes,
@@ -143,15 +144,15 @@ function generateMockSpendPartialPublicInputs(): {
   const leafIndex = 0n;
 
   // Compute commitment and nullifier (simulating what user's note would contain)
-  const commitment = computeUnifiedCommitment(pubKeyX, amount);
-  const nullifier = computeNullifier(privKey, leafIndex);
-  const nullifierHash = hashNullifier(nullifier);
+  const commitment = computeUnifiedCommitmentSync(pubKeyX, amount);
+  const nullifier = computeNullifierSync(privKey, leafIndex);
+  const nullifierHash = hashNullifierSync(nullifier);
 
   // For partial public: send 60% public, keep 40% as change
   const publicAmount = 60_000n;
   const changeAmount = 40_000n;
   const changePubKeyX = randomFieldElement();
-  const changeCommitment = computeUnifiedCommitment(changePubKeyX, changeAmount);
+  const changeCommitment = computeUnifiedCommitmentSync(changePubKeyX, changeAmount);
 
   // Mock merkle root (in real scenario, this comes from the commitment tree)
   const merkleRoot = createMock32Bytes(42);
@@ -203,16 +204,16 @@ function generateMockSpendSplitInputs(): {
   const leafIndex = 0n;
 
   // Compute nullifier
-  const nullifier = computeNullifier(privKey, leafIndex);
-  const nullifierHash = hashNullifier(nullifier);
+  const nullifier = computeNullifierSync(privKey, leafIndex);
+  const nullifierHash = hashNullifierSync(nullifier);
 
   // Split: 70% to output1, 30% to output2
   const output1Amount = 70_000n;
   const output2Amount = 30_000n;
   const output1PubKeyX = randomFieldElement();
   const output2PubKeyX = randomFieldElement();
-  const outputCommitment1 = computeUnifiedCommitment(output1PubKeyX, output1Amount);
-  const outputCommitment2 = computeUnifiedCommitment(output2PubKeyX, output2Amount);
+  const outputCommitment1 = computeUnifiedCommitmentSync(output1PubKeyX, output1Amount);
+  const outputCommitment2 = computeUnifiedCommitmentSync(output2PubKeyX, output2Amount);
 
   // Mock merkle root
   const merkleRoot = createMock32Bytes(42);
@@ -252,6 +253,9 @@ let relayer: Keypair;
 
 describe("Relay Functions E2E", () => {
   beforeAll(async () => {
+    // Initialize Poseidon for hash computations
+    await initPoseidon();
+
     // Set config based on network
     if (USE_DEVNET) {
       setConfig("devnet");
@@ -321,14 +325,14 @@ describe("Relay Functions E2E", () => {
       const pubKeyX = 12345n;
       const amount = 100_000n;
 
-      const commitment1 = computeUnifiedCommitment(pubKeyX, amount);
-      const commitment2 = computeUnifiedCommitment(pubKeyX, amount);
+      const commitment1 = computeUnifiedCommitmentSync(pubKeyX, amount);
+      const commitment2 = computeUnifiedCommitmentSync(pubKeyX, amount);
 
       // Same inputs should produce same commitment
       expect(commitment1).toBe(commitment2);
 
       // Different amount should produce different commitment
-      const commitment3 = computeUnifiedCommitment(pubKeyX, 50_000n);
+      const commitment3 = computeUnifiedCommitmentSync(pubKeyX, 50_000n);
       expect(commitment1).not.toBe(commitment3);
     });
 
@@ -336,19 +340,19 @@ describe("Relay Functions E2E", () => {
       const privKey = randomFieldElement();
       const leafIndex = 0n;
 
-      const nullifier = computeNullifier(privKey, leafIndex);
-      const nullifierHash = hashNullifier(nullifier);
+      const nullifier = computeNullifierSync(privKey, leafIndex);
+      const nullifierHash = hashNullifierSync(nullifier);
 
       expect(nullifierHash).toBeGreaterThan(0n);
 
       // Same inputs should produce same nullifier hash
-      const nullifier2 = computeNullifier(privKey, leafIndex);
-      const nullifierHash2 = hashNullifier(nullifier2);
+      const nullifier2 = computeNullifierSync(privKey, leafIndex);
+      const nullifierHash2 = hashNullifierSync(nullifier2);
       expect(nullifierHash).toBe(nullifierHash2);
 
       // Different leaf index should produce different nullifier
-      const nullifier3 = computeNullifier(privKey, 1n);
-      const nullifierHash3 = hashNullifier(nullifier3);
+      const nullifier3 = computeNullifierSync(privKey, 1n);
+      const nullifierHash3 = hashNullifierSync(nullifier3);
       expect(nullifierHash).not.toBe(nullifierHash3);
     });
   });
@@ -699,7 +703,7 @@ describe("Full Flow Simulation", () => {
     const amount = 100_000n;
     const leafIndex = 0n;
 
-    const commitment = computeUnifiedCommitment(pubKeyX, amount);
+    const commitment = computeUnifiedCommitmentSync(pubKeyX, amount);
     console.log(`   Commitment: ${commitment.toString(16).slice(0, 20)}...`);
 
     // Step 2: User generates ZK proof (mocked here)
@@ -709,14 +713,14 @@ describe("Full Flow Simulation", () => {
 
     // Step 3: User prepares relay params
     console.log("\n3. User prepares relay params");
-    const nullifier = computeNullifier(privKey, leafIndex);
-    const nullifierHash = hashNullifier(nullifier);
+    const nullifier = computeNullifierSync(privKey, leafIndex);
+    const nullifierHash = hashNullifierSync(nullifier);
 
     // For public transfer
     const publicAmount = 60_000n;
     const changeAmount = 40_000n;
     const changePubKeyX = randomFieldElement();
-    const changeCommitment = computeUnifiedCommitment(changePubKeyX, changeAmount);
+    const changeCommitment = computeUnifiedCommitmentSync(changePubKeyX, changeAmount);
     const recipient = Keypair.generate().publicKey;
 
     const params: RelaySpendPartialPublicParams = {
