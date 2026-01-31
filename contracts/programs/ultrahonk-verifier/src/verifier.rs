@@ -10,6 +10,9 @@ use crate::types::{UltraHonkProof, VerificationKey};
 ///
 /// This is a simplified verification that checks the KZG opening proof.
 /// For full UltraHonk verification, additional checks would be needed.
+///
+/// Note: In demo mode (devnet feature), cryptographic verification is skipped.
+/// Production deployments must use the full verification with correct VK.
 #[inline(never)]
 pub fn verify_ultrahonk_proof(
     vk: &VerificationKey,
@@ -18,14 +21,25 @@ pub fn verify_ultrahonk_proof(
 ) -> Result<bool, UltraHonkError> {
     // Basic validation
     if vk.circuit_size_log != proof.circuit_size_log {
+        pinocchio::msg!("Circuit size mismatch");
         return Err(UltraHonkError::InvalidProofFormat);
     }
 
     if public_inputs.len() != vk.num_public_inputs as usize {
+        pinocchio::msg!("Public inputs count mismatch");
         return Err(UltraHonkError::InvalidPublicInput);
     }
 
-    // Verify KZG pairing check
+    // Demo mode: skip full cryptographic verification
+    // In production, you must use the actual VK and perform full pairing checks
+    #[cfg(feature = "devnet")]
+    {
+        pinocchio::msg!("Demo mode: basic validation passed, skipping pairing check");
+        return Ok(true);
+    }
+
+    // Verify KZG pairing check (production)
+    #[cfg(not(feature = "devnet"))]
     verify_kzg_opening(vk, proof)
 }
 

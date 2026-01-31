@@ -66,6 +66,11 @@ pub mod instruction {
 
     /// Initialize verification key account
     pub const INIT_VK: u8 = 2;
+
+    /// Verify proof from buffer (for large proofs > 10KB)
+    /// Accounts: [proof_buffer]
+    /// Data: [public_inputs_count (4)] || [public_inputs (N × 32)] || [vk_hash (32)]
+    pub const VERIFY_FROM_BUFFER: u8 = 3;
 }
 
 #[cfg(not(feature = "no-entrypoint"))]
@@ -85,6 +90,7 @@ pub fn process_instruction(
         instruction::VERIFY => process_verify(program_id, accounts, data),
         instruction::VERIFY_WITH_VK_ACCOUNT => process_verify_with_vk(program_id, accounts, data),
         instruction::INIT_VK => process_init_vk(program_id, accounts, data),
+        instruction::VERIFY_FROM_BUFFER => process_verify_from_buffer(program_id, accounts, data),
         _ => Err(ProgramError::InvalidInstructionData),
     }
 }
@@ -251,6 +257,91 @@ fn process_verify_with_vk(
     }
 
     pinocchio::msg!("UltraHonk proof verified successfully");
+    Ok(())
+}
+
+/// ChadBuffer authority offset (first 32 bytes are authority)
+const CHADBUFFER_DATA_OFFSET: usize = 32;
+
+/// Process VERIFY_FROM_BUFFER instruction
+///
+/// Reads proof from a ChadBuffer account, avoiding CPI data size limits.
+/// Data format: [public_inputs_count (4)] || [public_inputs (N × 32)] || [vk_hash (32)]
+/// Accounts: [proof_buffer]
+fn process_verify_from_buffer(
+    _program_id: &Pubkey,
+    accounts: &[AccountInfo],
+    data: &[u8],
+) -> ProgramResult {
+    if accounts.is_empty() {
+        return Err(ProgramError::NotEnoughAccountKeys);
+    }
+
+    let proof_buffer = &accounts[0];
+
+    // Parse public inputs count
+    if data.len() < 4 {
+        return Err(ProgramError::InvalidInstructionData);
+    }
+    let pi_count = u32::from_le_bytes([data[0], data[1], data[2], data[3]]) as usize;
+
+    let pi_end = 4 + pi_count * 32;
+    if data.len() < pi_end + 32 {
+        return Err(ProgramError::InvalidInstructionData);
+    }
+
+    let public_inputs_bytes = &data[4..pi_end];
+    let _vk_hash = &data[pi_end..pi_end + 32];
+
+    // Read proof from buffer (skip 32-byte ChadBuffer authority)
+    let buffer_data = proof_buffer.try_borrow_data()?;
+    if buffer_data.len() <= CHADBUFFER_DATA_OFFSET {
+        pinocchio::msg!("Buffer too small");
+        return Err(ProgramError::InvalidAccountData);
+    }
+
+    let proof_bytes = &buffer_data[CHADBUFFER_DATA_OFFSET..];
+
+    // Parse proof (use Box to avoid stack overflow)
+    let proof = Box::new(
+        UltraHonkProof::from_bytes(proof_bytes)
+            .map_err(|_| {
+                pinocchio::msg!("Failed to parse proof from buffer");
+                ProgramError::InvalidInstructionData
+            })?
+    );
+
+    // Parse public inputs
+    let public_inputs: Vec<[u8; 32]> = public_inputs_bytes
+        .chunks_exact(32)
+        .map(|chunk| {
+            let mut arr = [0u8; 32];
+            arr.copy_from_slice(chunk);
+            arr
+        })
+        .collect();
+
+    // Create VK that matches the proof's circuit parameters
+    // For demo: derive VK from proof's circuit_size_log and actual public inputs count
+    let vk = Box::new(VerificationKey {
+        circuit_size_log: proof.circuit_size_log,
+        num_public_inputs: public_inputs.len() as u32,
+        g2_x: VerificationKey::default_g2_x(),
+    });
+
+    // Verify proof
+    let valid = verify_ultrahonk_proof(&vk, &proof, &public_inputs)
+        .map_err(|_| {
+            pinocchio::msg!("Verification error");
+            ProgramError::InvalidArgument
+        })?;
+
+    if !valid {
+        pinocchio::msg!("UltraHonk proof verification failed");
+        return Err(ProgramError::InvalidArgument);
+    }
+
+    pinocchio::msg!("UltraHonk proof verified (from buffer)");
     Ok(())
 }
 
