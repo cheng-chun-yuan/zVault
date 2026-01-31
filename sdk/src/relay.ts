@@ -17,56 +17,143 @@
  */
 
 import {
-  Connection,
-  Keypair,
-  PublicKey,
-  Transaction,
-  TransactionInstruction,
-  SystemProgram,
-  sendAndConfirmTransaction,
-  ComputeBudgetProgram,
-} from "@solana/web3.js";
+  address,
+  getProgramDerivedAddress,
+  generateKeyPairSigner,
+  pipe,
+  createTransactionMessage,
+  setTransactionMessageFeePayer,
+  setTransactionMessageLifetimeUsingBlockhash,
+  appendTransactionMessageInstruction,
+  appendTransactionMessageInstructions,
+  signTransactionMessageWithSigners,
+  getSignatureFromTransaction,
+  sendAndConfirmTransactionFactory,
+  AccountRole,
+  type Address,
+  type KeyPairSigner,
+  type Rpc,
+  type RpcSubscriptions,
+  type SolanaRpcApi,
+  type SolanaRpcSubscriptionsApi,
+} from "@solana/kit";
+import { getCreateAccountInstruction } from "@solana-program/system";
 import { getConfig, TOKEN_2022_PROGRAM_ID, ATA_PROGRAM_ID } from "./config";
+
+/** Instruction type for @solana/kit v2 */
+interface Instruction {
+  programAddress: Address;
+  accounts: Array<{
+    address: Address;
+    role: (typeof AccountRole)[keyof typeof AccountRole];
+    signer?: KeyPairSigner;
+  }>;
+  data: Uint8Array;
+}
 
 // =============================================================================
 // ATA Helpers (avoid @solana/spl-token dependency)
 // =============================================================================
 
-const TOKEN_2022_PROGRAM = new PublicKey(TOKEN_2022_PROGRAM_ID);
-const ATA_PROGRAM = new PublicKey(ATA_PROGRAM_ID);
+const TOKEN_2022_PROGRAM: Address = address(TOKEN_2022_PROGRAM_ID);
+const ATA_PROGRAM: Address = address(ATA_PROGRAM_ID);
+const SYSTEM_PROGRAM: Address = address("11111111111111111111111111111111");
 
-function getAssociatedTokenAddressSync(
-  mint: PublicKey,
-  owner: PublicKey,
-  allowOwnerOffCurve = false,
-  tokenProgram: PublicKey = TOKEN_2022_PROGRAM
-): PublicKey {
-  const [ata] = PublicKey.findProgramAddressSync(
-    [owner.toBuffer(), tokenProgram.toBuffer(), mint.toBuffer()],
-    ATA_PROGRAM
-  );
+async function getAssociatedTokenAddress(
+  mint: Address,
+  owner: Address,
+  tokenProgram: Address = TOKEN_2022_PROGRAM
+): Promise<Address> {
+  const [ata] = await getProgramDerivedAddress({
+    programAddress: ATA_PROGRAM,
+    seeds: [
+      getAddressBytes(owner),
+      getAddressBytes(tokenProgram),
+      getAddressBytes(mint),
+    ],
+  });
   return ata;
 }
 
 function createAssociatedTokenAccountInstruction(
-  payer: PublicKey,
-  ata: PublicKey,
-  owner: PublicKey,
-  mint: PublicKey,
-  tokenProgram: PublicKey = TOKEN_2022_PROGRAM
-): TransactionInstruction {
-  return new TransactionInstruction({
-    programId: ATA_PROGRAM,
-    keys: [
-      { pubkey: payer, isSigner: true, isWritable: true },
-      { pubkey: ata, isSigner: false, isWritable: true },
-      { pubkey: owner, isSigner: false, isWritable: false },
-      { pubkey: mint, isSigner: false, isWritable: false },
-      { pubkey: SystemProgram.programId, isSigner: false, isWritable: false },
-      { pubkey: tokenProgram, isSigner: false, isWritable: false },
+  payer: KeyPairSigner,
+  ata: Address,
+  owner: Address,
+  mint: Address,
+  tokenProgram: Address = TOKEN_2022_PROGRAM
+): Instruction {
+  return {
+    programAddress: ATA_PROGRAM,
+    accounts: [
+      { address: payer.address, role: AccountRole.WRITABLE_SIGNER, signer: payer },
+      { address: ata, role: AccountRole.WRITABLE },
+      { address: owner, role: AccountRole.READONLY },
+      { address: mint, role: AccountRole.READONLY },
+      { address: SYSTEM_PROGRAM, role: AccountRole.READONLY },
+      { address: tokenProgram, role: AccountRole.READONLY },
     ],
-    data: Buffer.from([0]), // 0 = Create instruction
-  });
+    data: new Uint8Array([0]), // 0 = Create instruction
+  };
+}
+
+// =============================================================================
+// Address/Bytes Helpers
+// =============================================================================
+
+const BASE58_ALPHABET = "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz";
+
+function getAddressBytes(addr: Address): Uint8Array {
+  return bs58Decode(addr.toString());
+}
+
+function bs58Decode(str: string): Uint8Array {
+  let num = 0n;
+  for (const char of str) {
+    const idx = BASE58_ALPHABET.indexOf(char);
+    if (idx === -1) throw new Error(`Invalid base58 character: ${char}`);
+    num = num * 58n + BigInt(idx);
+  }
+
+  const bytes: number[] = [];
+  while (num > 0n) {
+    bytes.unshift(Number(num % 256n));
+    num = num / 256n;
+  }
+
+  // Handle leading zeros
+  for (const char of str) {
+    if (char === "1") {
+      bytes.unshift(0);
+    } else {
+      break;
+    }
+  }
+
+  return new Uint8Array(bytes);
+}
+
+function bs58Encode(bytes: Uint8Array): string {
+  let num = 0n;
+  for (const byte of bytes) {
+    num = num * 256n + BigInt(byte);
+  }
+
+  let result = "";
+  while (num > 0n) {
+    result = BASE58_ALPHABET[Number(num % 58n)] + result;
+    num = num / 58n;
+  }
+
+  // Handle leading zeros
+  for (const byte of bytes) {
+    if (byte === 0) {
+      result = "1" + result;
+    } else {
+      break;
+    }
+  }
+
+  return result || "1";
 }
 
 // =============================================================================
@@ -74,12 +161,12 @@ function createAssociatedTokenAccountInstruction(
 // =============================================================================
 
 /** Get ChadBuffer program ID from current config */
-function getChadBufferProgramId(): PublicKey {
-  return new PublicKey(getConfig().chadbufferProgramId);
+function getChadBufferProgramId(): Address {
+  return address(getConfig().chadbufferProgramId);
 }
 
 /** ChadBuffer program ID (legacy export for backwards compatibility) */
-export const CHADBUFFER_PROGRAM_ID = new PublicKey("CHADufvk3AGLCVG1Pk76xUHZJZjEAj1YLNCgDA1P4YX9");
+export const CHADBUFFER_PROGRAM_ID: Address = address("CHADufvk3AGLCVG1Pk76xUHZJZjEAj1YLNCgDA1P4YX9");
 
 /** ChadBuffer authority offset (first 32 bytes) */
 const CHADBUFFER_AUTHORITY_SIZE = 32;
@@ -118,7 +205,7 @@ export interface RelaySpendPartialPublicParams {
   /** Change commitment (32 bytes) */
   changeCommitment: Uint8Array;
   /** Recipient Solana address */
-  recipient: PublicKey;
+  recipient: Address;
   /** VK hash (32 bytes) */
   vkHash: Uint8Array;
 }
@@ -153,23 +240,36 @@ export interface RelayResult {
 // PDA Derivation
 // =============================================================================
 
-function derivePoolStatePDA(programId: PublicKey): PublicKey {
-  return PublicKey.findProgramAddressSync([Buffer.from("pool")], programId)[0];
+async function derivePoolStatePDA(programId: Address): Promise<Address> {
+  const [pda] = await getProgramDerivedAddress({
+    programAddress: programId,
+    seeds: [new TextEncoder().encode("pool")],
+  });
+  return pda;
 }
 
-function deriveCommitmentTreePDA(programId: PublicKey): PublicKey {
-  return PublicKey.findProgramAddressSync([Buffer.from("commitment_tree")], programId)[0];
+async function deriveCommitmentTreePDA(programId: Address): Promise<Address> {
+  const [pda] = await getProgramDerivedAddress({
+    programAddress: programId,
+    seeds: [new TextEncoder().encode("commitment_tree")],
+  });
+  return pda;
 }
 
-function deriveNullifierPDA(programId: PublicKey, nullifierHash: Uint8Array): PublicKey {
-  return PublicKey.findProgramAddressSync(
-    [Buffer.from("nullifier"), nullifierHash],
-    programId
-  )[0];
+async function deriveNullifierPDA(programId: Address, nullifierHash: Uint8Array): Promise<Address> {
+  const [pda] = await getProgramDerivedAddress({
+    programAddress: programId,
+    seeds: [new TextEncoder().encode("nullifier"), nullifierHash],
+  });
+  return pda;
 }
 
-function deriveZbtcMintPDA(programId: PublicKey): PublicKey {
-  return PublicKey.findProgramAddressSync([Buffer.from("zbtc_mint")], programId)[0];
+async function deriveZbtcMintPDA(programId: Address): Promise<Address> {
+  const [pda] = await getProgramDerivedAddress({
+    programAddress: programId,
+    seeds: [new TextEncoder().encode("zbtc_mint")],
+  });
+  return pda;
 }
 
 // =============================================================================
@@ -180,86 +280,96 @@ function deriveZbtcMintPDA(programId: PublicKey): PublicKey {
  * Create a ChadBuffer account for storing proof data
  */
 export async function createChadBuffer(
-  connection: Connection,
-  payer: Keypair,
+  rpc: Rpc<SolanaRpcApi>,
+  rpcSubscriptions: RpcSubscriptions<SolanaRpcSubscriptionsApi>,
+  payer: KeyPairSigner,
   proofSize: number
-): Promise<{ keypair: Keypair; createTx: Transaction }> {
-  const bufferKeypair = Keypair.generate();
+): Promise<{ keypair: KeyPairSigner; signature: string }> {
+  const bufferKeypair = await generateKeyPairSigner();
   const bufferSize = CHADBUFFER_AUTHORITY_SIZE + proofSize;
 
-  const rentExemption = await connection.getMinimumBalanceForRentExemption(bufferSize);
-  const { blockhash } = await connection.getLatestBlockhash();
+  const rentExemption = await rpc.getMinimumBalanceForRentExemption(BigInt(bufferSize)).send();
+  const { value: blockhash } = await rpc.getLatestBlockhash().send();
 
-  const createIx = SystemProgram.createAccount({
-    fromPubkey: payer.publicKey,
-    newAccountPubkey: bufferKeypair.publicKey,
+  const createAccountIx = getCreateAccountInstruction({
+    payer,
+    newAccount: bufferKeypair,
     lamports: rentExemption,
-    space: bufferSize,
-    programId: getChadBufferProgramId(),
+    space: BigInt(bufferSize),
+    programAddress: getChadBufferProgramId(),
   });
 
-  const initIx = new TransactionInstruction({
-    programId: getChadBufferProgramId(),
-    keys: [
-      { pubkey: payer.publicKey, isSigner: true, isWritable: true },
-      { pubkey: bufferKeypair.publicKey, isSigner: false, isWritable: true },
+  const initIx: Instruction = {
+    programAddress: getChadBufferProgramId(),
+    accounts: [
+      { address: payer.address, role: AccountRole.WRITABLE_SIGNER, signer: payer },
+      { address: bufferKeypair.address, role: AccountRole.WRITABLE },
     ],
-    data: Buffer.from([CHADBUFFER_INIT]),
-  });
+    data: new Uint8Array([CHADBUFFER_INIT]),
+  };
 
-  const tx = new Transaction();
-  tx.add(createIx, initIx);
-  tx.feePayer = payer.publicKey;
-  tx.recentBlockhash = blockhash;
+  const tx = pipe(
+    createTransactionMessage({ version: 0 }),
+    (msg) => setTransactionMessageFeePayer(payer.address, msg),
+    (msg) => setTransactionMessageLifetimeUsingBlockhash(blockhash, msg),
+    (msg) => appendTransactionMessageInstructions([createAccountIx, initIx], msg)
+  );
 
-  return { keypair: bufferKeypair, createTx: tx };
+  const signedTx = await signTransactionMessageWithSigners(tx);
+  const sendAndConfirm = sendAndConfirmTransactionFactory({ rpc, rpcSubscriptions });
+  await sendAndConfirm(signedTx as any, { commitment: "confirmed" });
+
+  return { keypair: bufferKeypair, signature: getSignatureFromTransaction(signedTx) };
 }
 
 /**
  * Upload proof to ChadBuffer in chunks
  */
 export async function uploadProofToBuffer(
-  connection: Connection,
-  payer: Keypair,
-  bufferPubkey: PublicKey,
+  rpc: Rpc<SolanaRpcApi>,
+  rpcSubscriptions: RpcSubscriptions<SolanaRpcSubscriptionsApi>,
+  payer: KeyPairSigner,
+  bufferAddress: Address,
   proof: Uint8Array,
   onProgress?: (uploaded: number, total: number) => void
 ): Promise<string[]> {
   const signatures: string[] = [];
   let offset = 0;
+  const sendAndConfirm = sendAndConfirmTransactionFactory({ rpc, rpcSubscriptions });
 
   while (offset < proof.length) {
     const chunkSize = Math.min(MAX_CHUNK_SIZE, proof.length - offset);
     const chunk = proof.slice(offset, offset + chunkSize);
 
     // ChadBuffer Write instruction: discriminator(1) + u24_offset(3) + data
-    const writeData = Buffer.alloc(1 + 3 + chunk.length);
+    const writeData = new Uint8Array(1 + 3 + chunk.length);
     writeData[0] = CHADBUFFER_WRITE;
     // Write u24 offset (little-endian, 3 bytes)
     writeData[1] = offset & 0xff;
     writeData[2] = (offset >> 8) & 0xff;
     writeData[3] = (offset >> 16) & 0xff;
-    Buffer.from(chunk).copy(writeData, 4);
+    writeData.set(chunk, 4);
 
-    const writeIx = new TransactionInstruction({
-      programId: getChadBufferProgramId(),
-      keys: [
-        { pubkey: payer.publicKey, isSigner: true, isWritable: true },
-        { pubkey: bufferPubkey, isSigner: false, isWritable: true },
+    const writeIx: Instruction = {
+      programAddress: getChadBufferProgramId(),
+      accounts: [
+        { address: payer.address, role: AccountRole.WRITABLE_SIGNER, signer: payer },
+        { address: bufferAddress, role: AccountRole.WRITABLE },
       ],
       data: writeData,
-    });
+    };
 
-    const { blockhash } = await connection.getLatestBlockhash();
-    const tx = new Transaction();
-    tx.add(writeIx);
-    tx.feePayer = payer.publicKey;
-    tx.recentBlockhash = blockhash;
+    const { value: blockhash } = await rpc.getLatestBlockhash().send();
+    const tx = pipe(
+      createTransactionMessage({ version: 0 }),
+      (msg) => setTransactionMessageFeePayer(payer.address, msg),
+      (msg) => setTransactionMessageLifetimeUsingBlockhash(blockhash, msg),
+      (msg) => appendTransactionMessageInstruction(writeIx, msg)
+    );
 
-    const sig = await sendAndConfirmTransaction(connection, tx, [payer], {
-      commitment: "confirmed",
-    });
-    signatures.push(sig);
+    const signedTx = await signTransactionMessageWithSigners(tx);
+    await sendAndConfirm(signedTx as any, { commitment: "confirmed" });
+    signatures.push(getSignatureFromTransaction(signedTx));
 
     offset += chunkSize;
     onProgress?.(offset, proof.length);
@@ -272,26 +382,52 @@ export async function uploadProofToBuffer(
  * Close ChadBuffer and reclaim rent
  */
 export async function closeChadBuffer(
-  connection: Connection,
-  payer: Keypair,
-  bufferPubkey: PublicKey
+  rpc: Rpc<SolanaRpcApi>,
+  rpcSubscriptions: RpcSubscriptions<SolanaRpcSubscriptionsApi>,
+  payer: KeyPairSigner,
+  bufferAddress: Address
 ): Promise<string> {
-  const closeIx = new TransactionInstruction({
-    programId: getChadBufferProgramId(),
-    keys: [
-      { pubkey: payer.publicKey, isSigner: true, isWritable: true },
-      { pubkey: bufferPubkey, isSigner: false, isWritable: true },
+  const closeIx: Instruction = {
+    programAddress: getChadBufferProgramId(),
+    accounts: [
+      { address: payer.address, role: AccountRole.WRITABLE_SIGNER, signer: payer },
+      { address: bufferAddress, role: AccountRole.WRITABLE },
     ],
-    data: Buffer.from([CHADBUFFER_CLOSE]),
-  });
+    data: new Uint8Array([CHADBUFFER_CLOSE]),
+  };
 
-  const { blockhash } = await connection.getLatestBlockhash();
-  const tx = new Transaction();
-  tx.add(closeIx);
-  tx.feePayer = payer.publicKey;
-  tx.recentBlockhash = blockhash;
+  const { value: blockhash } = await rpc.getLatestBlockhash().send();
+  const tx = pipe(
+    createTransactionMessage({ version: 0 }),
+    (msg) => setTransactionMessageFeePayer(payer.address, msg),
+    (msg) => setTransactionMessageLifetimeUsingBlockhash(blockhash, msg),
+    (msg) => appendTransactionMessageInstruction(closeIx, msg)
+  );
 
-  return sendAndConfirmTransaction(connection, tx, [payer], { commitment: "confirmed" });
+  const signedTx = await signTransactionMessageWithSigners(tx);
+  const sendAndConfirm = sendAndConfirmTransactionFactory({ rpc, rpcSubscriptions });
+  await sendAndConfirm(signedTx as any, { commitment: "confirmed" });
+
+  return getSignatureFromTransaction(signedTx);
+}
+
+// =============================================================================
+// Compute Budget Helper
+// =============================================================================
+
+/** Compute Budget Program ID */
+const COMPUTE_BUDGET_PROGRAM: Address = address("ComputeBudget111111111111111111111111111111");
+
+function createSetComputeUnitLimitInstruction(units: number): Instruction {
+  const data = new Uint8Array(5);
+  data[0] = 2; // SetComputeUnitLimit instruction
+  const view = new DataView(data.buffer);
+  view.setUint32(1, units, true);
+  return {
+    programAddress: COMPUTE_BUDGET_PROGRAM,
+    accounts: [],
+    data,
+  };
 }
 
 // =============================================================================
@@ -308,35 +444,34 @@ export async function closeChadBuffer(
  * 4. Close buffer and reclaim rent
  */
 export async function relaySpendPartialPublic(
-  connection: Connection,
-  relayer: Keypair,
+  rpc: Rpc<SolanaRpcApi>,
+  rpcSubscriptions: RpcSubscriptions<SolanaRpcSubscriptionsApi>,
+  relayer: KeyPairSigner,
   params: RelaySpendPartialPublicParams,
   onProgress?: (stage: string, progress?: number) => void
 ): Promise<RelayResult> {
   const config = getConfig();
-  const zvaultProgram = new PublicKey(config.zvaultProgramId);
-  const ultrahonkVerifier = new PublicKey(config.ultrahonkVerifierProgramId);
+  const zvaultProgram = address(config.zvaultProgramId);
+  const ultrahonkVerifier = address(config.ultrahonkVerifierProgramId);
 
   onProgress?.("Creating buffer...");
 
   // 1. Create ChadBuffer
-  const { keypair: bufferKeypair, createTx } = await createChadBuffer(
-    connection,
+  const { keypair: bufferKeypair } = await createChadBuffer(
+    rpc,
+    rpcSubscriptions,
     relayer,
     params.proof.length
   );
-
-  await sendAndConfirmTransaction(connection, createTx, [relayer, bufferKeypair], {
-    commitment: "confirmed",
-  });
 
   onProgress?.("Uploading proof...", 0);
 
   // 2. Upload proof in chunks
   await uploadProofToBuffer(
-    connection,
+    rpc,
+    rpcSubscriptions,
     relayer,
-    bufferKeypair.publicKey,
+    bufferKeypair.address,
     params.proof,
     (uploaded, total) => onProgress?.("Uploading proof...", (uploaded / total) * 100)
   );
@@ -344,43 +479,42 @@ export async function relaySpendPartialPublic(
   onProgress?.("Building transaction...");
 
   // 3. Build and submit zVault transaction
-  const poolState = derivePoolStatePDA(zvaultProgram);
-  const commitmentTree = deriveCommitmentTreePDA(zvaultProgram);
-  const nullifierPDA = deriveNullifierPDA(zvaultProgram, params.nullifierHash);
-  const zbtcMint = deriveZbtcMintPDA(zvaultProgram);
-  const poolVault = getAssociatedTokenAddressSync(zbtcMint, poolState, true, TOKEN_2022_PROGRAM);
-  const recipientAta = getAssociatedTokenAddressSync(
+  const poolState = await derivePoolStatePDA(zvaultProgram);
+  const commitmentTree = await deriveCommitmentTreePDA(zvaultProgram);
+  const nullifierPDA = await deriveNullifierPDA(zvaultProgram, params.nullifierHash);
+  const zbtcMint = await deriveZbtcMintPDA(zvaultProgram);
+  const poolVault = await getAssociatedTokenAddress(zbtcMint, poolState, TOKEN_2022_PROGRAM);
+  const recipientAta = await getAssociatedTokenAddress(
     zbtcMint,
     params.recipient,
-    false,
     TOKEN_2022_PROGRAM
   );
 
   // Build instruction data (buffer mode)
-  const ixData = Buffer.alloc(1 + 1 + 32 + 32 + 8 + 32 + 32 + 32);
+  const ixData = new Uint8Array(1 + 1 + 32 + 32 + 8 + 32 + 32 + 32);
   let offset = 0;
   ixData[offset++] = SPEND_PARTIAL_PUBLIC;
   ixData[offset++] = PROOF_SOURCE_BUFFER;
-  Buffer.from(params.root).copy(ixData, offset); offset += 32;
-  Buffer.from(params.nullifierHash).copy(ixData, offset); offset += 32;
-  ixData.writeBigUInt64LE(params.publicAmountSats, offset); offset += 8;
-  Buffer.from(params.changeCommitment).copy(ixData, offset); offset += 32;
-  params.recipient.toBuffer().copy(ixData, offset); offset += 32;
-  Buffer.from(params.vkHash).copy(ixData, offset);
+  ixData.set(params.root, offset); offset += 32;
+  ixData.set(params.nullifierHash, offset); offset += 32;
+  const amountView = new DataView(ixData.buffer, offset, 8);
+  amountView.setBigUint64(0, params.publicAmountSats, true);
+  offset += 8;
+  ixData.set(params.changeCommitment, offset); offset += 32;
+  ixData.set(getAddressBytes(params.recipient), offset); offset += 32;
+  ixData.set(params.vkHash, offset);
 
   // Check if recipient ATA exists, create if needed
-  const recipientAtaInfo = await connection.getAccountInfo(recipientAta);
-  const instructions: TransactionInstruction[] = [];
+  const recipientAtaInfo = await rpc.getAccountInfo(recipientAta, { encoding: "base64" }).send();
+  const instructions: Instruction[] = [];
 
   // Add compute budget for ZK verification
-  instructions.push(
-    ComputeBudgetProgram.setComputeUnitLimit({ units: 1_400_000 })
-  );
+  instructions.push(createSetComputeUnitLimitInstruction(1_400_000));
 
-  if (!recipientAtaInfo) {
+  if (!recipientAtaInfo.value) {
     instructions.push(
       createAssociatedTokenAccountInstruction(
-        relayer.publicKey,
+        relayer,
         recipientAta,
         params.recipient,
         zbtcMint,
@@ -389,44 +523,46 @@ export async function relaySpendPartialPublic(
     );
   }
 
-  instructions.push(
-    new TransactionInstruction({
-      programId: zvaultProgram,
-      keys: [
-        { pubkey: poolState, isSigner: false, isWritable: true },
-        { pubkey: commitmentTree, isSigner: false, isWritable: true },
-        { pubkey: nullifierPDA, isSigner: false, isWritable: true },
-        { pubkey: zbtcMint, isSigner: false, isWritable: true },
-        { pubkey: poolVault, isSigner: false, isWritable: true },
-        { pubkey: recipientAta, isSigner: false, isWritable: true },
-        { pubkey: relayer.publicKey, isSigner: true, isWritable: true },
-        { pubkey: TOKEN_2022_PROGRAM, isSigner: false, isWritable: false },
-        { pubkey: SystemProgram.programId, isSigner: false, isWritable: false },
-        { pubkey: ultrahonkVerifier, isSigner: false, isWritable: false },
-        { pubkey: bufferKeypair.publicKey, isSigner: false, isWritable: false },
-      ],
-      data: ixData,
-    })
-  );
+  instructions.push({
+    programAddress: zvaultProgram,
+    accounts: [
+      { address: poolState, role: AccountRole.WRITABLE },
+      { address: commitmentTree, role: AccountRole.WRITABLE },
+      { address: nullifierPDA, role: AccountRole.WRITABLE },
+      { address: zbtcMint, role: AccountRole.WRITABLE },
+      { address: poolVault, role: AccountRole.WRITABLE },
+      { address: recipientAta, role: AccountRole.WRITABLE },
+      { address: relayer.address, role: AccountRole.WRITABLE_SIGNER, signer: relayer },
+      { address: TOKEN_2022_PROGRAM, role: AccountRole.READONLY },
+      { address: SYSTEM_PROGRAM, role: AccountRole.READONLY },
+      { address: ultrahonkVerifier, role: AccountRole.READONLY },
+      { address: bufferKeypair.address, role: AccountRole.READONLY },
+    ],
+    data: ixData,
+  });
 
   onProgress?.("Submitting transaction...");
 
-  const { blockhash } = await connection.getLatestBlockhash();
-  const tx = new Transaction();
-  instructions.forEach((ix) => tx.add(ix));
-  tx.feePayer = relayer.publicKey;
-  tx.recentBlockhash = blockhash;
+  const { value: blockhash } = await rpc.getLatestBlockhash().send();
+  const tx = pipe(
+    createTransactionMessage({ version: 0 }),
+    (msg) => setTransactionMessageFeePayer(relayer.address, msg),
+    (msg) => setTransactionMessageLifetimeUsingBlockhash(blockhash, msg),
+    (msg) => appendTransactionMessageInstructions(instructions, msg)
+  );
 
-  const signature = await sendAndConfirmTransaction(connection, tx, [relayer], {
-    commitment: "confirmed",
-  });
+  const signedTx = await signTransactionMessageWithSigners(tx);
+  const sendAndConfirm = sendAndConfirmTransactionFactory({ rpc, rpcSubscriptions });
+  await sendAndConfirm(signedTx as any, { commitment: "confirmed" });
+
+  const signature = getSignatureFromTransaction(signedTx);
 
   onProgress?.("Closing buffer...");
 
   // 4. Close buffer and reclaim rent
   let bufferClosed = false;
   try {
-    await closeChadBuffer(connection, relayer, bufferKeypair.publicKey);
+    await closeChadBuffer(rpc, rpcSubscriptions, relayer, bufferKeypair.address);
     bufferClosed = true;
   } catch (e) {
     console.warn("Failed to close buffer:", e);
@@ -436,7 +572,7 @@ export async function relaySpendPartialPublic(
 
   return {
     signature,
-    bufferAddress: bufferKeypair.publicKey.toBase58(),
+    bufferAddress: bufferKeypair.address,
     bufferClosed,
   };
 }
@@ -445,35 +581,34 @@ export async function relaySpendPartialPublic(
  * Relay a spend_split transaction
  */
 export async function relaySpendSplit(
-  connection: Connection,
-  relayer: Keypair,
+  rpc: Rpc<SolanaRpcApi>,
+  rpcSubscriptions: RpcSubscriptions<SolanaRpcSubscriptionsApi>,
+  relayer: KeyPairSigner,
   params: RelaySpendSplitParams,
   onProgress?: (stage: string, progress?: number) => void
 ): Promise<RelayResult> {
   const config = getConfig();
-  const zvaultProgram = new PublicKey(config.zvaultProgramId);
-  const ultrahonkVerifier = new PublicKey(config.ultrahonkVerifierProgramId);
+  const zvaultProgram = address(config.zvaultProgramId);
+  const ultrahonkVerifier = address(config.ultrahonkVerifierProgramId);
 
   onProgress?.("Creating buffer...");
 
   // 1. Create ChadBuffer
-  const { keypair: bufferKeypair, createTx } = await createChadBuffer(
-    connection,
+  const { keypair: bufferKeypair } = await createChadBuffer(
+    rpc,
+    rpcSubscriptions,
     relayer,
     params.proof.length
   );
-
-  await sendAndConfirmTransaction(connection, createTx, [relayer, bufferKeypair], {
-    commitment: "confirmed",
-  });
 
   onProgress?.("Uploading proof...", 0);
 
   // 2. Upload proof in chunks
   await uploadProofToBuffer(
-    connection,
+    rpc,
+    rpcSubscriptions,
     relayer,
-    bufferKeypair.publicKey,
+    bufferKeypair.address,
     params.proof,
     (uploaded, total) => onProgress?.("Uploading proof...", (uploaded / total) * 100)
   );
@@ -481,62 +616,62 @@ export async function relaySpendSplit(
   onProgress?.("Building transaction...");
 
   // 3. Build and submit zVault transaction
-  const poolState = derivePoolStatePDA(zvaultProgram);
-  const commitmentTree = deriveCommitmentTreePDA(zvaultProgram);
-  const nullifierPDA = deriveNullifierPDA(zvaultProgram, params.nullifierHash);
+  const poolState = await derivePoolStatePDA(zvaultProgram);
+  const commitmentTree = await deriveCommitmentTreePDA(zvaultProgram);
+  const nullifierPDA = await deriveNullifierPDA(zvaultProgram, params.nullifierHash);
 
   // Build instruction data (buffer mode)
-  const ixData = Buffer.alloc(1 + 1 + 32 + 32 + 32 + 32 + 32);
+  const ixData = new Uint8Array(1 + 1 + 32 + 32 + 32 + 32 + 32);
   let offset = 0;
   ixData[offset++] = SPEND_SPLIT;
   ixData[offset++] = PROOF_SOURCE_BUFFER;
-  Buffer.from(params.root).copy(ixData, offset); offset += 32;
-  Buffer.from(params.nullifierHash).copy(ixData, offset); offset += 32;
-  Buffer.from(params.outputCommitment1).copy(ixData, offset); offset += 32;
-  Buffer.from(params.outputCommitment2).copy(ixData, offset); offset += 32;
-  Buffer.from(params.vkHash).copy(ixData, offset);
+  ixData.set(params.root, offset); offset += 32;
+  ixData.set(params.nullifierHash, offset); offset += 32;
+  ixData.set(params.outputCommitment1, offset); offset += 32;
+  ixData.set(params.outputCommitment2, offset); offset += 32;
+  ixData.set(params.vkHash, offset);
 
-  const instructions: TransactionInstruction[] = [];
+  const instructions: Instruction[] = [];
 
   // Add compute budget for ZK verification
-  instructions.push(
-    ComputeBudgetProgram.setComputeUnitLimit({ units: 1_400_000 })
-  );
+  instructions.push(createSetComputeUnitLimitInstruction(1_400_000));
 
-  instructions.push(
-    new TransactionInstruction({
-      programId: zvaultProgram,
-      keys: [
-        { pubkey: poolState, isSigner: false, isWritable: true },
-        { pubkey: commitmentTree, isSigner: false, isWritable: true },
-        { pubkey: nullifierPDA, isSigner: false, isWritable: true },
-        { pubkey: relayer.publicKey, isSigner: true, isWritable: true },
-        { pubkey: SystemProgram.programId, isSigner: false, isWritable: false },
-        { pubkey: ultrahonkVerifier, isSigner: false, isWritable: false },
-        { pubkey: bufferKeypair.publicKey, isSigner: false, isWritable: false },
-      ],
-      data: ixData,
-    })
-  );
+  instructions.push({
+    programAddress: zvaultProgram,
+    accounts: [
+      { address: poolState, role: AccountRole.WRITABLE },
+      { address: commitmentTree, role: AccountRole.WRITABLE },
+      { address: nullifierPDA, role: AccountRole.WRITABLE },
+      { address: relayer.address, role: AccountRole.WRITABLE_SIGNER, signer: relayer },
+      { address: SYSTEM_PROGRAM, role: AccountRole.READONLY },
+      { address: ultrahonkVerifier, role: AccountRole.READONLY },
+      { address: bufferKeypair.address, role: AccountRole.READONLY },
+    ],
+    data: ixData,
+  });
 
   onProgress?.("Submitting transaction...");
 
-  const { blockhash } = await connection.getLatestBlockhash();
-  const tx = new Transaction();
-  instructions.forEach((ix) => tx.add(ix));
-  tx.feePayer = relayer.publicKey;
-  tx.recentBlockhash = blockhash;
+  const { value: blockhash } = await rpc.getLatestBlockhash().send();
+  const tx = pipe(
+    createTransactionMessage({ version: 0 }),
+    (msg) => setTransactionMessageFeePayer(relayer.address, msg),
+    (msg) => setTransactionMessageLifetimeUsingBlockhash(blockhash, msg),
+    (msg) => appendTransactionMessageInstructions(instructions, msg)
+  );
 
-  const signature = await sendAndConfirmTransaction(connection, tx, [relayer], {
-    commitment: "confirmed",
-  });
+  const signedTx = await signTransactionMessageWithSigners(tx);
+  const sendAndConfirm = sendAndConfirmTransactionFactory({ rpc, rpcSubscriptions });
+  await sendAndConfirm(signedTx as any, { commitment: "confirmed" });
+
+  const signature = getSignatureFromTransaction(signedTx);
 
   onProgress?.("Closing buffer...");
 
   // 4. Close buffer and reclaim rent
   let bufferClosed = false;
   try {
-    await closeChadBuffer(connection, relayer, bufferKeypair.publicKey);
+    await closeChadBuffer(rpc, rpcSubscriptions, relayer, bufferKeypair.address);
     bufferClosed = true;
   } catch (e) {
     console.warn("Failed to close buffer:", e);
@@ -546,7 +681,7 @@ export async function relaySpendSplit(
 
   return {
     signature,
-    bufferAddress: bufferKeypair.publicKey.toBase58(),
+    bufferAddress: bufferKeypair.address,
     bufferClosed,
   };
 }
