@@ -1,11 +1,13 @@
 // Validation utilities
+//
+// Uses @zvault/sdk for Bitcoin address validation (more comprehensive than regex)
 
 import {
   MIN_DEPOSIT_SATS,
   MAX_DEPOSIT_SATS,
   MIN_WITHDRAWAL_SATS,
-  BTC_ADDRESS_REGEX,
 } from "@/lib/constants";
+import { isValidBitcoinAddress } from "@zvault/sdk";
 
 export function validateDepositAmount(amount: number): { valid: boolean; error?: string } {
   if (!amount || amount <= 0) {
@@ -30,14 +32,26 @@ export function validateWithdrawalAmount(amount: number): { valid: boolean; erro
   return { valid: true };
 }
 
+/**
+ * Validate Bitcoin address using SDK's comprehensive validator
+ * Supports P2PKH, P2SH, P2WPKH, P2WSH, and P2TR (Taproot)
+ */
 export function validateBtcAddress(address: string): { valid: boolean; error?: string } {
   const trimmed = address.trim();
   if (!trimmed) {
     return { valid: false, error: "Bitcoin address is required" };
   }
-  if (!BTC_ADDRESS_REGEX.test(trimmed)) {
+
+  const result = isValidBitcoinAddress(trimmed);
+  if (!result.valid) {
     return { valid: false, error: "Invalid Bitcoin address format" };
   }
+
+  // Allow both mainnet and testnet addresses
+  if (result.network === "unknown") {
+    return { valid: false, error: "Unrecognized Bitcoin network" };
+  }
+
   return { valid: true };
 }
 

@@ -1,6 +1,13 @@
 // Formatting utilities
+//
+// Local utilities for UI display. For bigint-based formatting, use:
+// - formatBtc from @zvault/sdk (bigint sats, returns "X.XXXXXXXX BTC")
+// - formatBtcAmount from @zvault/sdk (bigint sats, returns "X.XXXXXXXX")
 
 import { SATS_PER_BTC } from "@/lib/constants";
+
+// Re-export SDK formatting utilities for bigint amounts
+export { formatBtc as formatBtcBigint, parseBtc, formatBtcAmount } from "@zvault/sdk";
 
 /**
  * Format satoshis as BTC string with 8 decimal places

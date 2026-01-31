@@ -4,24 +4,18 @@ import {
   PublicKey,
   sendAndConfirmTransaction,
 } from "@solana/web3.js";
+import { hexToBytes } from "@zvault/sdk";
+import { buildAddDemoStealthTransaction } from "@/lib/solana/demo-instructions";
 import {
-  hexToBytes,
-  ZVAULT_PROGRAM_ID as SDK_ZVAULT_PROGRAM_ID,
-  TOKEN_2022_PROGRAM_ID as SDK_TOKEN_2022_PROGRAM_ID,
-} from "@zvault/sdk";
-import {
-  buildAddDemoStealthTransaction,
+  ZVAULT_PROGRAM_ID,
+  TOKEN_2022_PROGRAM_ID,
+  ZBTC_MINT_ADDRESS,
   derivePoolStatePDA,
   deriveCommitmentTreePDA,
   derivePoolVaultATA,
-  derivezBTCMintPDA,
-} from "@/lib/solana/demo-instructions";
+} from "@/lib/solana/instructions";
 import { getHeliusConnection, isHeliusConfigured } from "@/lib/helius-server";
 import { addCommitmentToIndex } from "@/lib/commitment-index";
-
-// Convert SDK string addresses to PublicKey for use with @solana/web3.js
-const ZVAULT_PROGRAM_ID = new PublicKey(SDK_ZVAULT_PROGRAM_ID);
-const TOKEN_2022_PROGRAM_ID = new PublicKey(SDK_TOKEN_2022_PROGRAM_ID);
 
 export const runtime = "nodejs";
 
@@ -104,20 +98,19 @@ export async function POST(request: NextRequest) {
     // =========================================================================
     const [poolState] = derivePoolStatePDA();
     const [commitmentTree] = deriveCommitmentTreePDA();
-    const [zbtcMint] = derivezBTCMintPDA();
     const poolVault = derivePoolVaultATA();
 
     console.log("[Demo API] Checking required accounts...");
     console.log("[Demo API] Pool State PDA:", poolState.toBase58());
     console.log("[Demo API] Commitment Tree PDA:", commitmentTree.toBase58());
-    console.log("[Demo API] zBTC Mint:", zbtcMint.toBase58());
+    console.log("[Demo API] zBTC Mint:", ZBTC_MINT_ADDRESS.toBase58());
     console.log("[Demo API] Pool Vault ATA:", poolVault.toBase58());
 
     // Fetch account info for all required accounts
     const [poolInfo, treeInfo, mintInfo, vaultInfo] = await Promise.all([
       connection.getAccountInfo(poolState),
       connection.getAccountInfo(commitmentTree),
-      connection.getAccountInfo(zbtcMint),
+      connection.getAccountInfo(ZBTC_MINT_ADDRESS),
       connection.getAccountInfo(poolVault),
     ]);
 

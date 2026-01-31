@@ -5,6 +5,7 @@
  * without requiring actual BTC deposits. For demo/showcase only.
  *
  * Uses @zvault/sdk for instruction data building.
+ * PDA derivation consolidated in instructions.ts (single source of truth).
  */
 
 import {
@@ -14,55 +15,29 @@ import {
   Transaction,
   SystemProgram,
 } from "@solana/web3.js";
-import { getAssociatedTokenAddressSync } from "@solana/spl-token";
 import { getPriorityFeeInstructions } from "@/lib/helius";
 import {
   buildAddDemoStealthData,
-  PDA_SEEDS,
   DEMO_INSTRUCTION,
-  ZVAULT_PROGRAM_ID as SDK_ZVAULT_PROGRAM_ID,
-  TOKEN_2022_PROGRAM_ID as SDK_TOKEN_2022_PROGRAM_ID,
-  DEVNET_CONFIG,
+  PDA_SEEDS,
 } from "@zvault/sdk";
 
-// =============================================================================
-// Constants from SDK
-// =============================================================================
-
-const ZVAULT_PROGRAM_ID = new PublicKey(SDK_ZVAULT_PROGRAM_ID);
-const TOKEN_2022_PROGRAM_ID = new PublicKey(SDK_TOKEN_2022_PROGRAM_ID);
-const ZBTC_MINT_ADDRESS = new PublicKey(DEVNET_CONFIG.zbtcMint);
+// Import PDA functions from instructions.ts (single source of truth)
+import {
+  ZVAULT_PROGRAM_ID,
+  TOKEN_2022_PROGRAM_ID,
+  ZBTC_MINT_ADDRESS,
+  derivePoolStatePDA,
+  deriveCommitmentTreePDA,
+  derivePoolVaultATA,
+} from "./instructions";
 
 // Re-export for consumers
 export { DEMO_INSTRUCTION };
 
 // =============================================================================
-// PDA Derivation (using SDK PDA_SEEDS)
+// Stealth Announcement PDA (specific to demo - uses ephemeral key)
 // =============================================================================
-
-/**
- * Derive Pool State PDA
- */
-export function derivePoolStatePDA(
-  programId: PublicKey = ZVAULT_PROGRAM_ID
-): [PublicKey, number] {
-  return PublicKey.findProgramAddressSync(
-    [Buffer.from(PDA_SEEDS.POOL_STATE)],
-    programId
-  );
-}
-
-/**
- * Derive Commitment Tree PDA
- */
-export function deriveCommitmentTreePDA(
-  programId: PublicKey = ZVAULT_PROGRAM_ID
-): [PublicKey, number] {
-  return PublicKey.findProgramAddressSync(
-    [Buffer.from(PDA_SEEDS.COMMITMENT_TREE)],
-    programId
-  );
-}
 
 /**
  * Derive Stealth Announcement PDA
@@ -74,28 +49,6 @@ export function deriveStealthAnnouncementPDA(
   return PublicKey.findProgramAddressSync(
     [Buffer.from(PDA_SEEDS.STEALTH), ephemeralPub],
     programId
-  );
-}
-
-/**
- * Get zBTC Mint address
- */
-export function derivezBTCMintPDA(): [PublicKey, number] {
-  return [ZBTC_MINT_ADDRESS, 0];
-}
-
-/**
- * Derive Pool Vault ATA
- */
-export function derivePoolVaultATA(
-  programId: PublicKey = ZVAULT_PROGRAM_ID
-): PublicKey {
-  const [poolState] = derivePoolStatePDA(programId);
-  return getAssociatedTokenAddressSync(
-    ZBTC_MINT_ADDRESS,
-    poolState,
-    true,
-    TOKEN_2022_PROGRAM_ID
   );
 }
 
