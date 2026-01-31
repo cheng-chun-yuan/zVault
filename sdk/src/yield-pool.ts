@@ -15,11 +15,11 @@
  */
 
 import { sha256 } from "@noble/hashes/sha2.js";
-import { bigintToBytes, bytesToBigint } from "./crypto";
-import { poseidonHashSync } from "./poseidon";
 import {
-  generateKeyPair as generateGrumpkinKeyPair,
-  ecdh as grumpkinEcdh,
+  bigintToBytes,
+  bytesToBigint,
+  generateGrumpkinKeyPair,
+  grumpkinEcdh,
   pointToCompressedBytes,
   pointFromCompressedBytes,
   scalarFromBytes,
@@ -28,7 +28,8 @@ import {
   GRUMPKIN_GENERATOR,
   GRUMPKIN_ORDER,
   type GrumpkinPoint,
-} from "./grumpkin";
+} from "./crypto";
+import { poseidonHashSync } from "./poseidon";
 import type { ZVaultKeys, StealthMetaAddress } from "./keys";
 import { parseStealthMetaAddress } from "./keys";
 import type { Note } from "./note";
@@ -41,7 +42,7 @@ import {
   type PoolWithdrawInputs,
   type PoolClaimYieldInputs,
   type MerkleProofInput,
-} from "./prover";
+} from "./prover/web";
 
 // ==========================================================================
 // Operation Status Types
