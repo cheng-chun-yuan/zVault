@@ -4,38 +4,47 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-zVault is a privacy-preserving Bitcoin-to-Solana bridge using Zero-Knowledge Proofs. Users deposit BTC to receive private zkBTC tokens that can be transferred using stealth addresses and ZK proofs (Groth16 on BN254).
+zVault is a privacy-preserving Bitcoin-to-Solana bridge using Zero-Knowledge Proofs. Users deposit BTC to receive private zkBTC tokens that can be transferred using stealth addresses and ZK proofs (UltraHonk via Noir).
 
-**Key Technologies**: Pinocchio (Solana), Noir circuits (ZK), Taproot (BTC deposits), X25519 ECDH (stealth addresses)
+**Key Technologies**: Pinocchio (Solana), Noir circuits (UltraHonk proofs), Taproot (BTC deposits), Grumpkin ECDH (stealth addresses), FROST (threshold signing)
 
 ## Commands
 
-### Frontend (Next.js) - `/frontend`
+### Frontend (Next.js) - `/zvault_app`
 ```bash
 bun run dev          # Start dev server (port 3000)
-bun run build        # Production build
+bun run build        # Production build (builds SDK first)
 bun run lint         # ESLint
 bun run test         # Vitest tests
-```
-
-### Backend (Rust) - `/backend`
-```bash
-cargo run --bin zkbtc-api      # Start API server (port 8080)
-cargo run --bin redemption     # Start redemption service
-cargo test                     # Run tests
-```
-
-### Contracts (Pinocchio + Anchor) - `/contracts`
-```bash
-anchor build         # Build programs
-anchor deploy        # Deploy to devnet
-npm run test         # TypeScript tests (ts-mocha, 120s timeout)
 ```
 
 ### SDK - `/sdk`
 ```bash
 bun run build        # Compile TypeScript
 bun test             # Run tests
+bun run e2e          # End-to-end tests (localnet)
+bun run e2e:devnet   # E2E tests on devnet
+```
+
+### Contracts (Pinocchio) - `/contracts`
+```bash
+anchor build         # Build programs
+anchor deploy        # Deploy to devnet
+bun run test         # TypeScript tests
+```
+
+### FROST Server - `/frost_server`
+```bash
+cargo run --bin frost-server       # Start FROST signing server
+cargo run --bin generate_deposit_address  # Generate Taproot address
+cargo run --bin spend_utxo         # Spend UTXO with threshold sig
+cargo test                         # Run tests
+```
+
+### Backend (Rust) - `/backend`
+```bash
+cargo run                # Start API server
+cargo test               # Run tests
 ```
 
 ### Mobile App (Expo) - `/mobile-app`
@@ -47,9 +56,10 @@ bun run android      # Run on Android emulator
 
 ### Noir Circuits - `/noir-circuits`
 ```bash
-bun run compile:all            # Compile all circuits
-bun run compile:claim          # Single circuit
-bun run test                   # Noir + JS tests
+bun run compile:all       # Compile all 6 circuits
+bun run compile:claim     # Single circuit
+bun run test              # Noir + JS tests
+bun run prove             # Generate proof
 ```
 
 ### Header Relayer - `/backend/header-relayer`
@@ -63,57 +73,106 @@ bun run start        # Start header relay service
 ```
 BTC Deposit → Taproot Address (commitment-derived) → SPV Verification → On-chain Commitment
                                                                               ↓
-Claim: Provide nullifier+secret → Generate Groth16 ZK Proof → Verify → Mint zkBTC
+Claim: Provide nullifier+secret → Generate UltraHonk ZK Proof → Verify → Mint zkBTC
                                                                               ↓
-Redeem: Burn zkBTC → Backend signs BTC transaction → Return BTC to user
+Redeem: Burn zkBTC → FROST threshold signature → Return BTC to user
 ```
 
 ### Main Components
 
 | Directory | Purpose | Language |
 |-----------|---------|----------|
-| `contracts/programs/zVault-pinocchio` | Main Solana program | Rust (Pinocchio) |
+| `contracts/programs/zvault` | Main Solana program | Rust (Pinocchio) |
 | `contracts/programs/btc-light-client` | Bitcoin header tracking | Rust |
+| `contracts/programs/ultrahonk-verifier` | UltraHonk proof verification | Rust |
 | `sdk` | TypeScript SDK (@zvault/sdk) | TypeScript |
-| `backend` | API server + redemption service | Rust |
-| `backend/header-relayer` | Bitcoin header sync | Node.js |
-| `frontend` | Web interface | Next.js + React |
+| `frost_server` | FROST threshold signing for BTC | Rust |
+| `backend` | API server + header relayer | Rust + Node.js |
+| `zvault_app` | Web interface | Next.js + React |
 | `mobile-app` | Mobile app | Expo + React Native |
-| `noir-circuits` | ZK circuits (claim, transfer, split, withdraw) | Noir |
+| `noir-circuits` | ZK circuits (6 circuits) | Noir |
 
-### Program Instructions (Pinocchio)
+### Noir Circuits
 
-| Discriminator | Name | Purpose |
-|---|---|---|
-| 8 | VERIFY_DEPOSIT | Record BTC deposit with SPV proof |
-| 9 | CLAIM | Mint zkBTC with ZK proof (~95k CU) |
-| 4 | SPLIT_COMMITMENT | Split 1 note into 2 notes (~100k CU) |
-| 5 | REQUEST_REDEMPTION | Burn zkBTC, request BTC withdrawal |
-| 12 | ANNOUNCE_STEALTH | Send via stealth address |
+| Circuit | Purpose |
+|---------|---------|
+| `claim` | Claim deposited BTC as zkBTC |
+| `spend_split` | Split 1 note into 2 notes |
+| `spend_partial_public` | Partial public spend |
+| `pool_deposit` | Deposit into yield pool |
+| `pool_withdraw` | Withdraw from yield pool |
+| `pool_claim_yield` | Claim yield rewards |
 
-### Cryptography Flow
+### Key Privacy Features
 
-1. **Commitment**: `SHA256(nullifier || secret)` bound to Taproot address
-2. **ZK Proof**: Groth16 via Noir circuits, verified on-chain via `alt_bn128` syscalls
-3. **Stealth**: X25519 ECDH derives shared secret for recipient-specific notes
+| Feature | Description |
+|---------|-------------|
+| **Client-Side Proving** | All ZK proofs generated in browser/app - no trusted backend required |
+| **UltraHonk (No Trusted Setup)** | Unlike Groth16, UltraHonk requires no ceremony - fully trustless |
+| **Viewing/Spending Key Separation** | Share viewing key for audits without compromising spend ability |
+| **Stealth Addresses** | Unlinkable one-time addresses via DKSAP (EIP-5564) |
+| **.zkey Names** | Human-readable stealth addresses (SNS-style registry) |
+
+### Key Model
+
+```
+Spending Key (private) ─► Can spend funds, must keep secret
+       │
+       └─► Viewing Key (derived) ─► Can view balances/history, safe to share with auditors
+```
+
+- **Spending Key**: Full control - generate nullifiers, sign transactions
+- **Viewing Key**: Read-only access - scan for incoming payments, view transaction history
+- Use case: Share viewing key with accountants, regulators, or compliance without risk
+
+### Cryptography
+
+1. **Commitment**: Poseidon hash (in-circuit) bound to Taproot address
+2. **ZK Proof**: UltraHonk via Noir circuits (client-side, no trusted setup)
+3. **Stealth**: Grumpkin ECDH (~2k constraints vs ~300k for X25519)
+4. **Redemption**: FROST threshold signatures (secp256k1-tr)
+
+### Why UltraHonk over Groth16
+
+| Aspect | UltraHonk | Groth16 |
+|--------|-----------|---------|
+| Trusted Setup | None (transparent) | Required (ceremony) |
+| Proof Size | ~2-4 KB | ~200 bytes |
+| Prover Time | Fast (client-side viable) | Slower |
+| Verifier Cost | Higher on-chain | Lower on-chain |
+| Security Model | Transparent | Trusted setup assumption |
+
+We chose UltraHonk for trustlessness and client-side proving capability.
 
 ## Key Program IDs
 
-- **zVault (devnet)**: `5S5ynMni8Pgd6tKkpYaXiPJiEXgw927s7T2txDtDivRK`
-- **BTC Light Client**: `95vWurTc9BhjBvEbBdUKoTZHMPPyB1iQZEuXEaR7wPpd`
+- **zVault (devnet)**: `zKeyrLmpT8W9o8iRvhizuSihLAFLhfAGBvfM638Pbw8`
+- **BTC Light Client**: `S6rgPjCeBhkYBejWyDR1zzU3sYCMob36LAf8tjwj8pn`
 
-## SDK Usage
+## SDK Usage (@zvault/sdk)
 
-The SDK (`sdk`) provides:
-- `generateNote(amount)` - Create note with nullifier/secret
-- `deriveTaprootAddress(commitment)` - Get BTC deposit address
-- `createClaimLink(note)` - Shareable claim URL
-- `createStealthDeposit()` - ECDH-based stealth sends
-- Watcher system for real-time deposit tracking
+```typescript
+import { generateNote, createClaimProof, createStealthDeposit } from '@zvault/sdk';
+
+// Create note with nullifier/secret
+const note = generateNote(amount);
+
+// Generate UltraHonk proof for claim
+const proof = await createClaimProof(note, merkleProof);
+
+// ECDH-based stealth sends
+const stealth = createStealthDeposit(recipientPubkey, amount);
+```
+
+## Documentation
+
+- `docs/TECHNICAL.md` - Full technical documentation
+- `docs/SDK.md` - SDK API reference
 
 ## Development Notes
 
 - **Package Manager**: Always use `bun` instead of `npm`
 - **Network**: Solana devnet + Bitcoin testnet
-- **Poseidon Hashing**: Done inside Noir circuits, not in SDK
+- **Poseidon Hashing**: Done inside Noir circuits (Grumpkin curve)
 - **Token**: zkBTC uses Token-2022 program
+- **Solana SDK**: Uses `@solana/kit` (new framework-kit)
