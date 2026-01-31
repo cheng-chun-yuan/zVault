@@ -121,6 +121,8 @@ const TEST_BTC_BLOCK = {
 interface DeployResult {
   zvaultProgramId: PublicKey;
   btcLightClientProgramId: PublicKey;
+  chadbufferProgramId: PublicKey;
+  ultrahonkVerifierProgramId: PublicKey;
 }
 
 interface InitResult {
@@ -172,6 +174,9 @@ async function deployPrograms(skipDeploy: boolean): Promise<DeployResult> {
   // Get program IDs from keypairs
   const zvaultKeypairPath = path.join(TARGET_DIR, "zvault_pinocchio-keypair.json");
   const btclcKeypairPath = path.join(TARGET_DIR, "btc_light_client-keypair.json");
+  const chadbufferKeypairPath = path.join(CONTRACTS_DIR, "programs/chadbuffer/chadbuffer-keypair.json");
+  const ultrahonkKeypairPath = path.join(TARGET_DIR, "ultrahonk_verifier-keypair.json");
+  const chadbufferSoPath = path.join(CONTRACTS_DIR, "programs/chadbuffer/chadbuffer.so");
 
   if (!fs.existsSync(zvaultKeypairPath) || !fs.existsSync(btclcKeypairPath)) {
     throw new Error("Program keypairs not found. Run 'cargo build-sbf' first.");
@@ -180,15 +185,38 @@ async function deployPrograms(skipDeploy: boolean): Promise<DeployResult> {
   const zvaultKeypair = await loadKeypair(zvaultKeypairPath);
   const btclcKeypair = await loadKeypair(btclcKeypairPath);
 
+  // Load chadbuffer and ultrahonk keypairs
+  let chadbufferKeypair: Keypair;
+  let ultrahonkKeypair: Keypair;
+
+  if (fs.existsSync(chadbufferKeypairPath)) {
+    chadbufferKeypair = await loadKeypair(chadbufferKeypairPath);
+  } else {
+    log("ChadBuffer keypair not found, generating new one...");
+    chadbufferKeypair = Keypair.generate();
+    fs.writeFileSync(chadbufferKeypairPath, JSON.stringify(Array.from(chadbufferKeypair.secretKey)));
+  }
+
+  if (fs.existsSync(ultrahonkKeypairPath)) {
+    ultrahonkKeypair = await loadKeypair(ultrahonkKeypairPath);
+  } else {
+    log("UltraHonk keypair not found, generating new one...");
+    ultrahonkKeypair = Keypair.generate();
+  }
+
   const zvaultProgramId = zvaultKeypair.publicKey;
   const btcLightClientProgramId = btclcKeypair.publicKey;
+  const chadbufferProgramId = chadbufferKeypair.publicKey;
+  const ultrahonkVerifierProgramId = ultrahonkKeypair.publicKey;
 
   log(`zVault Program ID: ${zvaultProgramId.toBase58()}`);
   log(`BTC Light Client Program ID: ${btcLightClientProgramId.toBase58()}`);
+  log(`ChadBuffer Program ID: ${chadbufferProgramId.toBase58()}`);
+  log(`UltraHonk Verifier Program ID: ${ultrahonkVerifierProgramId.toBase58()}`);
 
   if (skipDeploy) {
     log("Skipping deployment (--skip-deploy flag)");
-    return { zvaultProgramId, btcLightClientProgramId };
+    return { zvaultProgramId, btcLightClientProgramId, chadbufferProgramId, ultrahonkVerifierProgramId };
   }
 
   // Deploy zVault
@@ -223,11 +251,56 @@ async function deployPrograms(skipDeploy: boolean): Promise<DeployResult> {
     }
   }
 
+  // Deploy ChadBuffer
+  if (fs.existsSync(chadbufferSoPath)) {
+    log("Deploying ChadBuffer program...");
+    try {
+      execSync(
+        `solana program deploy ${chadbufferSoPath} --program-id ${chadbufferKeypairPath} -u localhost`,
+        { stdio: "inherit" }
+      );
+      log("ChadBuffer deployed successfully");
+    } catch (e: any) {
+      if (e.message?.includes("already in use")) {
+        log("ChadBuffer program already deployed");
+      } else {
+        throw e;
+      }
+    }
+  } else {
+    log(`ChadBuffer .so not found at ${chadbufferSoPath}`);
+    log("To build ChadBuffer:");
+    log("  git clone https://github.com/deanmlittle/chadbuffer");
+    log("  cd chadbuffer && cargo build-sbf");
+    log("  cp target/deploy/chadbuffer.so ../contracts/programs/chadbuffer/");
+  }
+
+  // Deploy UltraHonk Verifier
+  const ultrahonkSoPath = path.join(TARGET_DIR, "ultrahonk_verifier.so");
+  if (fs.existsSync(ultrahonkSoPath)) {
+    log("Deploying UltraHonk Verifier program...");
+    try {
+      execSync(
+        `solana program deploy ${ultrahonkSoPath} --program-id ${ultrahonkKeypairPath} -u localhost`,
+        { stdio: "inherit" }
+      );
+      log("UltraHonk Verifier deployed successfully");
+    } catch (e: any) {
+      if (e.message?.includes("already in use")) {
+        log("UltraHonk Verifier program already deployed");
+      } else {
+        throw e;
+      }
+    }
+  } else {
+    log(`UltraHonk Verifier .so not found at ${ultrahonkSoPath}, skipping...`);
+  }
+
   // Wait for programs to be fully deployed
   log("Waiting for programs to be ready...");
   await sleep(3000);
 
-  return { zvaultProgramId, btcLightClientProgramId };
+  return { zvaultProgramId, btcLightClientProgramId, chadbufferProgramId, ultrahonkVerifierProgramId };
 }
 
 // =============================================================================
@@ -629,6 +702,8 @@ function saveLocalnetConfig(
   config.programs.localnet = {
     zVault: deployResult.zvaultProgramId.toBase58(),
     btc_light_client: deployResult.btcLightClientProgramId.toBase58(),
+    chadbuffer: deployResult.chadbufferProgramId.toBase58(),
+    ultrahonk_verifier: deployResult.ultrahonkVerifierProgramId.toBase58(),
   };
 
   fs.writeFileSync(CONFIG_PATH, JSON.stringify(config, null, 2) + "\n");
@@ -641,6 +716,8 @@ function saveLocalnetConfig(
     programs: {
       zVault: deployResult.zvaultProgramId.toBase58(),
       btcLightClient: deployResult.btcLightClientProgramId.toBase58(),
+      chadbuffer: deployResult.chadbufferProgramId.toBase58(),
+      ultrahonkVerifier: deployResult.ultrahonkVerifierProgramId.toBase58(),
     },
     accounts: {
       poolState: initResult.poolStatePda.toBase58(),
@@ -765,6 +842,8 @@ async function main() {
   console.log("Summary:");
   console.log(`  zVault Program:       ${deployResult.zvaultProgramId.toBase58()}`);
   console.log(`  BTC Light Client:     ${deployResult.btcLightClientProgramId.toBase58()}`);
+  console.log(`  ChadBuffer:           ${deployResult.chadbufferProgramId.toBase58()}`);
+  console.log(`  UltraHonk Verifier:   ${deployResult.ultrahonkVerifierProgramId.toBase58()}`);
   console.log(`  Pool State PDA:       ${initResult.poolStatePda.toBase58()}`);
   console.log(`  Commitment Tree PDA:  ${initResult.commitmentTreePda.toBase58()}`);
   console.log(`  zkBTC Mint:           ${initResult.zkbtcMint.toBase58()}`);
