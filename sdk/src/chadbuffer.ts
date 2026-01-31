@@ -62,9 +62,9 @@ export const SOLANA_TX_SIZE_LIMIT = 1232;
  * - Instruction header: 4 bytes
  * - Discriminator: 1 byte
  * - u24 offset: 3 bytes
- * Total fixed overhead: ~141 bytes (using 150 for safety margin)
+ * Total fixed overhead: ~141 bytes (using 176 for safety margin)
  */
-const WRITE_TX_OVERHEAD = 150;
+const WRITE_TX_OVERHEAD = 176;
 
 /**
  * Maximum data bytes per ChadBuffer Write transaction

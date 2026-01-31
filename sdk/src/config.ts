@@ -128,6 +128,11 @@ export const CHADBUFFER_PROGRAM_ID: Address = address(
   "C5RpjtTMFXKVZCtXSzKXD4CDNTaWBg3dVeMfYvjZYHDF"
 );
 
+/** ChadBuffer Program ID for localnet testing */
+export const LOCALNET_CHADBUFFER_PROGRAM_ID: Address = address(
+  "EgWyMVFZewHmjJ9GGvVBTyaC376Xp7qu7CAFjWYPYYDv"
+);
+
 // =============================================================================
 // Network Configurations
 // =============================================================================
@@ -228,22 +233,23 @@ export const MAINNET_CONFIG: NetworkConfig = {
 
 /**
  * Localnet Configuration (for local development)
+ * Synced with .localnet-config.json (2026-01-30)
  */
 export const LOCALNET_CONFIG: NetworkConfig = {
   network: "localnet",
 
-  // Program IDs (will be set dynamically during local deploy)
-  zvaultProgramId: address("DjnryiDxMsUY8pzYCgynVUGDgv45J9b3XbSDnp4qDYrq"),
-  btcLightClientProgramId: address("AvXLG43quQpc9aaE1fUxXdd1UFVBCMBkX9vFgjZSShrn"),
-  chadbufferProgramId: CHADBUFFER_PROGRAM_ID,
+  // Program IDs (synced with .localnet-config.json)
+  zvaultProgramId: address("zKeyrLmpT8W9o8iRvhizuSihLAFLhfAGBvfM638Pbw8"),
+  btcLightClientProgramId: address("S6rgPjCeBhkYBejWyDR1zzU3sYCMob36LAf8tjwj8pn"),
+  chadbufferProgramId: LOCALNET_CHADBUFFER_PROGRAM_ID,
   token2022ProgramId: TOKEN_2022_PROGRAM_ID,
   ataProgramId: ATA_PROGRAM_ID,
 
-  // Deployed Accounts (derived from local deploy)
-  poolStatePda: address("ASgByRooB2piAA7qAeERvPCFS1sqjzShdx1hXGg35TUq"),
-  commitmentTreePda: address("2M5F53Z9Pd7sYFiWaDKfpwYvPan1g44bV7D2sAeaVtHP"),
-  zbtcMint: address("BdUFQhqKpzYVHVg8cQoh7JdpSoHFtwKM4A48AFAjKFAK"),
-  poolVault: address("HNe2SvmQzHPHzRcLwfp1vQVwJq9ELeMZ3dJSbKyMkNdD"),
+  // Deployed Accounts (synced with .localnet-config.json 2026-01-30)
+  poolStatePda: address("ELGSdquznDBd6uUkWsBAmguMBmtuur7D5kapwoyZq44J"),
+  commitmentTreePda: address("5p7WERgzB6AHcga19QehvaTfbiVoM1Bg6drkwzYHYamq"),
+  zbtcMint: address("GU5DQFtz48SkSaLyHnL5fq7LN8MNiz9X5ujuLw7gjP2J"),
+  poolVault: address("C9e9SiHUCXBE4QQYJs7rhExJL1xUjkPb4sXJXz7wMDwi"),
 
   // RPC Endpoints
   solanaRpcUrl: "http://127.0.0.1:8899",
