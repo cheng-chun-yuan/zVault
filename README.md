@@ -1,111 +1,226 @@
-# zVault - Private BTC on Solana
+# zVault - Privacy-Preserving BTC on Solana
 
-Privacy-preserving Bitcoin deposits and withdrawals on Solana using Zero-Knowledge Proofs.
+**Private Bitcoin on Solana using Zero-Knowledge Proofs**
+
+zVault is a trustless bridge that enables Bitcoin holders to access Solana DeFi with full transaction privacy. Deposit BTC, receive shielded zkBTC, and transact without revealing amounts or linking identities.
 
 ```
-BTC → Taproot Deposit → SPV Verify → Shielded Pool → ZK Transfers → Withdraw BTC
-                                          │
-                         Amounts hidden in commitments
-                         Unlinkable deposits/claims
-                         Stealth address transfers
+BTC Deposit → Taproot Address → SPV Verify → Shielded Pool → ZK Transfers → Withdraw BTC
+                                                   │
+                              ┌────────────────────┴─────────────────────┐
+                              │                                          │
+                    Amounts hidden in commitments          Unlinkable stealth addresses
+                    Nullifier-based double-spend prevention   .zkey.sol human-readable names
 ```
 
 ---
 
-## Overview
+## The Problem
 
-zVault enables Bitcoin holders to access Solana with full transaction privacy. Deposits create cryptographic commitments that can be claimed, split, and transferred privately using ZK proofs.
+Bitcoin's transparent blockchain makes privacy challenging:
+- Every transaction is publicly visible and linkable
+- Cross-chain bridges expose user activity on both chains
+- DeFi participation requires revealing transaction history
 
-### Key Features
-
-- **Private Deposits**: BTC deposits unlinkable to claims via ZK proofs
-- **Shielded Transfers**: Split and transfer without revealing amounts
-- **Stealth Addresses**: One-time addresses via ECDH (Grumpkin curve)
-- **Claim Links**: Bearer instrument links for easy sharing
-- **Name Registry**: Human-readable `.zkey` addresses
-- **Proof of Innocence**: Optional compliance without de-anonymization
-
-### Privacy Guarantees
-
-| Operation | Amount Visible | Linkable |
-|-----------|---------------|----------|
-| Deposit BTC | On Bitcoin chain | No (to claim) |
-| Claim zBTC | Only claimed amount | No |
-| Split | No | No |
-| Stealth Send | No | Recipient only |
-| Withdraw BTC | On Bitcoin chain | No (to deposit) |
+**zVault solves this** by creating a privacy layer between Bitcoin and Solana using zero-knowledge proofs.
 
 ---
 
-## Architecture
+## Tech Stack
 
-```
-┌─────────────────────────────────────────────────────────────────────────────┐
-│                              BITCOIN LAYER                                   │
-│     Taproot Deposits  →  SPV Verification  →  Commitment Recording          │
-└─────────────────────────────────────────────────────────────────────────────┘
-                                     │
-                                     ▼
-┌─────────────────────────────────────────────────────────────────────────────┐
-│                              SOLANA LAYER                                    │
-│  ┌────────────────────────────────────────────────────────────────────────┐ │
-│  │                    zVault Program (Pinocchio)                          │ │
-│  │  Commitment Tree │ Nullifier Registry │ Stealth Announcements │ Names │ │
-│  └────────────────────────────────────────────────────────────────────────┘ │
-└─────────────────────────────────────────────────────────────────────────────┘
-                                     │
-                                     ▼
-┌─────────────────────────────────────────────────────────────────────────────┐
-│                              CLIENT LAYER                                    │
-│        Frontend (Next.js)  │  Mobile (Expo)  │  SDK  │  Backend (Rust)      │
-└─────────────────────────────────────────────────────────────────────────────┘
-```
-
-### Components
-
-| Component | Directory | Technology | Purpose |
-|-----------|-----------|------------|---------|
-| Contracts | `contracts/programs/zvault` | Rust (Pinocchio) | Main Solana program |
-| BTC Light Client | `contracts/programs/btc-light-client` | Rust | Bitcoin header tracking |
-| SDK | `sdk` | TypeScript | Client library (@zvault/sdk) |
-| Frontend | `frontend` | Next.js | Web interface |
-| Mobile | `mobile-app` | Expo/React Native | Mobile wallet |
-| Backend | `backend` | Rust (Axum) | Redemption & stealth API |
-| Header Relayer | `backend/header-relayer` | Node.js | Bitcoin header sync |
-| ZK Circuits | `noir-circuits` | Noir | Privacy proofs |
+| Layer | Technology | Innovation |
+|-------|------------|------------|
+| **ZK Circuits** | Noir + UltraHonk | 8 specialized privacy circuits |
+| **On-Chain Verifier** | BN254 alt_bn128 syscalls | Client-side proof generation |
+| **Smart Contracts** | Pinocchio (Solana) | Zero-copy, ~95k CU verification |
+| **Bitcoin Integration** | Taproot + SPV | Permissionless light client |
+| **Data Publishing** | ChadBuffer | Large tx & proof upload on-chain |
+| **Name Service** | .zkey.sol (SNS-style) | Human-readable stealth addresses |
+| **Stealth Addresses** | EIP-5564/DKSAP + Grumpkin | ~2k constraint ECDH (vs 300k X25519) |
+| **RPC Infrastructure** | Helius | Priority fee estimation |
+| **Client SDK** | @zvault/sdk (custom) | Full privacy toolkit |
+| **Frontend** | Next.js 14 | Server components, React hooks |
+| **Mobile** | Expo + React Native | Cross-platform wallet |
+| **Backend** | Rust (Axum) | FROST threshold signing |
 
 ---
 
-## Quick Start
+## Key Innovations
+
+### 1. Noir ZK Circuits (8 Specialized Circuits)
+
+Built on Aztec's Noir language with UltraHonk proofs for efficient client-side proving:
+
+| Circuit | Purpose | Key Constraints |
+|---------|---------|-----------------|
+| `claim` | Mint zkBTC from BTC deposit | Merkle proof, nullifier, amount match |
+| `spend_split` | Split 1 note → 2 notes | Amount conservation, unique recipients |
+| `spend_partial_public` | Partial withdrawal | Public + change outputs |
+| `pool_deposit` | Enter yield pool | Unified → Pool commitment |
+| `pool_withdraw` | Exit with yield | Yield calculation in-circuit |
+| `pool_claim_yield` | Compound yields | Re-stake with epoch reset |
+| `proof_of_innocence` | Regulatory compliance | Dual Merkle tree verification |
+
+**Unified Commitment Model:**
+```
+Commitment = Poseidon2(pub_key_x, amount)
+Nullifier  = Poseidon2(priv_key, leaf_index)
+```
+
+### 2. Stealth Address Protocol (EIP-5564/DKSAP)
+
+Unlinkable one-time addresses using Grumpkin curve ECDH:
+
+```
+Sender:                              Recipient:
+┌────────────────────┐               ┌────────────────────┐
+│ 1. ephemeral_priv  │               │ 1. viewing_priv    │
+│ 2. ECDH(eph, view) │───shared───►  │ 2. ECDH(view, eph) │
+│ 3. derive stealth  │   secret      │ 3. derive stealth  │
+│ 4. encrypt amount  │               │ 4. decrypt amount  │
+│ 5. publish announce│               │ 5. spend with priv │
+└────────────────────┘               └────────────────────┘
+```
+
+- **Viewing Key**: Detect and decrypt incoming transfers (cannot spend)
+- **Spending Key**: Generate nullifier and claim funds
+- **Grumpkin Curve**: ~2,000 constraints (vs ~300,000 for X25519)
+
+### 3. ChadBuffer Integration
+
+On-chain large data publishing for Bitcoin transactions and ZK proofs:
+
+```typescript
+// Upload Bitcoin transaction for SPV verification
+const bufferAddress = await uploadTransactionToBuffer(rpc, payer, rawBtcTx);
+
+// Upload large UltraHonk proof (>900 bytes)
+const { bufferAddress, usedBuffer } = await uploadProofToBuffer(rpc, payer, proofBytes);
+```
+
+- **Program ID**: `C5RpjtTMFXKVZCtXSzKXD4CDNTaWBg3dVeMfYvjZYHDF`
+- **Chunked Uploads**: Handles data larger than Solana tx limits
+- **Rent Reclaimable**: Close buffer to recover lamports
+
+### 4. .zkey Name Registry (SNS-Style)
+
+Human-readable stealth addresses following Solana Name Service patterns:
+
+```typescript
+// Send to alice.zkey.sol
+const entry = await lookupZkeyName(connection, 'alice');
+await sendPrivate(config, myNote, entry.stealthMetaAddress);
+
+// Reverse lookup
+const name = await reverseLookupZkeyName(connection, spendingPubKey);
+// => "alice"
+```
+
+- **Format**: `name.zkey.sol` (1-32 lowercase alphanumeric + underscore)
+- **Storage**: Maps name → (spendingPubKey, viewingPubKey)
+- **Reverse Lookup**: spendingPubKey → name
+
+### 5. Helius RPC Integration
+
+Enhanced Solana RPC with priority fee estimation:
+
+```typescript
+import { getPriorityFeeInstructions, HELIUS_RPC_DEVNET } from '@zvault/sdk';
+
+// Get optimal priority fee for your transaction
+const feeIxs = await getPriorityFeeInstructions([programId, userPubkey]);
+transaction.add(...feeIxs);
+```
+
+### 6. @zvault/sdk - Custom TypeScript SDK
+
+Complete privacy toolkit with React hooks:
+
+```typescript
+import { createClient, deposit, claimNote, splitNote, sendPrivate } from '@zvault/sdk';
+
+// 1. Generate deposit credentials
+const { taprootAddress, claimLink } = await deposit(100_000n);
+
+// 2. After BTC confirmed, claim zkBTC
+const claimed = await claimNote(config, claimLink);
+
+// 3. Split into two notes
+const { output1, output2 } = await splitNote(config, note, 60_000n);
+
+// 4. Send via stealth address
+await sendPrivate(config, output1, recipientMeta);
+```
+
+---
+
+## Quick Demo
+
+```typescript
+import { deposit, createClaimLinkFromNote } from '@zvault/sdk';
+
+// Generate a private Bitcoin deposit address
+const result = await deposit(50_000n); // 0.0005 BTC
+
+console.log('Send BTC to:', result.taprootAddress);
+console.log('Share this link:', result.claimLink);
+
+// Anyone with the link can claim (bearer instrument)
+// The claim is unlinkable to the deposit
+```
+
+---
+
+## Project Structure
+
+```
+zVault/
+├── contracts/                  # Solana programs
+│   ├── programs/zvault/        # Main zVault program (Pinocchio)
+│   └── programs/btc-light-client/  # Bitcoin header tracking
+├── noir-circuits/              # Zero-knowledge circuits
+│   ├── claim/                  # Claim zkBTC from deposit
+│   ├── spend_split/            # Split 1 → 2 notes
+│   ├── spend_partial_public/   # Partial withdrawal
+│   ├── pool_deposit/           # Enter yield pool
+│   ├── pool_withdraw/          # Exit pool with yield
+│   ├── pool_claim_yield/       # Compound yields
+│   ├── proof_of_innocence/     # Compliance proof
+│   └── utils/                  # Shared crypto (Grumpkin, Poseidon2)
+├── sdk/                        # @zvault/sdk TypeScript client
+├── frontend/                   # Next.js web interface
+├── mobile-app/                 # Expo React Native app
+├── backend/                    # Rust API + redemption service
+│   └── header-relayer/         # Bitcoin header sync
+└── docs/                       # Technical documentation
+```
+
+---
+
+## Documentation
+
+| Document | Description |
+|----------|-------------|
+| [Technical Deep Dive](./docs/TECHNICAL.md) | Architecture, cryptography, circuits, stealth addresses |
+| [SDK Reference](./docs/SDK.md) | TypeScript SDK quick reference |
+
+---
+
+## Getting Started
 
 ### Prerequisites
 
 - Node.js 18+
 - Bun package manager
-- Rust (for backend)
-- Solana CLI (for contracts)
+- Rust (for backend/contracts)
+- Solana CLI
 
-### Frontend (Next.js)
+### Frontend
 
 ```bash
 cd frontend
 bun install
 bun run dev          # Start dev server (port 3000)
-```
-
-### Backend (Rust)
-
-```bash
-cd backend
-cargo run --bin zkbtc-api      # Start API server (port 8080)
-```
-
-### Contracts (Solana)
-
-```bash
-cd contracts
-anchor build         # Build programs
-anchor deploy        # Deploy to devnet
 ```
 
 ### SDK
@@ -114,15 +229,15 @@ anchor deploy        # Deploy to devnet
 cd sdk
 bun install
 bun run build        # Compile TypeScript
+bun test             # Run tests
 ```
 
-### Mobile App (Expo)
+### Contracts
 
 ```bash
-cd mobile-app
-bun install
-bun run start        # Start Expo dev server
-bun run ios          # Run on iOS simulator
+cd contracts
+anchor build         # Build programs
+anchor deploy        # Deploy to devnet
 ```
 
 ### Noir Circuits
@@ -135,43 +250,25 @@ bun run test         # Run circuit tests
 
 ---
 
-## SDK Usage
-
-```typescript
-import { createClient } from '@zvault/sdk';
-import { Connection } from '@solana/web3.js';
-
-const connection = new Connection('https://api.devnet.solana.com');
-const client = createClient(connection);
-client.setPayer(myKeypair);
-
-// 1. DEPOSIT: Generate credentials
-const deposit = await client.deposit(100_000n); // 0.001 BTC
-console.log('Send BTC to:', deposit.taprootAddress);
-console.log('Save claim link:', deposit.claimLink);
-
-// 2. CLAIM: After BTC confirmed
-const result = await client.privateClaim(deposit.claimLink);
-
-// 3. SPLIT: Divide into two outputs
-const { output1, output2 } = await client.privateSplit(deposit.note, 50_000n);
-
-// 4. SEND: Via link or stealth
-const link = client.sendLink(output1.note);
-await client.sendStealth(recipientMeta, output2.note.amount, leafIndex);
-
-// 5. WITHDRAW: Back to BTC
-const withdraw = await client.withdraw(output1.note, 'tb1qxyz...');
-```
-
----
-
 ## Program IDs
 
 | Program | Network | Address |
 |---------|---------|---------|
 | zVault | Devnet | `5S5ynMni8Pgd6tKkpYaXiPJiEXgw927s7T2txDtDivRK` |
 | BTC Light Client | Devnet | `95vWurTc9BhjBvEbBdUKoTZHMPPyB1iQZEuXEaR7wPpd` |
+| ChadBuffer | Devnet | `C5RpjtTMFXKVZCtXSzKXD4CDNTaWBg3dVeMfYvjZYHDF` |
+
+---
+
+## Privacy Guarantees
+
+| Operation | Amount Visible | Linkable |
+|-----------|---------------|----------|
+| Deposit BTC | On Bitcoin chain | No (to claim) |
+| Claim zkBTC | No | No |
+| Split | No | No |
+| Stealth Send | No | Recipient only |
+| Withdraw BTC | On Bitcoin chain | No (to deposit) |
 
 ---
 
@@ -179,145 +276,29 @@ const withdraw = await client.withdraw(output1.note, 'tb1qxyz...');
 
 | Component | Technology |
 |-----------|------------|
-| Proof System | Groth16 on BN254 |
+| Proof System | UltraHonk (BN254) |
 | Hash Function | Poseidon2 (ZK-friendly) |
-| Commitment | `Poseidon2(Poseidon2(nullifier, secret), amount)` |
-| Stealth | Grumpkin ECDH |
+| Commitment | `Poseidon2(pub_key_x, amount)` |
+| Nullifier | `Poseidon2(priv_key, leaf_index)` |
+| Stealth | Grumpkin ECDH (EIP-5564) |
 | BTC Deposits | Taproot (BIP-341) |
 | Merkle Tree | Depth 20 (~1M leaves) |
 
 ---
 
-## Roadmap
+## Security Notice
 
-See [`roadmap/`](./roadmap/) for the full development roadmap and todo list.
+> **This is hackathon software.** Not audited for production use.
 
-**Vision:** Make Bitcoin private on every chain - starting with Solana, expanding to become the universal private layer for Bitcoin in DeFi.
-
-| Phase | Timeline | Goal |
-|-------|----------|------|
-| Beta | Month 1 | Mainnet launch, $10K limit |
-| Decentralize | Month 2 | FROST 2-of-3, $50K limit |
-| Audit | Month 3 | Security audit, $250K limit |
-| Yield | Month 4+ | zkEarn, $1M+ TVL |
-
----
-
-## Documentation
-
-Comprehensive documentation is available in the [`docs/`](./docs/) folder:
-
-| Document | Description |
-|----------|-------------|
-| [Architecture](./docs/ARCHITECTURE.md) | System design and data flows |
-| [Contracts](./docs/CONTRACTS.md) | Solana program reference |
-| [SDK](./docs/SDK.md) | TypeScript SDK guide |
-| [API](./docs/API.md) | Backend REST API |
-| [Mobile](./docs/MOBILE.md) | Mobile app documentation |
-| [ZK Proofs](./docs/ZK_PROOFS.md) | Circuit documentation |
-| [PRD](./docs/PRD.md) | Product requirements |
-
----
-
-## API Endpoints
-
-### Redemption API
-
-```
-POST /api/redeem            - Submit BTC withdrawal request
-GET  /api/withdrawal/:id    - Check withdrawal status
-GET  /api/health            - Health check
-```
-
-### Stealth API
-
-```
-POST /api/stealth/prepare   - Prepare stealth deposit
-GET  /api/stealth/status/:id - Get stealth deposit status
-POST /api/stealth/announce  - Manual announcement
-```
-
----
-
-## Configuration
-
-```env
-# Solana
-NEXT_PUBLIC_SOLANA_RPC=https://api.devnet.solana.com
-ZVAULT_PROGRAM_ID=5S5ynMni8Pgd6tKkpYaXiPJiEXgw927s7T2txDtDivRK
-
-# Bitcoin
-BITCOIN_NETWORK=testnet
-ESPLORA_URL=https://blockstream.info/testnet/api
-
-# Backend
-ZKBTC_API_URL=http://localhost:8080
-```
-
----
-
-## Development
-
-### Running Tests
-
-```bash
-# SDK tests
-cd sdk && bun test
-
-# Contract tests
-cd contracts && bun run test
-
-# Frontend tests
-cd frontend && bun run test
-
-# Circuit tests
-cd noir-circuits && bun run test
-
-# Backend tests
-cd backend && cargo test
-```
-
-### Build for Production
-
-```bash
-# Frontend
-cd frontend && bun run build
-
-# SDK
-cd sdk && bun run build
-
-# Backend
-cd backend && cargo build --release
-```
-
----
-
-## Security
-
-> **WARNING**: This is a proof-of-concept for hackathon demonstration.
-
-**Current Limitations**:
-- Uses testnet/devnet networks only
-- No production security audits performed
+**Current Status:**
+- Testnet/Devnet networks only
 - Simplified key management for demo
-- In-memory storage (data lost on restart)
+- No production security audits
 
-**Before Production**:
+**Before Production:**
 - Full security audit required
 - Proper key management implementation
 - Persistent database integration
-- Rate limiting and DDoS protection
-
----
-
-## Contributing
-
-1. Fork the repository
-2. Create a feature branch
-3. Make changes with tests
-4. Submit a pull request
-
-See documentation for coding standards and architecture guidelines.
 
 ---
 
