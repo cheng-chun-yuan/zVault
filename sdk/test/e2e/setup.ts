@@ -30,7 +30,7 @@ import {
 import * as fs from "fs";
 import * as path from "path";
 
-import { setConfig, getConfig, createConfig, LOCALNET_CONFIG, type NetworkConfig } from "../../src/config";
+import { setConfig, getConfig, createConfig, LOCALNET_CONFIG, DEVNET_CONFIG, type NetworkConfig } from "../../src/config";
 import { address as kitAddress } from "@solana/kit";
 import { initPoseidon } from "../../src/poseidon";
 import { initProver, setCircuitPath, isProverAvailable, circuitExists } from "../../src/prover/web";
@@ -91,8 +91,18 @@ export interface E2ETestContext {
 // Constants
 // =============================================================================
 
-export const RPC_URL = "http://127.0.0.1:8899";
-export const WS_URL = "ws://127.0.0.1:8900";
+/** Detect network from environment variable (default: localnet) */
+export const NETWORK = (process.env.NETWORK || "localnet") as "localnet" | "devnet";
+export const IS_DEVNET = NETWORK === "devnet";
+
+/** RPC URLs based on network */
+export const RPC_URL = IS_DEVNET
+  ? "https://api.devnet.solana.com"
+  : "http://127.0.0.1:8899";
+export const WS_URL = IS_DEVNET
+  ? "wss://api.devnet.solana.com"
+  : "ws://127.0.0.1:8900";
+
 export const TEST_TIMEOUT = 120_000; // 2 minutes for basic tests
 export const PROOF_TIMEOUT = 300_000; // 5 minutes for real proof generation
 export const REAL_PROOF_SIZE = 10 * 1024; // ~10KB typical UltraHonk proof
@@ -282,32 +292,42 @@ export function isProverReady(): boolean {
  * Sets skipProof=true if circuits are not compiled.
  */
 export async function createTestContext(): Promise<E2ETestContext> {
-  // Check validator availability
-  const validatorRunning = await isValidatorRunning();
-
-  // Load localnet config
+  // Load localnet config (only relevant for localnet)
   const localnetConfig = loadLocalnetConfig();
 
-  // Set SDK config to localnet, overriding with actual deployed addresses from localnet config
-  if (localnetConfig) {
-    const customConfig = createConfig(LOCALNET_CONFIG, {
-      // Override with actual deployed addresses
-      zvaultProgramId: kitAddress(localnetConfig.programs.zVault),
-      btcLightClientProgramId: kitAddress(localnetConfig.programs.btcLightClient),
-      chadbufferProgramId: localnetConfig.programs.chadbuffer
-        ? kitAddress(localnetConfig.programs.chadbuffer)
-        : LOCALNET_CONFIG.chadbufferProgramId,
-      ultrahonkVerifierProgramId: localnetConfig.programs.ultrahonkVerifier
-        ? kitAddress(localnetConfig.programs.ultrahonkVerifier)
-        : LOCALNET_CONFIG.ultrahonkVerifierProgramId,
-      poolStatePda: kitAddress(localnetConfig.accounts.poolState),
-      commitmentTreePda: kitAddress(localnetConfig.accounts.commitmentTree),
-      zbtcMint: kitAddress(localnetConfig.accounts.zkbtcMint),
-      poolVault: kitAddress(localnetConfig.accounts.poolVault),
-    });
-    setConfig(customConfig);
+  // Configure based on network
+  if (IS_DEVNET) {
+    // Use devnet config directly
+    setConfig("devnet");
+    console.log("[Setup] Using devnet configuration");
   } else {
-    setConfig("localnet");
+    // Localnet: check validator availability first
+    const validatorRunning = await isValidatorRunning();
+    if (!validatorRunning) {
+      console.warn("[Setup] Local validator not running");
+    }
+
+    // Set SDK config to localnet, overriding with actual deployed addresses from localnet config
+    if (localnetConfig) {
+      const customConfig = createConfig(LOCALNET_CONFIG, {
+        // Override with actual deployed addresses
+        zvaultProgramId: kitAddress(localnetConfig.programs.zVault),
+        btcLightClientProgramId: kitAddress(localnetConfig.programs.btcLightClient),
+        chadbufferProgramId: localnetConfig.programs.chadbuffer
+          ? kitAddress(localnetConfig.programs.chadbuffer)
+          : LOCALNET_CONFIG.chadbufferProgramId,
+        ultrahonkVerifierProgramId: localnetConfig.programs.ultrahonkVerifier
+          ? kitAddress(localnetConfig.programs.ultrahonkVerifier)
+          : LOCALNET_CONFIG.ultrahonkVerifierProgramId,
+        poolStatePda: kitAddress(localnetConfig.accounts.poolState),
+        commitmentTreePda: kitAddress(localnetConfig.accounts.commitmentTree),
+        zbtcMint: kitAddress(localnetConfig.accounts.zkbtcMint),
+        poolVault: kitAddress(localnetConfig.accounts.poolVault),
+      });
+      setConfig(customConfig);
+    } else {
+      setConfig("localnet");
+    }
   }
   const config = getConfig();
 
@@ -325,24 +345,49 @@ export async function createTestContext(): Promise<E2ETestContext> {
   const payerSigner = await createKeyPairSignerFromBytes(payer.secretKey);
 
   // Determine if we should skip on-chain tests
-  let skipOnChain = !validatorRunning;
+  let skipOnChain = false;
 
-  if (validatorRunning && !localnetConfig) {
-    console.warn("Validator running but no localnet config found. On-chain tests will be skipped.");
-    skipOnChain = true;
-  }
-
-  // Try to fund the payer if validator is running
-  if (!skipOnChain) {
+  if (IS_DEVNET) {
+    // Devnet: check connectivity and balance
     try {
       const balance = await connection.getBalance(payer.publicKey);
-      if (balance < LAMPORTS_PER_SOL) {
-        console.log(`Airdropping 2 SOL to test payer: ${payer.publicKey.toBase58()}`);
-        await airdrop(connection, payer.publicKey);
+      if (balance < 0.1 * LAMPORTS_PER_SOL) {
+        console.log(`[Devnet] Low balance (${balance / LAMPORTS_PER_SOL} SOL), requesting airdrop...`);
+        try {
+          await airdrop(connection, payer.publicKey, 2 * LAMPORTS_PER_SOL);
+          console.log("[Devnet] Airdrop successful");
+        } catch (airdropError) {
+          console.warn("[Devnet] Airdrop failed (rate limited?), check balance manually:", airdropError);
+        }
+      } else {
+        console.log(`[Devnet] Payer balance: ${balance / LAMPORTS_PER_SOL} SOL`);
       }
     } catch (error) {
-      console.warn("Failed to airdrop to payer:", error);
+      console.warn("[Devnet] Failed to connect:", error);
       skipOnChain = true;
+    }
+  } else {
+    // Localnet: check validator
+    const validatorRunning = await isValidatorRunning();
+    skipOnChain = !validatorRunning;
+
+    if (validatorRunning && !localnetConfig) {
+      console.warn("Validator running but no localnet config found. On-chain tests will be skipped.");
+      skipOnChain = true;
+    }
+
+    // Try to fund the payer if validator is running
+    if (!skipOnChain) {
+      try {
+        const balance = await connection.getBalance(payer.publicKey);
+        if (balance < LAMPORTS_PER_SOL) {
+          console.log(`Airdropping 2 SOL to test payer: ${payer.publicKey.toBase58()}`);
+          await airdrop(connection, payer.publicKey);
+        }
+      } catch (error) {
+        console.warn("Failed to airdrop to payer:", error);
+        skipOnChain = true;
+      }
     }
   }
 
@@ -362,19 +407,19 @@ export async function createTestContext(): Promise<E2ETestContext> {
     payerSigner,
     config,
     localnetConfig: localnetConfig || {
-      network: "localnet",
+      network: NETWORK,
       rpcUrl: RPC_URL,
       programs: {
-        zVault: LOCALNET_CONFIG.zvaultProgramId.toString(),
-        btcLightClient: LOCALNET_CONFIG.btcLightClientProgramId.toString(),
-        ultrahonkVerifier: LOCALNET_CONFIG.ultrahonkVerifierProgramId.toString(),
-        chadbuffer: LOCALNET_CONFIG.chadbufferProgramId.toString(),
+        zVault: config.zvaultProgramId.toString(),
+        btcLightClient: config.btcLightClientProgramId.toString(),
+        ultrahonkVerifier: config.ultrahonkVerifierProgramId.toString(),
+        chadbuffer: config.chadbufferProgramId.toString(),
       },
       accounts: {
-        poolState: LOCALNET_CONFIG.poolStatePda.toString(),
-        commitmentTree: LOCALNET_CONFIG.commitmentTreePda.toString(),
-        zkbtcMint: LOCALNET_CONFIG.zbtcMint.toString(),
-        poolVault: LOCALNET_CONFIG.poolVault.toString(),
+        poolState: config.poolStatePda.toString(),
+        commitmentTree: config.commitmentTreePda.toString(),
+        zkbtcMint: config.zbtcMint.toString(),
+        poolVault: config.poolVault.toString(),
       },
     },
     skipOnChain,

@@ -469,6 +469,11 @@ describe("SPEND_PARTIAL_PUBLIC E2E", () => {
           console.log("⚠️  Skipping: requires validator and compiled circuits");
           return;
         }
+        if (ctx.config.network === "devnet") {
+          console.log("⚠️  Skipping on devnet: demo stealth instruction not available");
+          console.log("    (devnet requires real BTC deposits, not demo stealth)");
+          return;
+        }
 
         console.log("\n" + "=".repeat(60));
         console.log("FULL STEALTH PARTIAL PUBLIC FLOW WITH REAL ZK PROOF");
