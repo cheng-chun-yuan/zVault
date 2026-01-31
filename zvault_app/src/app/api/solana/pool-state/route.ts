@@ -1,7 +1,7 @@
-import { NextRequest, NextResponse } from "next/server";
-import { PublicKey } from "@solana/web3.js";
-import { getHeliusConnection, isHeliusConfigured } from "@/lib/helius-server";
+import { NextResponse } from "next/server";
+import { fetchAccountInfo, isHeliusConfigured } from "@/lib/helius-server";
 import { DEVNET_CONFIG, bytesToBigint } from "@zvault/sdk";
+import bs58 from "bs58";
 
 export const runtime = "nodejs";
 
@@ -31,17 +31,14 @@ interface PoolStateData {
 /**
  * GET /api/solana/pool-state
  *
- * Fetch zVault pool state from Solana via Helius RPC.
+ * Fetch zVault pool state from Solana using @solana/kit.
  */
-export async function GET(request: NextRequest) {
+export async function GET() {
   try {
-    const connection = getHeliusConnection("devnet");
-
     console.log("[PoolState API] Fetching from:", POOL_STATE_ADDRESS);
     console.log("[PoolState API] Using Helius:", isHeliusConfigured());
 
-    const pubkey = new PublicKey(POOL_STATE_ADDRESS);
-    const accountInfo = await connection.getAccountInfo(pubkey);
+    const accountInfo = await fetchAccountInfo(POOL_STATE_ADDRESS, "devnet");
 
     if (!accountInfo) {
       return NextResponse.json(
@@ -65,9 +62,9 @@ export async function GET(request: NextRequest) {
     const state: PoolStateData = {
       discriminator: data[0],
       bump: data[1],
-      authority: new PublicKey(data.slice(8, 40)).toBase58(),
-      zbtcMint: new PublicKey(data.slice(40, 72)).toBase58(),
-      poolVault: new PublicKey(data.slice(72, 104)).toBase58(),
+      authority: bs58.encode(data.slice(8, 40)),
+      zbtcMint: bs58.encode(data.slice(40, 72)),
+      poolVault: bs58.encode(data.slice(72, 104)),
       minDeposit: bytesToBigint(data.slice(104, 112)).toString(),
       totalMinted: bytesToBigint(data.slice(112, 120)).toString(),
       totalBurned: bytesToBigint(data.slice(120, 128)).toString(),
