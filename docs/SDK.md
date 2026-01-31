@@ -1,23 +1,6 @@
 # zVault SDK Reference
 
-Complete TypeScript SDK for interacting with the zVault protocol. Privacy-preserving BTC to Solana bridge using ZK proofs.
-
----
-
-## Table of Contents
-
-1. [Installation](#installation)
-2. [Quick Start](#quick-start)
-3. [Function Categories](#function-categories)
-4. [Contract Instructions](#contract-instructions)
-5. [Deposit Functions](#deposit-functions)
-6. [Transfer Functions](#transfer-functions)
-7. [Withdraw Functions](#withdraw-functions)
-8. [Yield Pool Functions](#yield-pool-functions)
-9. [Identity Functions](#identity-functions)
-10. [Setup Functions](#setup-functions)
-11. [Utility Functions](#utility-functions)
-12. [Types Reference](#types-reference)
+TypeScript SDK for privacy-preserving BTC to Solana bridge.
 
 ---
 
@@ -25,14 +8,6 @@ Complete TypeScript SDK for interacting with the zVault protocol. Privacy-preser
 
 ```bash
 bun add @zvault/sdk
-```
-
-**Peer Dependencies:**
-```json
-{
-  "@solana/web3.js": "^1.95.0",
-  "@noble/hashes": "^1.6.1"
-}
 ```
 
 ---
@@ -50,15 +25,15 @@ import {
 } from '@zvault/sdk';
 
 // 1. Generate deposit credentials
-const depositResult = await deposit(100_000n); // 0.001 BTC
-console.log('Send BTC to:', depositResult.taprootAddress);
-console.log('Save this link:', depositResult.claimLink);
+const result = await deposit(100_000n); // 0.001 BTC
+console.log('Send BTC to:', result.taprootAddress);
+console.log('Save this link:', result.claimLink);
 
 // 2. After BTC confirmed, claim zkBTC
-const claimed = await claimNote(config, depositResult.claimLink);
+const claimed = await claimNote(config, result.claimLink);
 
 // 3. Split into two notes
-const { output1, output2 } = await splitNote(config, depositResult.note, 60_000n);
+const { output1, output2 } = await splitNote(config, result.note, 60_000n);
 
 // 4. Send via link or stealth
 const link = createClaimLinkFromNote(output1);        // Shareable URL
@@ -72,498 +47,113 @@ await withdraw(config, myNote, 'tb1q...');
 
 ## Function Categories
 
+| Category | Functions | Purpose |
+|----------|-----------|---------|
+| **Deposit** | `deposit`, `claimNote`, `sendStealth` | BTC → zkBTC |
+| **Transfer** | `splitNote`, `createClaimLinkFromNote`, `sendPrivate` | zkBTC → Someone |
+| **Withdraw** | `withdraw` | zkBTC → BTC |
+| **Yield** | `depositToPool`, `withdrawFromPool`, `claimPoolYield` | Earn yield |
+| **Identity** | `registerName`, `lookupZkeyName` | .zkey names |
+| **Setup** | `deriveKeysFromWallet`, `createStealthMetaAddress` | Key management |
+
+---
+
+## Core Functions
+
+### Deposit Functions
+
+| Function | On-Chain | ZK Proof | Description |
+|----------|----------|----------|-------------|
+| `deposit(amount)` | No | No | Generate BTC deposit address |
+| `claimNote(config, claimLink)` | Yes | Yes | Mint zkBTC after BTC confirmed |
+| `sendStealth(config, meta, amount)` | Yes | No | Create stealth announcement |
+
+### Transfer Functions
+
+| Function | On-Chain | ZK Proof | Description |
+|----------|----------|----------|-------------|
+| `splitNote(config, note, amount1)` | Yes | Yes | Split 1 note → 2 notes |
+| `createClaimLinkFromNote(note)` | No | No | Create shareable URL |
+| `sendPrivate(config, note, recipientMeta)` | Yes | Yes | Private stealth transfer |
+
+### Withdraw Functions
+
+| Function | On-Chain | ZK Proof | Description |
+|----------|----------|----------|-------------|
+| `withdraw(config, note, btcAddress)` | Yes | Yes | Burn zkBTC, request BTC |
+
+---
+
+## Key Management
+
+```typescript
+import { deriveKeysFromWallet, createStealthMetaAddress } from '@zvault/sdk';
+
+// Derive keys from wallet signature
+const keys = await deriveKeysFromWallet(walletAdapter);
+// Returns: { spendingKey, viewingKey, spendingPubKey, viewingPubKey }
+
+// Create shareable stealth address
+const meta = createStealthMetaAddress(keys);
+// Share this with senders
 ```
-┌────────────────────────────────────────────────────────────────┐
-│                        zVault SDK                              │
-├────────────────────────────────────────────────────────────────┤
-│                                                                │
-│  DEPOSIT (BTC → zkBTC)                                        │
-│  ├── deposit()          Generate taproot address              │
-│  ├── claimNote()        Claim after BTC confirmed             │
-│  └── sendStealth()      Direct deposit to recipient           │
-│                                                                │
-│  TRANSFER (zkBTC → Someone)                                   │
-│  ├── splitNote()        Split 1 note → 2 notes               │
-│  ├── createClaimLinkFromNote()  Create shareable URL          │
-│  └── sendPrivate()      Send via stealth address              │
-│                                                                │
-│  WITHDRAW (zkBTC → BTC)                                       │
-│  └── withdraw()         Burn and get BTC back                 │
-│                                                                │
-│  YIELD POOL (Earn)                                            │
-│  ├── depositToPool()    Stake for yield                       │
-│  ├── claimPoolYield()   Claim yield only                      │
-│  ├── compoundYield()    Reinvest yield                        │
-│  └── withdrawFromPool() Exit with principal + yield           │
-│                                                                │
-│  IDENTITY (.zkey)                                             │
-│  ├── registerName()     Register "alice.zkey"                 │
-│  └── lookupZkeyName()   Resolve to stealth address            │
-│                                                                │
-│  SETUP                                                        │
-│  ├── deriveKeysFromWallet()   Get spending/viewing keys       │
-│  └── createStealthMetaAddress()  Shareable address            │
-│                                                                │
-└────────────────────────────────────────────────────────────────┘
+
+---
+
+## Stealth Address Operations
+
+```typescript
+import { scanAnnouncements, lookupZkeyName } from '@zvault/sdk';
+
+// Scan for incoming transfers
+const myNotes = scanAnnouncements(keys, announcements);
+
+// Send to .zkey name
+const entry = await lookupZkeyName(connection, 'alice');
+await sendPrivate(config, myNote, entry.stealthMetaAddress);
+```
+
+---
+
+## ChadBuffer (Large Data Upload)
+
+```typescript
+import {
+  uploadTransactionToBuffer,
+  uploadProofToBuffer,
+  closeBuffer,
+  needsBuffer
+} from '@zvault/sdk';
+
+// Upload Bitcoin transaction
+const bufferAddress = await uploadTransactionToBuffer(rpc, rpcSubs, payer, rawTx);
+
+// Upload ZK proof if needed
+if (needsBuffer(proofBytes)) {
+  const result = await uploadProofToBuffer(rpc, rpcSubs, payer, proofBytes);
+}
+
+// Reclaim rent after verification
+await closeBuffer(rpc, rpcSubs, payer, bufferAddress);
 ```
 
 ---
 
 ## Contract Instructions
 
-| Discriminator | Instruction | Purpose |
-|---------------|-------------|---------|
-| **0** | `INITIALIZE` | Initialize pool state and commitment tree |
-| **1** | `ADD_COMMITMENT` | Add commitment to merkle tree (admin) |
-| **4** | `SPLIT_COMMITMENT` | Split 1 note → 2 notes with ZK proof |
-| **5** | `REQUEST_REDEMPTION` | Burn zkBTC, request BTC withdrawal |
-| **8** | `VERIFY_DEPOSIT` | Record BTC deposit with SPV proof |
-| **9** | `CLAIM` | Mint zkBTC with ZK proof |
-| **10** | `TRANSFER` | Transfer zkBTC with ZK proof |
-| **11** | `WITHDRAW` | Withdraw to BTC address with ZK proof |
-| **12** | `ANNOUNCE_STEALTH` | Announce stealth transfer |
-| **13** | `VERIFY_STEALTH_DEPOSIT` | Verify stealth BTC deposit |
-| **20** | `REGISTER_NAME` | Register .zkey name |
-| **21** | `UPDATE_NAME` | Update .zkey registration |
-| **22** | `TRANSFER_NAME` | Transfer .zkey ownership |
-| **30** | `CREATE_YIELD_POOL` | Create yield pool (admin) |
-| **31** | `DEPOSIT_TO_POOL` | Deposit zkBTC into yield pool |
-| **32** | `WITHDRAW_FROM_POOL` | Exit pool with principal + yield |
-| **33** | `CLAIM_POOL_YIELD` | Claim yield, keep principal staked |
-| **34** | `COMPOUND_YIELD` | Reinvest yield into principal |
-| **35** | `UPDATE_YIELD_RATE` | Update pool rate (governance) |
-| **36** | `HARVEST_YIELD` | Harvest from DeFi vault |
+| Disc | Instruction | Purpose |
+|------|-------------|---------|
+| 0 | `INITIALIZE` | Initialize pool state |
+| 4 | `SPLIT_COMMITMENT` | Split 1 → 2 notes |
+| 5 | `REQUEST_REDEMPTION` | Burn, request BTC |
+| 8 | `VERIFY_DEPOSIT` | Record BTC deposit (SPV) |
+| 9 | `CLAIM` | Mint zkBTC with proof |
+| 12 | `ANNOUNCE_STEALTH` | Stealth transfer |
+| 17 | `REGISTER_NAME` | Register .zkey name |
 
 ---
 
-## Deposit Functions
-
-### `deposit(amountSats, network?, baseUrl?)`
-
-Generate deposit credentials (taproot address + claim link).
-
-| | |
-|---|---|
-| **On-chain** | No |
-| **ZK Proof** | No |
-| **Purpose** | Generate BTC deposit address |
-
-```typescript
-const result = await deposit(100_000n, 'testnet');
-
-// Returns:
-{
-  note: Note,              // Secret note data (SAVE THIS!)
-  taprootAddress: string,  // BTC deposit address
-  claimLink: string,       // Shareable claim URL
-  displayAmount: string,   // "0.001 BTC"
-}
-```
-
-**Next step:** Send BTC to the taproot address externally.
-
----
-
-### `claimNote(config, claimLinkOrNote, merkleProof?)`
-
-Claim zkBTC tokens with ZK proof after BTC deposit confirms.
-
-| | |
-|---|---|
-| **On-chain** | Yes |
-| **ZK Proof** | Yes (claim circuit) |
-| **Purpose** | Mint zkBTC after BTC confirmed |
-
-```typescript
-// From claim link
-const result = await claimNote(config, 'zvault://claim?n=abc...');
-
-// Or from note directly
-const result = await claimNote(config, note);
-
-// Returns:
-{
-  signature: string,  // Solana transaction signature
-  amount: bigint,     // Claimed amount in sats
-  recipient: PublicKey,
-}
-```
-
----
-
-### `sendStealth(config, recipientMeta, amountSats, leafIndex?)`
-
-Send to specific recipient via stealth address (for new deposits).
-
-| | |
-|---|---|
-| **On-chain** | Yes |
-| **ZK Proof** | No |
-| **Purpose** | Create stealth announcement for recipient |
-
-```typescript
-const result = await sendStealth(config, recipientMeta, 100_000n);
-
-// Returns:
-{
-  signature: string,
-  ephemeralPubKey: Uint8Array,  // For recipient scanning
-  leafIndex: number,
-}
-
-// Recipient scans with viewing key to discover
-const found = scanAnnouncements(recipientKeys, announcements);
-```
-
----
-
-## Transfer Functions
-
-### `splitNote(config, inputNote, amount1, merkleProof?)`
-
-Split one note into two outputs.
-
-| | |
-|---|---|
-| **On-chain** | Yes |
-| **ZK Proof** | Yes (split circuit) |
-| **Purpose** | Divide balance into smaller pieces |
-
-```typescript
-// Split 100k sats into 60k + 40k
-const { output1, output2 } = await splitNote(config, myNote, 60_000n);
-
-// output1 = 60,000 sats (Note)
-// output2 = 40,000 sats (Note)
-// Original note is nullified (spent)
-```
-
-**Use cases:**
-- Send partial amount to someone
-- Keep some, share some via claim link
-
----
-
-### `createClaimLinkFromNote(note, baseUrl?)`
-
-Create a shareable claim link (off-chain).
-
-| | |
-|---|---|
-| **On-chain** | No |
-| **ZK Proof** | No |
-| **Purpose** | Encode note secrets into URL |
-
-```typescript
-const link = createClaimLinkFromNote(note);
-// => "zvault://claim?n=<nullifier>&s=<secret>&a=<amount>"
-
-// Share via messaging, email, QR code
-// Anyone with link can claim (first-come-first-served)
-```
-
-**Warning:** This is a bearer instrument. Anyone with the link can claim!
-
----
-
-### `sendPrivate(config, inputNote, recipientMeta, merkleProof?)`
-
-Send existing zkBTC to recipient's stealth address (private transfer).
-
-| | |
-|---|---|
-| **On-chain** | Yes |
-| **ZK Proof** | Yes (transfer circuit) |
-| **Purpose** | Private send to known recipient |
-
-```typescript
-const result = await sendPrivate(config, myNote, aliceMetaAddress, merkleProof);
-
-// Returns:
-{
-  signature: string,
-  ephemeralPubKey: Uint8Array,
-  outputCommitment: Uint8Array,
-  inputNullifierHash: Uint8Array,
-  amount: bigint,
-}
-
-// Alice scans and claims
-const found = scanAnnouncements(aliceKeys, announcements);
-```
-
----
-
-## Withdraw Functions
-
-### `withdraw(config, note, btcAddress, withdrawAmount?, merkleProof?)`
-
-Request BTC withdrawal (burn zkBTC).
-
-| | |
-|---|---|
-| **On-chain** | Yes |
-| **ZK Proof** | Yes (withdraw circuit) |
-| **Purpose** | Convert zkBTC back to BTC |
-
-```typescript
-// Full withdrawal
-const result = await withdraw(config, myNote, 'tb1q...');
-
-// Partial withdrawal (50%)
-const result = await withdraw(config, myNote, 'tb1q...', 50_000n);
-
-// Returns:
-{
-  signature: string,
-  withdrawAmount: bigint,
-  changeNote?: Note,       // If partial withdrawal
-  changeClaimLink?: string,
-}
-```
-
-**Next step:** Backend signs and broadcasts BTC transaction.
-
----
-
-## Yield Pool Functions
-
-The yield pool uses **stealth addresses** for privacy. Positions are discovered via viewing key scanning.
-
-### `createStealthPoolDeposit(recipientMeta, principal, depositEpoch, poolId)`
-
-Create a stealth pool deposit for a recipient.
-
-| | |
-|---|---|
-| **On-chain** | No (preparation only) |
-| **Purpose** | Prepare pool position data |
-
-```typescript
-import { createStealthPoolDeposit } from '@zvault/sdk';
-
-const position = createStealthPoolDeposit(
-  recipientMeta,    // Stealth meta address
-  1_000_000n,       // 0.01 BTC principal
-  currentEpoch,
-  poolId
-);
-```
-
----
-
-### `scanPoolAnnouncements(keys, announcements)`
-
-Find your pool positions using viewing key.
-
-| | |
-|---|---|
-| **On-chain** | No (read-only scan) |
-| **Purpose** | Discover positions you can claim |
-
-```typescript
-import { scanPoolAnnouncements } from '@zvault/sdk';
-
-const myPositions = scanPoolAnnouncements(keys, announcements);
-// Returns positions where ECDH succeeds with your viewing key
-```
-
----
-
-### `calculateYield(position, currentEpoch, yieldRateBps)`
-
-Calculate earned yield off-chain.
-
-```typescript
-import { calculateYield } from '@zvault/sdk';
-
-const earned = calculateYield(position, currentEpoch, 500); // 5% rate
-// Returns yield amount in sats
-```
-
----
-
-### `prepareStealthPoolClaimInputs(keys, position, merkleProof)`
-
-Prepare inputs for pool claim/withdraw (requires spending key).
-
-```typescript
-import { prepareStealthPoolClaimInputs } from '@zvault/sdk';
-
-const inputs = prepareStealthPoolClaimInputs(keys, position, merkleProof);
-// Use inputs to generate ZK proof for claim
-```
-
----
-
-### Yield Pool Flow
-
-```
-zkBTC Note → depositToPool() → StealthPoolPosition
-                                      ↓
-              ┌───────────────────────┼───────────────────┐
-              ↓                       ↓                   ↓
-      claimPoolYield()        withdrawFromPool()   compoundYield()
-      (yield → zkBTC)         (all → zkBTC)        (yield → principal)
-```
-
----
-
-## Identity Functions
-
-### `lookupZkeyName(connection, name)`
-
-Resolve .zkey name to stealth address.
-
-```typescript
-import { lookupZkeyName } from '@zvault/sdk';
-
-const entry = await lookupZkeyName(connection, 'alice');
-// Returns: { owner, stealthAddress, ... }
-
-// Now you can send to alice.zkey
-await sendPrivate(config, myNote, entry.stealthAddress);
-```
-
----
-
-### `isValidName(name)`
-
-Validate .zkey name format.
-
-```typescript
-import { isValidName } from '@zvault/sdk';
-
-isValidName('alice_123');  // true
-isValidName('Alice');      // false (uppercase not allowed)
-isValidName('ab');         // false (too short, min 3 chars)
-```
-
----
-
-## Setup Functions
-
-### `deriveKeysFromWallet(walletAdapter)`
-
-Derive spending/viewing keys from Solana wallet signature.
-
-```typescript
-import { deriveKeysFromWallet } from '@zvault/sdk';
-
-const keys = await deriveKeysFromWallet(walletAdapter);
-
-// Returns:
-{
-  spendingKey: bigint,      // Private - for spending
-  viewingKey: bigint,       // Private - for scanning
-  spendingPubKey: GrumpkinPoint,
-  viewingPubKey: GrumpkinPoint,
-}
-```
-
----
-
-### `createStealthMetaAddress(keys)`
-
-Create shareable stealth meta-address from keys.
-
-```typescript
-import { createStealthMetaAddress, encodeStealthMetaAddress } from '@zvault/sdk';
-
-const meta = createStealthMetaAddress(keys);
-const encoded = encodeStealthMetaAddress(meta);
-// => "zk1:ABC123..." (share this with senders)
-```
-
----
-
-### `scanAnnouncements(keys, announcements)`
-
-Scan stealth announcements with viewing key.
-
-```typescript
-import { scanAnnouncements } from '@zvault/sdk';
-
-const myNotes = scanAnnouncements(keys, announcements);
-// Returns notes where ECDH derivation matches
-```
-
----
-
-## Utility Functions
-
-### Note Management
-
-```typescript
-import {
-  generateNote,       // Create note with random secrets
-  createNote,         // Create from specific secrets
-  serializeNote,      // Note → JSON
-  deserializeNote,    // JSON → Note
-  computeCommitment,  // Note → commitment hash
-} from '@zvault/sdk';
-
-const note = generateNote(100_000n);
-const json = serializeNote(note);
-const restored = deserializeNote(json);
-```
-
-### Cryptography
-
-```typescript
-import {
-  poseidon2Hash,          // Poseidon2 hash (Noir compatible)
-  sha256Hash,             // SHA-256
-  doubleSha256,           // Bitcoin-style double SHA
-  randomFieldElement,     // Random BN254 field element
-  bigintToBytes,          // bigint → Uint8Array
-  bytesToBigint,          // Uint8Array → bigint
-} from '@zvault/sdk';
-```
-
-### Grumpkin Curve
-
-```typescript
-import {
-  generateGrumpkinKeyPair,
-  grumpkinEcdhSharedSecret,
-  pointMul,
-  pointAdd,
-  isOnCurve,
-} from '@zvault/sdk';
-
-const { privateKey, publicKey } = generateGrumpkinKeyPair();
-const shared = grumpkinEcdhSharedSecret(myPriv, theirPub);
-```
-
-### Taproot Addresses
-
-```typescript
-import {
-  deriveTaprootAddress,
-  verifyTaprootAddress,
-  isValidBitcoinAddress,
-} from '@zvault/sdk';
-
-const { address } = await deriveTaprootAddress(commitment, 'testnet');
-```
-
-### Merkle Tree
-
-```typescript
-import {
-  createMerkleProof,
-  proofToNoirFormat,
-  TREE_DEPTH,        // 20 levels
-  MAX_LEAVES,        // ~1M leaves
-} from '@zvault/sdk';
-```
-
----
-
-## Types Reference
-
-### Core Types
+## Types
 
 ```typescript
 // Note (shielded commitment)
@@ -572,17 +162,15 @@ interface Note {
   secret: bigint;
   amount: bigint;
   commitment?: bigint;
-  nullifierHash?: bigint;
-  commitmentBytes?: Uint8Array;
 }
 
-// Stealth meta-address (public, shareable)
+// Stealth meta-address (shareable)
 interface StealthMetaAddress {
   spendingPubKey: GrumpkinPoint;
   viewingPubKey: GrumpkinPoint;
 }
 
-// ZVault keys (private, never share)
+// ZVault keys (private)
 interface ZVaultKeys {
   spendingKey: bigint;
   viewingKey: bigint;
@@ -605,159 +193,54 @@ interface MerkleProof {
 }
 ```
 
-### Result Types
-
-```typescript
-interface DepositResult {
-  note: Note;
-  taprootAddress: string;
-  claimLink: string;
-  displayAmount: string;
-}
-
-interface ClaimNoteResult {
-  signature: string;
-  amount: bigint;
-  recipient: PublicKey;
-}
-
-interface SplitNoteResult {
-  signature: string;
-  output1: Note;
-  output2: Note;
-  inputNullifierHash: Uint8Array;
-}
-
-interface WithdrawResult {
-  signature: string;
-  withdrawAmount: bigint;
-  changeNote?: Note;
-  changeClaimLink?: string;
-}
-
-interface SendPrivateResult {
-  signature: string;
-  ephemeralPubKey: Uint8Array;
-  outputCommitment: Uint8Array;
-  inputNullifierHash: Uint8Array;
-  amount: bigint;
-}
-```
-
-### Pool Types
-
-```typescript
-interface StealthPoolPosition {
-  poolId: Uint8Array;
-  ephemeralPub: Uint8Array;
-  principal: bigint;
-  depositEpoch: bigint;
-  stealthPub: GrumpkinPoint;
-  commitment: bigint;
-  leafIndex: number;
-  commitmentBytes: Uint8Array;
-}
-
-interface ScannedPoolPosition extends StealthPoolPosition {
-  sharedSecret: bigint;
-  stealthPriv: bigint;
-}
-```
-
 ---
 
 ## Constants
 
 ```typescript
-// BN254 field prime
-BN254_FIELD_PRIME = 21888242871839275222246405745257275088548364400416034343698204186575808495617n;
+// Program IDs
+ZVAULT_PROGRAM_ID = '5S5ynMni8Pgd6tKkpYaXiPJiEXgw927s7T2txDtDivRK';
+CHADBUFFER_PROGRAM_ID = 'C5RpjtTMFXKVZCtXSzKXD4CDNTaWBg3dVeMfYvjZYHDF';
 
-// Grumpkin curve order
-GRUMPKIN_ORDER = 21888242871839275222246405745257275088548364400416034343698204186575808495617n;
-
-// Merkle tree config
+// Merkle tree
 TREE_DEPTH = 20;
 MAX_LEAVES = 2 ** 20;  // ~1 million
-ROOT_HISTORY_SIZE = 30;
 
-// Program ID
-ZVAULT_PROGRAM_ID = '5S5ynMni8Pgd6tKkpYaXiPJiEXgw927s7T2txDtDivRK';
+// ChadBuffer
+AUTHORITY_SIZE = 32;
+MAX_DATA_PER_WRITE = 1082;  // bytes per chunk
 ```
 
 ---
 
-## Flow Diagrams
+## Error Handling
 
-### Complete User Flow
-
-```
-┌─────────────────────────────────────────────────────────────────┐
-│                         USER ACTIONS                            │
-├─────────────────────────────────────────────────────────────────┤
-│                                                                 │
-│   BTC World                        Solana World                 │
-│   ─────────                        ────────────                 │
-│                                                                 │
-│   ┌─────────┐    deposit()     ┌──────────────┐                │
-│   │ Bitcoin │ ───────────────► │ Taproot Addr │                │
-│   │ Wallet  │                  └──────┬───────┘                │
-│   └─────────┘                         │                         │
-│                                       │ SPV Verify              │
-│                                       ▼                         │
-│                               ┌───────────────┐                 │
-│                               │  claimNote()  │                 │
-│                               └───────┬───────┘                 │
-│                                       │                         │
-│                                       ▼                         │
-│                               ┌───────────────┐                 │
-│                               │   zkBTC Note  │                 │
-│                               └───────┬───────┘                 │
-│                                       │                         │
-│         ┌─────────────────────────────┼─────────────────────┐   │
-│         │                             │                     │   │
-│         ▼                             ▼                     ▼   │
-│  ┌─────────────┐            ┌─────────────────┐    ┌───────────┐│
-│  │ splitNote   │            │  sendPrivate    │    │ withdraw  ││
-│  │ (1 → 2)     │            │ (private send)  │    │ (→ BTC)   ││
-│  └──────┬──────┘            └────────┬────────┘    └───────────┘│
-│         │                            │                          │
-│         ▼                            ▼                          │
-│  ┌──────────────────┐       ┌─────────────────┐                │
-│  │createClaimLink   │       │ Stealth Announce│                │
-│  │FromNote(shareURL)│       │ (ECDH scan)     │                │
-│  └──────────────────┘       └─────────────────┘                │
-│                                                                 │
-└─────────────────────────────────────────────────────────────────┘
+```typescript
+try {
+  await claimNote(config, claimLink);
+} catch (error) {
+  if (error.message.includes('Nullifier already exists')) {
+    console.log('Note already claimed');
+  } else if (error.message.includes('Commitment not found')) {
+    console.log('Wait for deposit confirmation');
+  } else if (error.message.includes('Invalid proof')) {
+    console.log('Proof verification failed');
+  }
+}
 ```
 
-### Yield Pool Flow
+---
 
-```
-┌─────────────────────────────────────────────────────────────────┐
-│                      YIELD POOL (Stealth-based)                 │
-├─────────────────────────────────────────────────────────────────┤
-│                                                                 │
-│   zkBTC Note ──► depositToPool() ──► StealthPoolAnnouncement   │
-│                                              │                  │
-│                       ┌──────────────────────┼──────────┐       │
-│                       ▼                      ▼          ▼       │
-│               claimPoolYield()      withdrawFromPool()  │       │
-│               (yield → zkBTC)       (all → zkBTC)       │       │
-│                                                         │       │
-│                                              compoundYield()    │
-│                                              (yield → principal)│
-│                                                                 │
-│   Scanning: Use viewing key to discover your positions         │
-│   Claiming: Use spending key to generate ZK proof              │
-│                                                                 │
-└─────────────────────────────────────────────────────────────────┘
-```
+## Best Practices
+
+1. **Backup notes** before transactions
+2. **Wait for confirmation** after claims
+3. **Close buffers** to reclaim rent
+4. **Never expose** spending/viewing keys
 
 ---
 
 ## Related Documentation
 
-- [ARCHITECTURE.md](./ARCHITECTURE.md) - System overview
-- [CONTRACTS.md](./CONTRACTS.md) - Solana program details
-- [ZK_PROOFS.md](./ZK_PROOFS.md) - Circuit documentation
-- [API.md](./API.md) - Backend API reference
+- [Technical Deep Dive](./TECHNICAL.md) - Architecture and cryptography
+- [Main README](../README.md) - Project overview
