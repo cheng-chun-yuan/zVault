@@ -31,6 +31,8 @@ import {
   saveCommitmentIndex,
   computeUnifiedCommitmentSync,
   bytesToBigint,
+  hexToBytes,
+  DEVNET_CONFIG,
   type ProofData,
   type ClaimInputs,
   type CommitmentTreeState,
@@ -558,14 +560,17 @@ function ClaimContent() {
       const [zbtcMint] = derivezBTCMintPDA();
       const userTokenAccount = getAssociatedTokenAddressSync(zbtcMint, publicKey, false);
 
+      // Get vkHash from SDK config
+      const vkHash = hexToBytes(DEVNET_CONFIG.vkHashes.claim);
+
       const transaction = await buildClaimTransaction(connection, {
         nullifierHash: nullifierHashBytes,
         merkleRoot: merkleRootBytes,
         zkProof: proofBytes,
         amountSats: BigInt(amountSats),
         userPubkey: publicKey,
-        commitment: commitmentBytes,
         userTokenAccount,
+        vkHash,
       });
 
       setClaimProgress("relaying");

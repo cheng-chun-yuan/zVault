@@ -125,6 +125,11 @@ export {
   computeNullifier,
   hashNullifier,
   computePoolCommitment,
+  // Sync versions (require prior initPoseidon call)
+  computeUnifiedCommitmentSync,
+  computeNullifierSync,
+  hashNullifierSync,
+  computePoolCommitmentSync,
   BN254_SCALAR_FIELD,
 } from "./poseidon";
 
@@ -660,6 +665,8 @@ export {
 // ==========================================================================
 
 export {
+  // Instruction discriminators
+  INSTRUCTION_DISCRIMINATORS,
   // Claim instruction (supports inline and buffer modes)
   buildClaimInstructionData,
   buildClaimInstruction,
@@ -669,6 +676,9 @@ export {
   // SpendPartialPublic instruction (supports inline and buffer modes)
   buildSpendPartialPublicInstructionData,
   buildSpendPartialPublicInstruction,
+  // Redemption request instruction
+  buildRedemptionRequestInstructionData,
+  buildRedemptionRequestInstruction,
   // Pool deposit instruction (supports inline and buffer modes)
   buildPoolDepositInstructionData,
   buildPoolDepositInstruction,
@@ -683,12 +693,15 @@ export {
   calculateAvailableProofSpace,
   hexToBytes as instructionHexToBytes,
   bytesToHex as instructionBytesToHex,
+  bigintTo32Bytes,
+  bytes32ToBigint,
   // Types
   type Instruction,
   type ProofSource,
   type ClaimInstructionOptions,
   type SplitInstructionOptions,
   type SpendPartialPublicInstructionOptions,
+  type RedemptionRequestInstructionOptions,
   type PoolDepositInstructionOptions,
   type PoolWithdrawInstructionOptions,
   type PoolClaimYieldInstructionOptions,

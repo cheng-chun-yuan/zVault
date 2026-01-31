@@ -220,12 +220,16 @@ export interface PoolClaimYieldInstructionOptions {
 /** Instruction discriminators */
 const INSTRUCTION = {
   SPEND_SPLIT: 4,
+  REQUEST_REDEMPTION: 5,
   CLAIM: 9,
   SPEND_PARTIAL_PUBLIC: 10,
   DEPOSIT_TO_POOL: 31,
   WITHDRAW_FROM_POOL: 32,
   CLAIM_POOL_YIELD: 33,
 } as const;
+
+/** Export instruction discriminators for consumers */
+export const INSTRUCTION_DISCRIMINATORS = INSTRUCTION;
 
 /** Proof source byte values */
 const PROOF_SOURCE = {
@@ -624,10 +628,22 @@ export function buildSplitInstruction(options: SplitInstructionOptions): Instruc
 // =============================================================================
 
 /**
- * Build spend_partial_public instruction data (UltraHonk - supports buffer mode)
+ * Build spend_partial_public instruction data (UltraHonk proof)
  *
  * Allows spending a shielded note with partial public output (reveal some amount)
  * and keeping remainder in a new shielded commitment.
+ *
+ * Supports both inline and buffer modes:
+ * - Inline (proof_source=0): proof included in instruction data
+ * - Buffer (proof_source=1): proof read from ChadBuffer account
+ *
+ * Contract format (inline):
+ *   discriminator(1) + proof_source(1) + proof_len(4) + proof + root(32) + nullifier(32) +
+ *   public_amount(8) + change_commitment(32) + recipient(32) + vk_hash(32)
+ *
+ * Contract format (buffer):
+ *   discriminator(1) + proof_source(1) + root(32) + nullifier(32) +
+ *   public_amount(8) + change_commitment(32) + recipient(32) + vk_hash(32)
  */
 export function buildSpendPartialPublicInstructionData(options: {
   proofSource: ProofSource;
@@ -647,7 +663,8 @@ export function buildSpendPartialPublicInstructionData(options: {
       throw new Error("proofBytes required for inline mode");
     }
 
-    // Inline: discriminator(1) + proof_source(1) + proof_len(4) + proof + root(32) + nullifier(32) + public_amount(8) + change_commitment(32) + recipient(32) + vk_hash(32)
+    // Inline mode: discriminator(1) + proof_source(1) + proof_len(4) + proof + root(32) + nullifier(32) +
+    // public_amount(8) + change_commitment(32) + recipient(32) + vk_hash(32)
     const totalSize = 1 + 1 + 4 + proofBytes.length + 32 + 32 + 8 + 32 + 32 + 32;
     const data = new Uint8Array(totalSize);
     const view = new DataView(data.buffer);
@@ -673,7 +690,8 @@ export function buildSpendPartialPublicInstructionData(options: {
 
     return data;
   } else {
-    // Buffer: discriminator(1) + proof_source(1) + root(32) + nullifier(32) + public_amount(8) + change_commitment(32) + recipient(32) + vk_hash(32)
+    // Buffer mode: discriminator(1) + proof_source(1) + root(32) + nullifier(32) +
+    // public_amount(8) + change_commitment(32) + recipient(32) + vk_hash(32)
     const totalSize = 1 + 1 + 32 + 32 + 8 + 32 + 32 + 32;
     const data = new Uint8Array(totalSize);
     const view = new DataView(data.buffer);
@@ -1082,8 +1100,123 @@ export function buildPoolClaimYieldInstruction(options: PoolClaimYieldInstructio
 }
 
 // =============================================================================
+// Redemption Request Instruction Builder
+// =============================================================================
+
+/**
+ * Build instruction data for REQUEST_REDEMPTION
+ *
+ * Burns zBTC and creates a RedemptionRequest PDA that the
+ * backend redemption processor will pick up.
+ *
+ * Layout:
+ * - discriminator (1 byte) = 5
+ * - amount_sats (8 bytes, LE)
+ * - btc_address_len (1 byte)
+ * - btc_address (variable, max 62 bytes)
+ *
+ * @param amountSats - Amount to redeem in satoshis
+ * @param btcAddress - Bitcoin address for withdrawal (max 62 bytes)
+ */
+export function buildRedemptionRequestInstructionData(
+  amountSats: bigint,
+  btcAddress: string
+): Uint8Array {
+  const btcAddrBytes = new TextEncoder().encode(btcAddress);
+  if (btcAddrBytes.length > 62) {
+    throw new Error("BTC address too long (max 62 bytes)");
+  }
+
+  // Layout: discriminator(1) + amount(8) + addr_len(1) + addr
+  const totalLen = 1 + 8 + 1 + btcAddrBytes.length;
+  const data = new Uint8Array(totalLen);
+  const view = new DataView(data.buffer);
+
+  let offset = 0;
+  data[offset++] = INSTRUCTION.REQUEST_REDEMPTION;
+
+  view.setBigUint64(offset, amountSats, true);
+  offset += 8;
+
+  data[offset++] = btcAddrBytes.length;
+  data.set(btcAddrBytes, offset);
+
+  return data;
+}
+
+/** Redemption request instruction options */
+export interface RedemptionRequestInstructionOptions {
+  /** Amount to redeem in satoshis */
+  amountSats: bigint;
+  /** Bitcoin address for withdrawal */
+  btcAddress: string;
+  /** Account addresses */
+  accounts: {
+    poolState: Address;
+    zbtcMint: Address;
+    userTokenAccount: Address;
+    user: Address;
+  };
+}
+
+/**
+ * Build a complete redemption request instruction
+ */
+export function buildRedemptionRequestInstruction(
+  options: RedemptionRequestInstructionOptions
+): Instruction {
+  const config = getConfig();
+
+  const data = buildRedemptionRequestInstructionData(
+    options.amountSats,
+    options.btcAddress
+  );
+
+  const accounts: Instruction["accounts"] = [
+    { address: options.accounts.poolState, role: AccountRole.WRITABLE },
+    { address: options.accounts.zbtcMint, role: AccountRole.WRITABLE },
+    { address: options.accounts.userTokenAccount, role: AccountRole.WRITABLE },
+    { address: options.accounts.user, role: AccountRole.WRITABLE_SIGNER },
+    { address: SYSTEM_PROGRAM_ADDRESS, role: AccountRole.READONLY },
+    { address: TOKEN_2022_PROGRAM_ID, role: AccountRole.READONLY },
+  ];
+
+  return {
+    programAddress: config.zvaultProgramId,
+    accounts,
+    data,
+  };
+}
+
+// =============================================================================
 // Utility Exports
 // =============================================================================
+
+/**
+ * Bigint to 32-byte Uint8Array (big-endian)
+ */
+export function bigintTo32Bytes(value: bigint): Uint8Array {
+  const hex = value.toString(16).padStart(64, "0");
+  const bytes = new Uint8Array(32);
+  for (let i = 0; i < 32; i++) {
+    bytes[i] = parseInt(hex.slice(i * 2, i * 2 + 2), 16);
+  }
+  return bytes;
+}
+
+/**
+ * 32-byte Uint8Array to bigint (big-endian)
+ */
+export function bytes32ToBigint(bytes: Uint8Array): bigint {
+  if (bytes.length !== 32) {
+    throw new Error("Expected 32 bytes");
+  }
+  let hex = "0x";
+  for (let i = 0; i < 32; i++) {
+    hex += bytes[i].toString(16).padStart(2, "0");
+  }
+  return BigInt(hex);
+}
 
 /**
  * Check if a proof is too large for inline mode (needs buffer)
