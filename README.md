@@ -30,7 +30,7 @@ zVault enables Bitcoin holders to access Solana with full transaction privacy. D
 | Operation | Amount Visible | Linkable |
 |-----------|---------------|----------|
 | Deposit BTC | On Bitcoin chain | No (to claim) |
-| Claim zBTC | No | No |
+| Claim zBTC | Only claimed amount | No |
 | Split | No | No |
 | Stealth Send | No | Recipient only |
 | Withdraw BTC | On Bitcoin chain | No (to deposit) |
