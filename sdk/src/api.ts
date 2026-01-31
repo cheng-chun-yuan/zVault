@@ -39,16 +39,22 @@ interface Instruction {
   accounts: Array<{ address: Address; role: (typeof AccountRole)[keyof typeof AccountRole] }>;
   data: Uint8Array;
 }
-import { generateNote, type Note, formatBtc } from "./note";
+import { generateNote, computeNoteCommitment, type Note, formatBtc } from "./note";
 import { getConfig, TOKEN_2022_PROGRAM_ID, ATA_PROGRAM_ID } from "./config";
 import { deriveTaprootAddress } from "./taproot";
 import { createClaimLink, parseClaimLink } from "./claim-link";
 import {
-  generateClaimProof,
-  generateSplitProof,
-  generatePartialWithdrawProof,
-  type NoirProof,
-} from "./proof";
+  generateClaimProof as _generateClaimProof,
+  generateSpendSplitProof as _generateSpendSplitProof,
+  generateSpendPartialPublicProof as _generateSpendPartialPublicProof,
+  type ProofData,
+  type ClaimInputs,
+  type SpendSplitInputs,
+  type SpendPartialPublicInputs,
+} from "./prover/web";
+
+// Type alias for backward compatibility
+type NoirProof = ProofData;
 import {
   createStealthDeposit,
   prepareClaimInputs,
@@ -57,7 +63,122 @@ import {
 import { type StealthMetaAddress, type ZVaultKeys } from "./keys";
 import { type MerkleProof, TREE_DEPTH, ZERO_VALUE } from "./merkle";
 import { bigintToBytes, bytesToBigint, hexToBytes } from "./crypto";
-import { hashNullifierSync } from "./poseidon";
+import { hashNullifierSync, computeNullifierSync } from "./poseidon";
+import { pointMul, GRUMPKIN_GENERATOR } from "./crypto";
+
+/**
+ * Generate claim proof from Note
+ *
+ * Converts Note-based input to the prover's ClaimInputs format.
+ */
+async function generateClaimProof(
+  note: Note,
+  merkleProof: MerkleProof,
+  recipient: bigint
+): Promise<NoirProof> {
+  // Derive pubKeyX from note.nullifier (used as privKey in unified model)
+  // In the unified model: commitment = Poseidon(pubKeyX, amount)
+  // where pubKeyX = (privKey * G).x
+  const privKey = note.nullifier;
+  const pubKey = pointMul(privKey, GRUMPKIN_GENERATOR);
+  const pubKeyX = pubKey.x;
+
+  const inputs: ClaimInputs = {
+    privKey,
+    pubKeyX,
+    amount: note.amount,
+    leafIndex: BigInt(merkleProof.leafIndex),
+    merkleRoot: bytesToBigint(merkleProof.root),
+    merkleProof: {
+      siblings: merkleProof.pathElements.map(el => bytesToBigint(el)),
+      indices: merkleProof.pathIndices,
+    },
+    recipient,
+  };
+
+  return _generateClaimProof(inputs);
+}
+
+/**
+ * Adapter: Generate split proof from Notes (legacy API)
+ */
+async function generateSplitProof(
+  inputNote: Note,
+  output1: Note,
+  output2: Note,
+  merkleProof: MerkleProof
+): Promise<NoirProof> {
+  // Derive keys from notes
+  const privKey = inputNote.nullifier;
+  const pubKey = pointMul(privKey, GRUMPKIN_GENERATOR);
+  const pubKeyX = pubKey.x;
+
+  const output1PrivKey = output1.nullifier;
+  const output1PubKey = pointMul(output1PrivKey, GRUMPKIN_GENERATOR);
+  const output1PubKeyX = output1PubKey.x;
+
+  const output2PrivKey = output2.nullifier;
+  const output2PubKey = pointMul(output2PrivKey, GRUMPKIN_GENERATOR);
+  const output2PubKeyX = output2PubKey.x;
+
+  const inputs: SpendSplitInputs = {
+    privKey,
+    pubKeyX,
+    amount: inputNote.amount,
+    leafIndex: BigInt(merkleProof.leafIndex),
+    merkleRoot: bytesToBigint(merkleProof.root),
+    merkleProof: {
+      siblings: merkleProof.pathElements.map(el => bytesToBigint(el)),
+      indices: merkleProof.pathIndices,
+    },
+    output1PubKeyX,
+    output1Amount: output1.amount,
+    output2PubKeyX,
+    output2Amount: output2.amount,
+  };
+
+  return _generateSpendSplitProof(inputs);
+}
+
+/**
+ * Adapter: Generate partial withdraw proof from Note (legacy API)
+ */
+async function generatePartialWithdrawProof(
+  inputNote: Note,
+  publicAmount: bigint,
+  changeNote: Note,
+  merkleProof: MerkleProof,
+  _recipient: Uint8Array // recipient is bound via public inputs
+): Promise<NoirProof> {
+  const privKey = inputNote.nullifier;
+  const pubKey = pointMul(privKey, GRUMPKIN_GENERATOR);
+  const pubKeyX = pubKey.x;
+
+  const changePrivKey = changeNote.nullifier;
+  const changePubKey = pointMul(changePrivKey, GRUMPKIN_GENERATOR);
+  const changePubKeyX = changePubKey.x;
+
+  // Recipient as bigint (first 32 bytes interpreted as field element)
+  const recipientBigint = bytesToBigint(_recipient);
+
+  const inputs: SpendPartialPublicInputs = {
+    privKey,
+    pubKeyX,
+    amount: inputNote.amount,
+    leafIndex: BigInt(merkleProof.leafIndex),
+    merkleRoot: bytesToBigint(merkleProof.root),
+    merkleProof: {
+      siblings: merkleProof.pathElements.map(el => bytesToBigint(el)),
+      indices: merkleProof.pathIndices,
+    },
+    publicAmount,
+    changePubKeyX,
+    changeAmount: changeNote.amount,
+    recipient: recipientBigint,
+  };
+
+  return _generateSpendPartialPublicProof(inputs);
+}
 
 /** System program address */
 const SYSTEM_PROGRAM_ADDRESS = address("11111111111111111111111111111111");
@@ -425,17 +546,14 @@ export async function depositToNote(
   validateAmount(amountSats, "depositToNote");
 
   // Generate note with random secrets
-  const note = generateNote(amountSats);
+  let note = generateNote(amountSats);
 
-  // For taproot derivation, use XOR of nullifier/secret as placeholder commitment
-  // In production, compute actual Poseidon hash via helper circuit
-  const placeholderCommitment = bigintToBytes(
-    (note.nullifier ^ note.secret) % (2n ** 256n)
-  );
+  // Compute the commitment using Poseidon hash: Poseidon(pubKeyX, amount)
+  note = computeNoteCommitment(note);
 
-  // Derive taproot address
+  // Derive taproot address from commitment
   const { address: taprootAddress } = await deriveTaprootAddress(
-    placeholderCommitment,
+    note.commitmentBytes,
     network
   );
 
@@ -637,8 +755,11 @@ export async function claimNote(
   // Use provided merkle proof or create empty one
   const mp = merkleProof ?? createEmptyMerkleProofForNote();
 
+  // Convert payer address to bigint for proof recipient binding
+  const recipientBigint = bytesToBigint(addressToBytes(config.payer.address));
+
   // Generate ZK proof
-  const proof = await generateClaimProof(note, mp);
+  const proof = await generateClaimProof(note, mp, recipientBigint);
 
   // Build instruction data
   const data = buildClaimData(proof, note.amount);
@@ -739,8 +860,11 @@ export async function claimPublic(
   // Use provided merkle proof or create empty one
   const mp = merkleProof ?? createEmptyMerkleProofForNote();
 
+  // Convert recipient address to bigint for proof binding
+  const recipientBigint = bytesToBigint(addressToBytes(recipientAddress));
+
   // Generate ZK proof
-  const proof = await generateClaimProof(note, mp);
+  const proof = await generateClaimProof(note, mp, recipientBigint);
 
   // Get network config for token addresses
   const networkConfig = getConfig();
