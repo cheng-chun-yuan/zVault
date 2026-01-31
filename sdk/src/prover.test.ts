@@ -20,8 +20,8 @@ import {
   verifyProof,
   cleanup,
   circuitExists,
-} from "./prover";
-import { computeUnifiedCommitment, poseidonHash } from "./poseidon";
+} from "./prover/web";
+import { computeUnifiedCommitmentSync, poseidonHashSync, initPoseidon } from "./poseidon";
 
 /**
  * Compute merkle root from commitment using all-zero siblings.
@@ -30,14 +30,15 @@ import { computeUnifiedCommitment, poseidonHash } from "./poseidon";
 function computeMerkleRootFromCommitment(commitment: bigint, depth: number): bigint {
   let current = commitment;
   for (let i = 0; i < depth; i++) {
-    current = poseidonHash([current, 0n]);
+    current = poseidonHashSync([current, 0n]);
   }
   return current;
 }
 
-// Set circuit path for tests (relative to sdk/)
+// Set circuit path and initialize Poseidon for tests
 beforeAll(async () => {
   setCircuitPath("./circuits");
+  await initPoseidon();
 });
 
 // ============================================================================
@@ -75,7 +76,7 @@ describe("CLAIM PROOF (Unified Model)", () => {
     const amount = 100000000n; // 1 BTC in satoshis
 
     // Compute commitment = Poseidon(pub_key_x, amount)
-    const commitment = computeUnifiedCommitment(pubKeyX, amount);
+    const commitment = computeUnifiedCommitmentSync(pubKeyX, amount);
 
     // Compute merkle root using depth-20 tree with all-zero siblings
     const merkleRoot = computeMerkleRootFromCommitment(commitment, 20);
@@ -93,6 +94,7 @@ describe("CLAIM PROOF (Unified Model)", () => {
       leafIndex: 0n,
       merkleRoot,
       merkleProof,
+      recipient: 999999n, // Mock recipient
     });
 
     expect(proof.proof).toBeInstanceOf(Uint8Array);
@@ -126,7 +128,7 @@ describe("SPEND SPLIT PROOF (Unified Model)", () => {
     const output2Amount = 40000000n; // 60M + 40M = 100M
 
     // Compute input commitment and merkle root (depth 20)
-    const inputCommitment = computeUnifiedCommitment(pubKeyX, amount);
+    const inputCommitment = computeUnifiedCommitmentSync(pubKeyX, amount);
     const merkleRoot = computeMerkleRootFromCommitment(inputCommitment, 20);
 
     // 20-level merkle proof (matching circuit)
@@ -200,7 +202,7 @@ describe("SPEND PARTIAL PUBLIC PROOF (Unified Model)", () => {
     const changeAmount = 40000000n;
 
     // Compute input commitment and merkle root
-    const inputCommitment = computeUnifiedCommitment(pubKeyX, amount);
+    const inputCommitment = computeUnifiedCommitmentSync(pubKeyX, amount);
     const merkleRoot = computeMerkleRootFromCommitment(inputCommitment, 20);
 
     const merkleProof = {
@@ -262,7 +264,7 @@ describe("PROOF SERIALIZATION", () => {
     const pubKeyX = 67890n;
     const amount = 100000000n;
 
-    const commitment = computeUnifiedCommitment(pubKeyX, amount);
+    const commitment = computeUnifiedCommitmentSync(pubKeyX, amount);
     const merkleRoot = computeMerkleRootFromCommitment(commitment, 20);
 
     const merkleProof = {
@@ -277,6 +279,7 @@ describe("PROOF SERIALIZATION", () => {
       leafIndex: 0n,
       merkleRoot,
       merkleProof,
+      recipient: 999999n, // Mock recipient
     });
 
     // Proof should be consistent format

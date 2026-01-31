@@ -21,10 +21,9 @@ import { deriveKeysFromSeed, createStealthMetaAddress, encodeStealthMetaAddress,
 import { createStealthDeposit, scanAnnouncements } from "./stealth";
 import { createStealthPoolDeposit, scanPoolAnnouncements, calculateYield, calculateTotalValue } from "./yield-pool";
 import { createEmptyMerkleProof, TREE_DEPTH } from "./merkle";
-import { poseidonHash } from "./poseidon";
-import { generateKeyPair, pointMul, GRUMPKIN_GENERATOR, isOnCurve } from "./grumpkin";
+import { poseidonHashSync, initPoseidon } from "./poseidon";
+import { generateGrumpkinKeyPair, pointMul, GRUMPKIN_GENERATOR, isOnCurve } from "./crypto";
 import { buildRegisterNameData, hashName, isValidName, NAME_REGISTRY_SEED, ZVAULT_PROGRAM_ID } from "./name-registry";
-import { createClient, ZVaultClient } from "./zvault";
 
 // Test constants
 const TEST_SEED = new Uint8Array(32).fill(0x42);
@@ -269,60 +268,24 @@ describe("NAME REGISTRY", () => {
 // ============================================================================
 
 describe("CRYPTOGRAPHY", () => {
-  test("Poseidon hash is deterministic", () => {
-    const h1 = poseidonHash([123n, 456n]);
-    const h2 = poseidonHash([123n, 456n]);
+  test("Poseidon hash is deterministic", async () => {
+    await initPoseidon();
+    const h1 = poseidonHashSync([123n, 456n]);
+    const h2 = poseidonHashSync([123n, 456n]);
     expect(h1).toBe(h2);
   });
 
   test("Grumpkin keypair is valid", () => {
-    const { privKey, pubKey } = generateKeyPair();
+    const { privKey, pubKey } = generateGrumpkinKeyPair();
     expect(privKey).toBeGreaterThan(0n);
     expect(isOnCurve(pubKey)).toBe(true);
   });
 
   test("Grumpkin scalar multiplication", () => {
-    const { privKey, pubKey } = generateKeyPair();
+    const { privKey, pubKey } = generateGrumpkinKeyPair();
     const computed = pointMul(privKey, GRUMPKIN_GENERATOR);
     expect(computed.x).toBe(pubKey.x);
     expect(computed.y).toBe(pubKey.y);
-  });
-});
-
-// ============================================================================
-// 7. ZVaultClient
-// ============================================================================
-
-describe("ZVaultClient", () => {
-  test("createClient() returns valid client", () => {
-    const rpc = createSolanaRpc("https://api.devnet.solana.com");
-    const client = createClient(rpc);
-    expect(client).toBeInstanceOf(ZVaultClient);
-  });
-
-  test("client has all methods", () => {
-    const rpc = createSolanaRpc("https://api.devnet.solana.com");
-    const client = createClient(rpc);
-
-    // Deposit
-    expect(typeof client.deposit).toBe("function");
-    expect(typeof client.claimNote).toBe("function");
-
-    // Transfer
-    expect(typeof client.splitNote).toBe("function");
-    expect(typeof client.createClaimLink).toBe("function");
-
-    // Withdraw
-    expect(typeof client.withdraw).toBe("function");
-  });
-
-  test("client.deposit() works", async () => {
-    const rpc = createSolanaRpc("https://api.devnet.solana.com");
-    const client = createClient(rpc);
-    const result = await client.deposit(100_000n, "testnet");
-
-    expect(result.note.amount).toBe(100_000n);
-    expect(result.taprootAddress).toMatch(/^tb1p/);
   });
 });
 

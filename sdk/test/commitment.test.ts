@@ -21,7 +21,7 @@ import {
   computeNullifierSync,
   hashNullifierSync,
 } from "../src/poseidon";
-import { pointMul, GRUMPKIN_GENERATOR } from "../src/grumpkin";
+import { pointMul, GRUMPKIN_GENERATOR } from "../src/crypto";
 import { depositToNote } from "../src/api";
 
 describe("Unified Model Commitment Computation", () => {
