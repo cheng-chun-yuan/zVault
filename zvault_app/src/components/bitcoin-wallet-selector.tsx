@@ -1,7 +1,7 @@
 "use client";
 
 import { useBitcoinWallet } from "@/contexts/bitcoin-wallet-context";
-import { Spinner } from "@/components/ui";
+import { Spinner } from "@/components/ui/spinner";
 import { truncateMiddle } from "@/lib/utils/formatting";
 
 interface BitcoinWalletSelectorProps {

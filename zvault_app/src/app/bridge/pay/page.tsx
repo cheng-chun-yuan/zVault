@@ -3,7 +3,7 @@
 import { Suspense } from "react";
 import { useSearchParams } from "next/navigation";
 import { Send } from "lucide-react";
-import { FlowPageLayout } from "@/components/ui";
+import { FlowPageLayout } from "@/components/ui/flow-page-layout";
 import { PayFlow } from "@/components/btc-widget/pay-flow";
 
 function PayFlowWithParams() {
