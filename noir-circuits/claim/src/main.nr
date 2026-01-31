@@ -30,6 +30,7 @@ fn main(
     merkle_root: pub Field,
     nullifier_hash: pub Field,
     amount_pub: pub u64,       // Amount revealed for public claim
+    recipient: pub Field,      // Recipient address (bound to proof - cannot be changed)
 ) {
     // 1. Verify commitment exists in Merkle tree
     let commitment = zvault_utils::compute_commitment(pub_key_x, amount as Field);
@@ -51,6 +52,10 @@ fn main(
     // 4. Security: Verify non-zero values
     assert(priv_key != 0, "Private key cannot be zero");
     assert(amount > 0, "Amount must be positive");
+
+    // 5. Security: Recipient must be valid (non-zero)
+    // This binds the recipient to the proof - no one can change it after signing
+    assert(recipient != 0, "Recipient cannot be zero");
 }
 
 #[test]
@@ -59,6 +64,7 @@ fn test_claim_circuit() {
     let pub_key_x = 67890; // In practice: pub_key = priv_key * G
     let amount: u64 = 100000000;
     let leaf_index = 0;
+    let recipient: Field = 0x1234567890abcdef; // Mock recipient address
 
     let commitment = zvault_utils::compute_commitment(pub_key_x, amount as Field);
     let nullifier = zvault_utils::compute_nullifier(priv_key, leaf_index);
@@ -84,7 +90,8 @@ fn test_claim_circuit() {
         path_indices,
         merkle_root,
         nullifier_hash,
-        amount
+        amount,
+        recipient
     );
 }
 
@@ -94,6 +101,7 @@ fn test_claim_wrong_amount() {
     let pub_key_x = 67890;
     let amount: u64 = 100000000;
     let leaf_index = 0;
+    let recipient: Field = 0x1234567890abcdef;
 
     let commitment = zvault_utils::compute_commitment(pub_key_x, amount as Field);
     let nullifier = zvault_utils::compute_nullifier(priv_key, leaf_index);
@@ -121,6 +129,7 @@ fn test_claim_wrong_amount() {
         path_indices,
         merkle_root,
         nullifier_hash,
-        wrong_amount // Mismatch!
+        wrong_amount, // Mismatch!
+        recipient
     );
 }
