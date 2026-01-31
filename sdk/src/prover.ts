@@ -328,6 +328,8 @@ export interface ClaimInputs {
   merkleRoot: bigint;
   /** Merkle proof (20 levels) */
   merkleProof: MerkleProofInput;
+  /** Recipient address (32 bytes as bigint) - bound to proof, cannot be changed */
+  recipient: bigint;
 }
 
 /**
@@ -353,6 +355,7 @@ export async function generateClaimProof(inputs: ClaimInputs): Promise<ProofData
     merkle_root: inputs.merkleRoot.toString(),
     nullifier_hash: nullifierHash.toString(),
     amount_pub: inputs.amount.toString(),
+    recipient: inputs.recipient.toString(), // Recipient bound to proof
   };
 
   return generateProof("claim", circuitInputs);
