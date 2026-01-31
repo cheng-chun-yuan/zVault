@@ -5,8 +5,8 @@
       "btc_light_client": "S6rgPjCeBhkYBejWyDR1zzU3sYCMob36LAf8tjwj8pn"
     },
     "localnet": {
-      "zVault": "3mr1UrVKftimqB5rBEmKiGFBMAo9VUZuJLRDMdac42JV",
-      "btc_light_client": "AvXLG43quQpc9aaE1fUxXdd1UFVBCMBkX9vFgjZSShrn"
+      "zVault": "zKeyrLmpT8W9o8iRvhizuSihLAFLhfAGBvfM638Pbw8",
+      "btc_light_client": "S6rgPjCeBhkYBejWyDR1zzU3sYCMob36LAf8tjwj8pn"
     },
     "mainnet": {
       "zVault": "",

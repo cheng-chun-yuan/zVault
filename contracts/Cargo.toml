@@ -1,7 +1,12 @@
 [workspace]
 resolver = "2"
 members = [
-    "programs/*"
+    "programs/zvault",
+    "programs/btc-light-client",
+    "programs/ultrahonk-verifier",
+]
+exclude = [
+    "programs/chadbuffer"
 ]
 
 [profile.release]
