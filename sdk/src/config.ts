@@ -138,27 +138,27 @@ export const LOCALNET_CHADBUFFER_PROGRAM_ID: Address = address(
 // =============================================================================
 
 /**
- * Devnet Configuration (v1.1.0)
+ * Devnet Configuration (v1.2.0)
  *
- * Current deployment as of 2025-01-30:
- * - zKey vanity address: zKeyrLmpT8W9o8iRvhizuSihLAFLhfAGBvfM638Pbw8
- * - Fresh clean deployment
+ * Fresh deployment 2026-02-01:
+ * - Fixed commitment tree size (was 3312, now 3952 bytes)
+ * - New program ID: Hcqp9b83Hh2gN1bFWydZWJmpYQceo3PZCXobamSEj3bt
  */
 export const DEVNET_CONFIG: NetworkConfig = {
   network: "devnet",
 
-  // Program IDs
-  zvaultProgramId: address("zKeyrLmpT8W9o8iRvhizuSihLAFLhfAGBvfM638Pbw8"),
+  // Program IDs (fresh deployment 2026-02-01)
+  zvaultProgramId: address("Hcqp9b83Hh2gN1bFWydZWJmpYQceo3PZCXobamSEj3bt"),
   btcLightClientProgramId: address("S6rgPjCeBhkYBejWyDR1zzU3sYCMob36LAf8tjwj8pn"),
   chadbufferProgramId: CHADBUFFER_PROGRAM_ID,
   token2022ProgramId: TOKEN_2022_PROGRAM_ID,
   ataProgramId: ATA_PROGRAM_ID,
 
-  // Deployed Accounts (zKey program - initialized 2025-01-30)
-  poolStatePda: address("ELGSdquznDBd6uUkWsBAmguMBmtuur7D5kapwoyZq44J"),
-  commitmentTreePda: address("5p7WERgzB6AHcga19QehvaTfbiVoM1Bg6drkwzYHYamq"),
-  zbtcMint: address("56gihX59Zy3coM9B1PYXLPoFEzjNuPEVhskCZcKq3VKx"),
-  poolVault: address("J3dRjxc441qNitZBhPNrrmS5moWY89Fp1g97ayuQSDSj"),
+  // Deployed Accounts (fresh deployment 2026-02-01)
+  poolStatePda: address("DfUsWNKFfYZyEkupTpq5PEvxB1aQ8Wg2ZWVNeFuRvFcJ"),
+  commitmentTreePda: address("FdS67pn6wXCzjQ9Kc8asXMADEtHD1qZigbQ2i4wpbPKh"),
+  zbtcMint: address("Bz4B3TYBEJigE9xLxQArbDH96LEZJ7Dj1AGL9BiQU63r"),
+  poolVault: address("5hsETnbpmDrewrhjuo9f6JjL9E4qjJqoR7U8XSTArLLw"),
 
   // RPC Endpoints
   solanaRpcUrl: "https://api.devnet.solana.com",
@@ -354,11 +354,11 @@ export const BTC_LIGHT_CLIENT_PROGRAM_ID: Address = DEVNET_CONFIG.btcLightClient
 // Version Info
 // =============================================================================
 
-export const SDK_VERSION = "1.6.0";
+export const SDK_VERSION = "1.7.0";
 
 export const DEPLOYMENT_INFO = {
   version: SDK_VERSION,
-  deployedAt: "2025-01-30",
+  deployedAt: "2026-02-01",
   network: "devnet" as NetworkType,
   features: [
     "demo-stealth",

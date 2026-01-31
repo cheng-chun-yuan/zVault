@@ -395,6 +395,50 @@ export {
   type EsploraNetwork,
 } from "./core/esplora";
 
+// Mempool.space client with SPV support
+export {
+  MempoolClient,
+  mempoolTestnet,
+  mempoolMainnet,
+  reverseBytes,
+  type BlockHeader,
+  type TransactionInfo,
+  type SPVProofData,
+} from "./core/mempool";
+
+// ==========================================================================
+// Priority Fee Estimation
+// ==========================================================================
+
+export {
+  estimatePriorityFee,
+  buildPriorityFeeInstructionData,
+  encodeSetComputeUnitLimit,
+  encodeSetComputeUnitPrice,
+  getHeliusRpcUrl,
+  DEFAULT_COMPUTE_UNITS,
+  DEFAULT_PRIORITY_FEE,
+  COMPUTE_BUDGET_DISCRIMINATORS,
+  type PriorityFeeConfig,
+  type PriorityFeeEstimate,
+  type PriorityFeeInstructions,
+} from "./solana/priority-fee";
+
+// ==========================================================================
+// Connection Adapter Factory
+// ==========================================================================
+
+export {
+  createFetchConnectionAdapter,
+  createConnectionAdapterFromWeb3,
+  createConnectionAdapterFromKit,
+  getConnectionAdapter,
+  clearConnectionAdapterCache,
+  type RpcConfig,
+  type Web3Connection,
+  type KitRpc,
+} from "./solana/connection";
+
 // ==========================================================================
 // Deposit Watcher
 // ==========================================================================

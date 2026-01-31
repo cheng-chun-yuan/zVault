@@ -399,6 +399,24 @@ export async function createTestContext(): Promise<E2ETestContext> {
     console.warn("[Setup] Proof tests will be skipped (prover not ready)");
   }
 
+  // Build config object from SDK config (correct addresses for the network)
+  const networkConfig: LocalnetConfig = {
+    network: NETWORK,
+    rpcUrl: RPC_URL,
+    programs: {
+      zVault: config.zvaultProgramId.toString(),
+      btcLightClient: config.btcLightClientProgramId.toString(),
+      ultrahonkVerifier: config.ultrahonkVerifierProgramId.toString(),
+      chadbuffer: config.chadbufferProgramId.toString(),
+    },
+    accounts: {
+      poolState: config.poolStatePda.toString(),
+      commitmentTree: config.commitmentTreePda.toString(),
+      zkbtcMint: config.zbtcMint.toString(),
+      poolVault: config.poolVault.toString(),
+    },
+  };
+
   return {
     connection,
     payer,
@@ -406,22 +424,9 @@ export async function createTestContext(): Promise<E2ETestContext> {
     rpcSubscriptions,
     payerSigner,
     config,
-    localnetConfig: localnetConfig || {
-      network: NETWORK,
-      rpcUrl: RPC_URL,
-      programs: {
-        zVault: config.zvaultProgramId.toString(),
-        btcLightClient: config.btcLightClientProgramId.toString(),
-        ultrahonkVerifier: config.ultrahonkVerifierProgramId.toString(),
-        chadbuffer: config.chadbufferProgramId.toString(),
-      },
-      accounts: {
-        poolState: config.poolStatePda.toString(),
-        commitmentTree: config.commitmentTreePda.toString(),
-        zkbtcMint: config.zbtcMint.toString(),
-        poolVault: config.poolVault.toString(),
-      },
-    },
+    // For devnet: always use SDK config addresses
+    // For localnet: prefer localnetConfig file if available (for fresh deployments)
+    localnetConfig: IS_DEVNET ? networkConfig : (localnetConfig || networkConfig),
     skipOnChain,
     skipProof,
     proverReady,

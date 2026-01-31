@@ -20,3 +20,16 @@ export {
   type EsploraMerkleProof,
   type EsploraNetwork,
 } from "./esplora";
+
+// Mempool.space client with SPV support
+export {
+  MempoolClient,
+  mempoolTestnet,
+  mempoolMainnet,
+  reverseBytes,
+  hexToBytes,
+  bytesToHex,
+  type BlockHeader,
+  type TransactionInfo,
+  type SPVProofData,
+} from "./mempool";
