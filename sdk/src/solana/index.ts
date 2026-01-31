@@ -96,7 +96,7 @@ export {
   type ProofUploadResult,
 } from "../chadbuffer";
 
-// Commitment tree parsing
+// Commitment tree parsing and on-chain fetch
 export {
   COMMITMENT_TREE_DISCRIMINATOR,
   parseCommitmentTreeData,
@@ -105,7 +105,14 @@ export {
   getCommitmentIndex,
   saveCommitmentIndex,
   CommitmentTreeIndex,
+  // On-chain fetch functions (Helius-compatible)
+  buildCommitmentTreeFromChain,
+  getLeafIndexForCommitment,
+  fetchMerkleProofForCommitment,
+  getMerkleProofFromTree,
   type CommitmentTreeState,
+  type RpcClient,
+  type OnChainMerkleProof,
 } from "../commitment-tree";
 
 // Relay utilities

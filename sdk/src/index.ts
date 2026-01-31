@@ -472,7 +472,14 @@ export {
   getCommitmentIndex,
   saveCommitmentIndex,
   CommitmentTreeIndex,
+  // On-chain fetch functions (Helius-compatible)
+  buildCommitmentTreeFromChain,
+  getLeafIndexForCommitment,
+  fetchMerkleProofForCommitment,
+  getMerkleProofFromTree,
   type CommitmentTreeState,
+  type RpcClient,
+  type OnChainMerkleProof,
 } from "./commitment-tree";
 
 // ==========================================================================
