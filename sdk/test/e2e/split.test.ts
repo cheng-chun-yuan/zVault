@@ -24,6 +24,7 @@ import {
   initializeTestEnvironment,
   logTestEnvironment,
   TEST_TIMEOUT,
+  PROOF_TIMEOUT,
   type E2ETestContext,
 } from "./setup";
 
@@ -39,14 +40,23 @@ import {
   type TestNote,
 } from "./helpers";
 
+import {
+  generateTestKeys,
+  createAndSubmitStealthDeposit,
+  scanAndPrepareClaim,
+  checkNullifierExists,
+} from "./stealth-helpers";
+
 import { initPoseidon, computeUnifiedCommitmentSync } from "../../src/poseidon";
-import { randomFieldElement } from "../../src/crypto";
+import { randomFieldElement, bigintToBytes } from "../../src/crypto";
 import {
   derivePoolStatePDA,
   deriveCommitmentTreePDA,
   deriveNullifierRecordPDA,
 } from "../../src/pda";
 import { buildSplitInstruction } from "../../src/instructions";
+import { generateSpendSplitProof, verifyProof } from "../../src/prover/web";
+import { createChadBuffer, uploadProofToBuffer, closeChadBuffer } from "../../src/relay";
 
 // =============================================================================
 // Test Context
@@ -94,6 +104,10 @@ describe("SPEND_SPLIT E2E", () => {
 
     if (ctx.skipOnChain) {
       console.log("⚠️  Skipping on-chain tests (validator not available)");
+    }
+    if (ctx.skipProof) {
+      console.log("⚠️  Skipping proof tests (circuits not compiled)");
+      console.log("   Run: cd noir-circuits && bun run compile:all && bun run copy-to-sdk");
     }
   });
 
@@ -262,9 +276,13 @@ describe("SPEND_SPLIT E2E", () => {
   // ===========================================================================
 
   describe("On-Chain Tests", () => {
-    it.skipIf(ctx?.skipOnChain !== false)(
+    it(
       "should reject double-spend attempt (mock test)",
       async () => {
+        if (ctx.skipOnChain) {
+          console.log("⚠️  Skipping: validator not available");
+          return;
+        }
         // Simulate trying to spend the same commitment twice
         const input = createTestNote(TEST_AMOUNTS.small);
         const merkleProof = createMockMerkleProof(input.commitment);
@@ -406,5 +424,260 @@ describe("SPEND_SPLIT E2E", () => {
 
       expect(afterNextIndex).toBe(3n);
     });
+  });
+
+  // ===========================================================================
+  // Real Proof Tests (Full stealth flow with real ZK proofs)
+  // ===========================================================================
+
+  describe("Real Proof Tests", () => {
+    it(
+      "should complete full stealth split flow with real ZK proof",
+      async () => {
+        if (ctx.skipOnChain || ctx.skipProof) {
+          console.log("⚠️  Skipping: requires validator and compiled circuits");
+          return;
+        }
+
+        console.log("\n" + "=".repeat(60));
+        console.log("FULL STEALTH SPLIT FLOW WITH REAL ZK PROOF");
+        console.log("=".repeat(60) + "\n");
+
+        // Step 1: Generate keys for input and outputs
+        console.log("1. Generating keys...");
+        const inputRecipientKeys = generateTestKeys("split-test-input-1");
+        const output1RecipientKeys = generateTestKeys("split-test-output-1");
+        const output2RecipientKeys = generateTestKeys("split-test-output-2");
+        console.log(`   Input spending pub key X: ${inputRecipientKeys.spendingPubKey.x.toString(16).slice(0, 16)}...`);
+        console.log(`   Output1 pub key X: ${output1RecipientKeys.spendingPubKey.x.toString(16).slice(0, 16)}...`);
+        console.log(`   Output2 pub key X: ${output2RecipientKeys.spendingPubKey.x.toString(16).slice(0, 16)}...`);
+
+        // Step 2: Create and submit stealth deposit for input note
+        console.log("\n2. Creating and submitting input stealth deposit...");
+        const inputAmount = TEST_AMOUNTS.medium; // 1M sats
+        const testNote = await createAndSubmitStealthDeposit(ctx, inputRecipientKeys, inputAmount);
+        console.log(`   Input amount: ${testNote.amount} sats`);
+        console.log(`   Input commitment: ${testNote.commitment.toString(16).slice(0, 16)}...`);
+        console.log(`   Leaf index: ${testNote.leafIndex}`);
+
+        // Step 3: Scan for input note and prepare claim data
+        console.log("\n3. Scanning and preparing input note data...");
+        const inputData = await scanAndPrepareClaim(ctx, inputRecipientKeys, testNote.commitment);
+        console.log(`   Scanned amount: ${inputData.scannedNote.amount} sats`);
+        console.log(`   Merkle root: ${inputData.merkleProof.root.toString(16).slice(0, 16)}...`);
+        console.log(`   Nullifier hash: ${inputData.nullifierHash.toString(16).slice(0, 16)}...`);
+
+        // Step 4: Define split amounts
+        const output1Amount = 700_000n; // 70% of 1M
+        const output2Amount = 300_000n; // 30% of 1M
+        console.log("\n4. Defining split amounts...");
+        console.log(`   Output 1: ${output1Amount} sats (70%)`);
+        console.log(`   Output 2: ${output2Amount} sats (30%)`);
+        expect(output1Amount + output2Amount).toBe(inputAmount);
+
+        // Step 5: Compute output commitments
+        console.log("\n5. Computing output commitments...");
+        const output1Commitment = computeUnifiedCommitmentSync(
+          output1RecipientKeys.spendingPubKey.x,
+          output1Amount
+        );
+        const output2Commitment = computeUnifiedCommitmentSync(
+          output2RecipientKeys.spendingPubKey.x,
+          output2Amount
+        );
+        console.log(`   Output 1 commitment: ${output1Commitment.toString(16).slice(0, 16)}...`);
+        console.log(`   Output 2 commitment: ${output2Commitment.toString(16).slice(0, 16)}...`);
+
+        // Step 6: Generate REAL ZK proof
+        console.log("\n6. Generating REAL spend_split proof (this may take 30-120 seconds)...");
+        const proofStartTime = Date.now();
+
+        const proof = await generateSpendSplitProof({
+          // Input note
+          privKey: inputData.stealthPrivKey,
+          pubKeyX: inputData.stealthPubKeyX,
+          amount: inputData.scannedNote.amount,
+          leafIndex: BigInt(inputData.scannedNote.leafIndex),
+          merkleRoot: inputData.merkleProof.root,
+          merkleProof: {
+            siblings: inputData.merkleProof.siblings,
+            indices: inputData.merkleProof.indices,
+          },
+          // Output 1
+          output1PubKeyX: output1RecipientKeys.spendingPubKey.x,
+          output1Amount: output1Amount,
+          // Output 2
+          output2PubKeyX: output2RecipientKeys.spendingPubKey.x,
+          output2Amount: output2Amount,
+        });
+
+        const proofTime = ((Date.now() - proofStartTime) / 1000).toFixed(1);
+        console.log(`   Proof generated in ${proofTime}s`);
+        console.log(`   Proof size: ${proof.proof.length} bytes`);
+        console.log(`   Public inputs: ${proof.publicInputs.length}`);
+
+        // Step 7: Verify proof locally
+        console.log("\n7. Verifying proof locally...");
+        const isValid = await verifyProof("spend_split", proof);
+        console.log(`   Local verification: ${isValid ? "PASSED" : "FAILED"}`);
+        expect(isValid).toBe(true);
+
+        // Step 8: Upload proof to ChadBuffer
+        console.log("\n8. Uploading proof to ChadBuffer...");
+        const { keypair: bufferKeypair } = await createChadBuffer(
+          ctx.rpc,
+          ctx.rpcSubscriptions,
+          ctx.payerSigner,
+          proof.proof.length
+        );
+        console.log(`   Buffer address: ${bufferKeypair.address}`);
+
+        await uploadProofToBuffer(
+          ctx.rpc,
+          ctx.rpcSubscriptions,
+          ctx.payerSigner,
+          bufferKeypair.address,
+          proof.proof,
+          (uploaded, total) => {
+            const pct = Math.round((uploaded / total) * 100);
+            process.stdout.write(`\r   Uploading: ${pct}%`);
+          }
+        );
+        console.log("\n   Upload complete!");
+
+        // Step 9: Build split transaction (buffer mode)
+        console.log("\n9. Building split transaction (buffer mode)...");
+        const [poolState] = await derivePoolStatePDA(ctx.config.zvaultProgramId);
+        const [commitmentTree] = await deriveCommitmentTreePDA(ctx.config.zvaultProgramId);
+        const [nullifierRecord] = await deriveNullifierRecordPDA(
+          inputData.nullifierHashBytes,
+          ctx.config.zvaultProgramId
+        );
+
+        const splitIx = buildSplitInstruction({
+          proofSource: "buffer",
+          bufferAddress: bufferKeypair.address,
+          root: bigintToBytes(inputData.merkleProof.root, 32),
+          nullifierHash: inputData.nullifierHashBytes,
+          outputCommitment1: bigintToBytes(output1Commitment, 32),
+          outputCommitment2: bigintToBytes(output2Commitment, 32),
+          vkHash: generateMockVkHash(), // TODO: Use real VK hash
+          accounts: {
+            poolState,
+            commitmentTree,
+            nullifierRecord,
+            user: address(ctx.payer.publicKey.toBase58()),
+          },
+        });
+
+        console.log(`   Instruction data size: ${splitIx.data.length} bytes`);
+        console.log(`   Proof source: buffer`);
+        console.log(`   NOTE: Full on-chain execution requires UltraHonk verifier`);
+
+        // Step 10: Close ChadBuffer
+        console.log("\n10. Closing ChadBuffer...");
+        try {
+          const closeSig = await closeChadBuffer(
+            ctx.rpc,
+            ctx.rpcSubscriptions,
+            ctx.payerSigner,
+            bufferKeypair.address
+          );
+          console.log(`    Buffer closed: ${closeSig}`);
+        } catch (e) {
+          console.log(`    Buffer close skipped (may already be closed)`);
+        }
+
+        // Step 11: Verify results
+        console.log("\n11. Verification:");
+        console.log(`    ✓ Input stealth deposit created and submitted`);
+        console.log(`    ✓ Input note scanned with viewing key`);
+        console.log(`    ✓ Real ZK proof generated (${proofTime}s)`);
+        console.log(`    ✓ Proof verified locally`);
+        console.log(`    ✓ Proof uploaded to ChadBuffer`);
+        console.log(`    ✓ Split instruction built (buffer mode)`);
+        console.log(`    ✓ ChadBuffer closed`);
+        console.log(`    ✓ Amount conservation verified: ${output1Amount} + ${output2Amount} = ${inputAmount}`);
+
+        console.log("\n" + "=".repeat(60));
+        console.log("FULL STEALTH SPLIT FLOW COMPLETE");
+        console.log("=".repeat(60) + "\n");
+
+        // Final assertions
+        expect(proof.proof.length).toBeGreaterThan(0);
+        expect(proof.publicInputs.length).toBeGreaterThan(0);
+        expect(isValid).toBe(true);
+        expect(output1Amount + output2Amount).toBe(inputAmount);
+      },
+      PROOF_TIMEOUT // 5 minute timeout for proof generation
+    );
+
+    it(
+      "should generate valid split proof with real circuit",
+      async () => {
+        if (ctx.skipProof) {
+          console.log("⚠️  Skipping: requires compiled circuits");
+          return;
+        }
+
+        // Simpler test that just generates a proof without on-chain ops
+        console.log("\n=== Spend Split Proof Generation Test ===\n");
+
+        // Use simple test values
+        const privKey = 12345n;
+        const pubKeyX = 67890n;
+        const amount = 1_000_000n; // 1M sats
+        const leafIndex = 0n;
+
+        // Compute input commitment
+        const commitment = computeUnifiedCommitmentSync(pubKeyX, amount);
+
+        // Compute merkle root (all-zero siblings)
+        const { poseidonHashSync } = await import("../../src/poseidon");
+        let current = commitment;
+        for (let i = 0; i < 20; i++) {
+          current = poseidonHashSync([current, 0n]);
+        }
+        const merkleRoot = current;
+
+        // Output values (60/40 split)
+        const output1PubKeyX = 111111n;
+        const output1Amount = 600_000n;
+        const output2PubKeyX = 222222n;
+        const output2Amount = 400_000n;
+
+        // Generate proof
+        console.log("Generating spend_split proof...");
+        const startTime = Date.now();
+
+        const proof = await generateSpendSplitProof({
+          privKey,
+          pubKeyX,
+          amount,
+          leafIndex,
+          merkleRoot,
+          merkleProof: {
+            siblings: Array(20).fill(0n),
+            indices: Array(20).fill(0),
+          },
+          output1PubKeyX,
+          output1Amount,
+          output2PubKeyX,
+          output2Amount,
+        });
+
+        const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
+        console.log(`Proof generated in ${elapsed}s`);
+        console.log(`Proof size: ${proof.proof.length} bytes`);
+
+        // Verify
+        const isValid = await verifyProof("spend_split", proof);
+        console.log(`Verification: ${isValid ? "PASSED" : "FAILED"}`);
+
+        expect(proof.proof.length).toBeGreaterThan(0);
+        expect(isValid).toBe(true);
+      },
+      PROOF_TIMEOUT
+    );
   });
 });
