@@ -85,6 +85,7 @@
     "test": "bun test",
     "test:unit": "bun test src/ test/commitment.test.ts test/commitment-onchain.test.ts",
     "test:e2e": "bun test test/e2e/",
+    "test:e2e:devnet": "NETWORK=devnet bun test test/e2e/",
     "test:e2e:claim": "bun test test/e2e/claim.test.ts",
     "test:e2e:split": "bun test test/e2e/split.test.ts",
     "test:e2e:partial": "bun test test/e2e/partial-public.test.ts",
