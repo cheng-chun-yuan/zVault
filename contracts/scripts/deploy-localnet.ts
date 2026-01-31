@@ -48,6 +48,17 @@ import { sha256 } from "@noble/hashes/sha2.js";
 import * as fs from "fs";
 import * as path from "path";
 import { fileURLToPath } from "url";
+
+// SDK imports for demo stealth instruction
+import {
+  buildAddDemoStealthData,
+  initPoseidon,
+  computeUnifiedCommitmentSync,
+  generateGrumpkinKeyPair,
+  pointToCompressedBytes,
+  grumpkinEcdh as ecdh,
+  encryptAmount,
+} from "@zvault/sdk";
 import { execSync } from "child_process";
 
 const __filename = fileURLToPath(import.meta.url);
@@ -79,7 +90,7 @@ const BTCLCSeeds = {
 // Instruction discriminators
 const ZVaultInstruction = {
   INITIALIZE: 0,
-  ADD_DEMO_NOTE: 21,
+  ADD_DEMO_STEALTH: 22,
 };
 
 const BTCLCInstruction = {
@@ -307,31 +318,48 @@ function buildZVaultInitializeIx(
   });
 }
 
-function buildAddDemoNoteIx(
+function buildAddDemoStealthIx(
   poolState: PublicKey,
   commitmentTree: PublicKey,
+  stealthAnnouncement: PublicKey,
   authority: PublicKey,
   zbtcMint: PublicKey,
   poolVault: PublicKey,
   programId: PublicKey,
-  secret: Uint8Array
+  ephemeralPub: Uint8Array,
+  commitment: Uint8Array,
+  encryptedAmountBytes: Uint8Array
 ): TransactionInstruction {
-  const data = Buffer.alloc(1 + 32);
-  data[0] = ZVaultInstruction.ADD_DEMO_NOTE;
-  Buffer.from(secret).copy(data, 1);
+  // Use SDK to build the instruction data
+  const data = buildAddDemoStealthData(ephemeralPub, commitment, encryptedAmountBytes);
 
   return new TransactionInstruction({
     keys: [
       { pubkey: poolState, isSigner: false, isWritable: true },
       { pubkey: commitmentTree, isSigner: false, isWritable: true },
-      { pubkey: authority, isSigner: true, isWritable: false },
+      { pubkey: stealthAnnouncement, isSigner: false, isWritable: true },
+      { pubkey: authority, isSigner: true, isWritable: true },
+      { pubkey: SystemProgram.programId, isSigner: false, isWritable: false },
       { pubkey: zbtcMint, isSigner: false, isWritable: true },
       { pubkey: poolVault, isSigner: false, isWritable: true },
       { pubkey: TOKEN_2022_PROGRAM_ID, isSigner: false, isWritable: false },
     ],
     programId,
-    data,
+    data: Buffer.from(data),
   });
+}
+
+// Helper to derive stealth announcement PDA
+function deriveStealthAnnouncementPDA(
+  ephemeralPub: Uint8Array,
+  programId: PublicKey
+): [PublicKey, number] {
+  // Use bytes 1-32 of ephemeral pub (skip the prefix byte)
+  const seeds = [
+    Buffer.from("stealth"),
+    Buffer.from(ephemeralPub.slice(1, 33)),
+  ];
+  return PublicKey.findProgramAddressSync(seeds, programId);
 }
 
 // =============================================================================
@@ -516,21 +544,53 @@ async function addDemoNotes(
   poolVault: PublicKey,
   count: number = 3
 ): Promise<void> {
-  logSection("Adding Demo Notes");
+  logSection("Adding Demo Stealth Notes");
 
-  log(`Adding ${count} demo notes to commitment tree...`);
+  log(`Adding ${count} demo stealth notes to commitment tree...`);
   log(`zBTC will be minted to pool vault: ${poolVault.toBase58()}`);
 
+  // Demo amount: 0.0001 BTC = 10,000 sats (matches DEMO_MINT_AMOUNT_SATS in contract)
+  const demoAmount = 10_000n;
+
   for (let i = 0; i < count; i++) {
-    const secret = generateSecret();
-    const ix = buildAddDemoNoteIx(
+    // Generate stealth keys for the demo deposit
+    const spendingKey = generateGrumpkinKeyPair();
+    const viewingKey = generateGrumpkinKeyPair();
+    const ephemeralKey = generateGrumpkinKeyPair();
+
+    // Compress the ephemeral public key (33 bytes)
+    const ephemeralPub = pointToCompressedBytes(ephemeralKey.pubKey);
+
+    // Compute shared secret using ECDH
+    const sharedSecret = ecdh(ephemeralKey.privKey, viewingKey.pubKey);
+
+    // Compute stealth public key: stealthPub = spendingPub + hash(sharedSecret) * G
+    // For simplicity in demo, we use spendingPub.x directly
+    const stealthPubX = spendingKey.pubKey.x;
+
+    // Compute commitment = Poseidon(stealthPub.x, amount)
+    const commitment = computeUnifiedCommitmentSync(stealthPubX, demoAmount);
+    const commitmentBytes = bigintToBytes32(commitment);
+
+    // Encrypt the amount (XOR with shared secret hash)
+    const encryptedAmountBytes = encryptAmount(demoAmount, sharedSecret);
+
+    // Derive stealth announcement PDA
+    const [stealthAnnouncement] = deriveStealthAnnouncementPDA(ephemeralPub, programId);
+
+    log(`Note ${i + 1}: ephemeral=${Buffer.from(ephemeralPub).toString("hex").slice(0, 16)}...`);
+
+    const ix = buildAddDemoStealthIx(
       poolStatePda,
       commitmentTreePda,
+      stealthAnnouncement,
       authority.publicKey,
       zbtcMint,
       poolVault,
       programId,
-      secret
+      ephemeralPub,
+      commitmentBytes,
+      encryptedAmountBytes
     );
 
     const tx = new Transaction().add(ix);
@@ -538,10 +598,21 @@ async function addDemoNotes(
       commitment: "confirmed",
     });
 
-    log(`Demo note ${i + 1}/${count} added: ${sig.slice(0, 16)}...`);
+    log(`Demo stealth note ${i + 1}/${count} added: ${sig.slice(0, 16)}...`);
   }
 
-  log(`Successfully added ${count} demo notes`);
+  log(`Successfully added ${count} demo stealth notes`);
+}
+
+// Helper to convert bigint to 32-byte Uint8Array
+function bigintToBytes32(value: bigint): Uint8Array {
+  const bytes = new Uint8Array(32);
+  let temp = value;
+  for (let i = 31; i >= 0; i--) {
+    bytes[i] = Number(temp & 0xffn);
+    temp >>= 8n;
+  }
+  return bytes;
 }
 
 // =============================================================================
@@ -670,6 +741,8 @@ async function main() {
 
   // Add demo notes (now also mints zBTC to pool vault)
   if (!skipDemo) {
+    // Initialize Poseidon before computing commitments
+    await initPoseidon();
     await addDemoNotes(
       connection,
       authority,
