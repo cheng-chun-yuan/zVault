@@ -1,20 +1,25 @@
 import { NextRequest, NextResponse } from "next/server";
-import { Connection, PublicKey } from "@solana/web3.js";
+import { getProgramDerivedAddress, address } from "@solana/kit";
+import { fetchAccountInfo } from "@/lib/helius-server";
 import { DEVNET_CONFIG } from "@zvault/sdk";
 
 export const runtime = "nodejs";
 
 // zVault Program ID from SDK (single source of truth)
-const PROGRAM_ID = new PublicKey(DEVNET_CONFIG.zvaultProgramId);
+const PROGRAM_ID = DEVNET_CONFIG.zvaultProgramId;
 
-// Derive block header PDA
-function deriveBlockHeaderPDA(blockHeight: number): [PublicKey, number] {
-  const heightBuffer = Buffer.alloc(8);
-  heightBuffer.writeBigUInt64LE(BigInt(blockHeight));
-  return PublicKey.findProgramAddressSync(
-    [Buffer.from("block_header"), heightBuffer],
-    PROGRAM_ID
-  );
+// Derive block header PDA using @solana/kit
+async function deriveBlockHeaderPDA(blockHeight: number): Promise<string> {
+  const heightBuffer = new Uint8Array(8);
+  const view = new DataView(heightBuffer.buffer);
+  view.setBigUint64(0, BigInt(blockHeight), true);
+
+  const [pda] = await getProgramDerivedAddress({
+    programAddress: address(PROGRAM_ID),
+    seeds: [new TextEncoder().encode("block_header"), heightBuffer],
+  });
+
+  return pda;
 }
 
 export async function GET(
@@ -44,13 +49,9 @@ export async function GET(
       );
     }
 
-    // Connect to Solana
-    const rpcUrl = process.env.SOLANA_RPC_URL || "https://api.devnet.solana.com";
-    const connection = new Connection(rpcUrl, "confirmed");
-
-    // Check if header exists
-    const [headerPDA] = deriveBlockHeaderPDA(blockHeight);
-    const accountInfo = await connection.getAccountInfo(headerPDA);
+    // Derive PDA and check if header exists using @solana/kit
+    const headerPDA = await deriveBlockHeaderPDA(blockHeight);
+    const accountInfo = await fetchAccountInfo(headerPDA, "devnet");
 
     if (accountInfo) {
       return NextResponse.json({

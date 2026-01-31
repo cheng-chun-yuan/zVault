@@ -1,6 +1,5 @@
-import { NextRequest, NextResponse } from "next/server";
-import { PublicKey } from "@solana/web3.js";
-import { getHeliusConnection, isHeliusConfigured } from "@/lib/helius-server";
+import { NextResponse } from "next/server";
+import { fetchAccountInfo, isHeliusConfigured } from "@/lib/helius-server";
 import { DEVNET_CONFIG, parseCommitmentTreeData } from "@zvault/sdk";
 
 export const runtime = "nodejs";
@@ -11,18 +10,15 @@ const COMMITMENT_TREE_ADDRESS = DEVNET_CONFIG.commitmentTreePda;
 /**
  * GET /api/solana/commitment-tree
  *
- * Fetch commitment tree state from Solana via Helius RPC.
+ * Fetch commitment tree state from Solana using @solana/kit.
  * Returns current root, next index, and other state.
  */
-export async function GET(request: NextRequest) {
+export async function GET() {
   try {
-    const connection = getHeliusConnection("devnet");
-
     console.log("[CommitmentTree API] Fetching from:", COMMITMENT_TREE_ADDRESS);
     console.log("[CommitmentTree API] Using Helius:", isHeliusConfigured());
 
-    const pubkey = new PublicKey(COMMITMENT_TREE_ADDRESS);
-    const accountInfo = await connection.getAccountInfo(pubkey);
+    const accountInfo = await fetchAccountInfo(COMMITMENT_TREE_ADDRESS, "devnet");
 
     if (!accountInfo) {
       return NextResponse.json(
@@ -32,7 +28,7 @@ export async function GET(request: NextRequest) {
     }
 
     // Use SDK's parseCommitmentTreeData (handles validation + parsing)
-    const parsed = parseCommitmentTreeData(new Uint8Array(accountInfo.data));
+    const parsed = parseCommitmentTreeData(accountInfo.data);
 
     const state = {
       discriminator: parsed.discriminator,
