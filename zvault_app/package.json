@@ -4,7 +4,7 @@
   "private": true,
   "scripts": {
     "dev": "next dev --webpack",
-    "build": "cd ../sdk && bun run build && cd ../frontend && next build --webpack",
+    "build": "cd ../sdk && bun run build && cd ../zvault_app && next build --webpack",
     "start": "next start",
     "lint": "eslint",
     "test": "vitest",
