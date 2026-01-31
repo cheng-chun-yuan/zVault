@@ -18,9 +18,7 @@ import { getAssociatedTokenAddressSync } from "@solana/spl-token";
 import { getPriorityFeeInstructions } from "@/lib/helius";
 import {
   buildAddDemoStealthData,
-  getPoolStatePDASeeds,
-  getCommitmentTreePDASeeds,
-  getStealthAnnouncementPDASeeds,
+  PDA_SEEDS,
   DEMO_INSTRUCTION,
   ZVAULT_PROGRAM_ID as SDK_ZVAULT_PROGRAM_ID,
   TOKEN_2022_PROGRAM_ID as SDK_TOKEN_2022_PROGRAM_ID,
@@ -39,7 +37,7 @@ const ZBTC_MINT_ADDRESS = new PublicKey(DEVNET_CONFIG.zbtcMint);
 export { DEMO_INSTRUCTION };
 
 // =============================================================================
-// PDA Derivation (using SDK seeds)
+// PDA Derivation (using SDK PDA_SEEDS)
 // =============================================================================
 
 /**
@@ -48,9 +46,8 @@ export { DEMO_INSTRUCTION };
 export function derivePoolStatePDA(
   programId: PublicKey = ZVAULT_PROGRAM_ID
 ): [PublicKey, number] {
-  const { seeds } = getPoolStatePDASeeds();
   return PublicKey.findProgramAddressSync(
-    seeds.map(s => Buffer.from(s)),
+    [Buffer.from(PDA_SEEDS.POOL_STATE)],
     programId
   );
 }
@@ -61,9 +58,8 @@ export function derivePoolStatePDA(
 export function deriveCommitmentTreePDA(
   programId: PublicKey = ZVAULT_PROGRAM_ID
 ): [PublicKey, number] {
-  const { seeds } = getCommitmentTreePDASeeds();
   return PublicKey.findProgramAddressSync(
-    seeds.map(s => Buffer.from(s)),
+    [Buffer.from(PDA_SEEDS.COMMITMENT_TREE)],
     programId
   );
 }
@@ -75,9 +71,8 @@ export function deriveStealthAnnouncementPDA(
   ephemeralPub: Uint8Array,
   programId: PublicKey = ZVAULT_PROGRAM_ID
 ): [PublicKey, number] {
-  const { seeds } = getStealthAnnouncementPDASeeds(ephemeralPub);
   return PublicKey.findProgramAddressSync(
-    seeds.map(s => Buffer.from(s)),
+    [Buffer.from(PDA_SEEDS.STEALTH), ephemeralPub],
     programId
   );
 }

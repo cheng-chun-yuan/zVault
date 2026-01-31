@@ -1,11 +1,13 @@
 /**
  * Solana Transaction Builders for zVault
  *
- * Thin wrapper around @zvault/sdk that adds:
- * - @solana/web3.js Transaction construction
- * - Helius priority fee optimization
+ * Hybrid architecture:
+ * - Transaction builders use @solana/web3.js (wallet adapter compatibility)
+ * - Read-only utilities use @solana/kit (modern, efficient)
  *
- * All instruction data building and PDA derivation comes from SDK.
+ * All instruction data building and PDA derivation comes from @zvault/sdk.
+ *
+ * @module solana/instructions
  */
 
 import {
@@ -18,6 +20,7 @@ import {
 import { getAssociatedTokenAddressSync } from "@solana/spl-token";
 import { address } from "@solana/kit";
 import { getPriorityFeeInstructions } from "@/lib/helius";
+import { fetchAccountInfo } from "@/lib/adapters/connection-adapter";
 
 // =============================================================================
 // Re-export from SDK (single source of truth)
@@ -470,15 +473,15 @@ export function getTokenAccountAddress(userPubkey: PublicKey): PublicKey {
 }
 
 /**
- * Check if a nullifier has been used (claimed)
+ * Check if a nullifier has been used (claimed).
+ * Uses @solana/kit for efficient RPC reads.
  */
 export async function isNullifierUsed(
-  connection: Connection,
   nullifierHash: Uint8Array
 ): Promise<boolean> {
   const [nullifierPDA] = deriveNullifierPDA(nullifierHash);
   try {
-    const account = await connection.getAccountInfo(nullifierPDA);
+    const account = await fetchAccountInfo(nullifierPDA.toBase58());
     return account !== null;
   } catch {
     return false;
@@ -486,14 +489,12 @@ export async function isNullifierUsed(
 }
 
 /**
- * Get current Merkle root from commitment tree
+ * Get current Merkle root from commitment tree.
+ * Uses @solana/kit for efficient RPC reads.
  */
-export async function getMerkleRoot(
-  connection: Connection
-): Promise<Uint8Array | null> {
-  const [commitmentTree] = deriveCommitmentTreePDA();
+export async function getMerkleRoot(): Promise<Uint8Array | null> {
   try {
-    const account = await connection.getAccountInfo(commitmentTree);
+    const account = await fetchAccountInfo(DEVNET_CONFIG.commitmentTreePda);
     if (!account) return null;
     // Root is at offset 8 (after discriminator), 32 bytes
     return account.data.slice(8, 40);
