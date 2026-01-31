@@ -5,20 +5,19 @@
  *
  * Integrates with @zvault/sdk/prover for client-side ZK proof generation.
  * Used for SPEND_SPLIT (private send) and SPEND_PARTIAL_PUBLIC (public send).
+ *
+ * Uses dynamic imports to defer loading heavy WASM modules (~2-4MB) until
+ * proof generation is actually needed, improving initial page load time.
  */
 
 import { useState, useCallback, useRef } from "react";
-import {
-  initProver,
-  isProverAvailable,
-  generateSpendSplitProof,
-  generateSpendPartialPublicProof,
-  setCircuitPath,
-  type SpendSplitInputs,
-  type SpendPartialPublicInputs,
-  type ProofData,
+
+// Types imported statically (no runtime cost)
+import type {
+  SpendSplitInputs,
+  SpendPartialPublicInputs,
+  ProofData,
 } from "@zvault/sdk/prover";
-import { computeUnifiedCommitment, hashNullifier, computeNullifier } from "@zvault/sdk/poseidon2";
 
 interface MerkleProofResponse {
   success: boolean;
@@ -35,6 +34,27 @@ interface ProverState {
   isGenerating: boolean;
   error: string | null;
   progress: string;
+}
+
+// Cached module references after dynamic import
+let proverModule: typeof import("@zvault/sdk/prover") | null = null;
+let sdkModule: typeof import("@zvault/sdk") | null = null;
+
+/**
+ * Dynamically load the prover WASM modules.
+ * Only called when proof generation is actually needed.
+ */
+async function loadProverModules() {
+  if (!proverModule || !sdkModule) {
+    // Load both modules in parallel
+    const [prover, sdk] = await Promise.all([
+      import("@zvault/sdk/prover"),
+      import("@zvault/sdk"),
+    ]);
+    proverModule = prover;
+    sdkModule = sdk;
+  }
+  return { prover: proverModule, sdk: sdkModule };
 }
 
 export function useProver() {
@@ -57,12 +77,15 @@ export function useProver() {
     try {
       setState((s) => ({ ...s, progress: "Loading WASM modules..." }));
 
+      // Dynamically import heavy WASM modules
+      const { prover } = await loadProverModules();
+
       // Set circuit path for browser
-      setCircuitPath("/circuits/noir");
+      prover.setCircuitPath("/circuits/noir");
 
-      await initProver();
+      await prover.initProver();
 
-      const available = await isProverAvailable();
+      const available = await prover.isProverAvailable();
       if (!available) {
         throw new Error("Circuit artifacts not found. Ensure circuits are compiled.");
       }
@@ -120,6 +143,9 @@ export function useProver() {
       setState((s) => ({ ...s, isGenerating: true, error: null, progress: "Fetching merkle proof..." }));
 
       try {
+        // Ensure modules are loaded
+        const { prover, sdk } = await loadProverModules();
+
         // 1. Fetch merkle proof
         const merkleProof = await fetchMerkleProof(params.commitmentHex);
 
@@ -136,13 +162,15 @@ export function useProver() {
         const siblings = merkleProof.siblings.map((s) => BigInt("0x" + s));
         const indices = merkleProof.indices;
 
-        // 3. Compute output commitments
-        const outputCommitment1 = computeUnifiedCommitment(params.recipientPubKeyX, params.sendAmount);
-        const outputCommitment2 = computeUnifiedCommitment(params.changePubKeyX, changeAmount);
+        // 3. Compute output commitments (async)
+        const [outputCommitment1, outputCommitment2] = await Promise.all([
+          sdk.computeUnifiedCommitment(params.recipientPubKeyX, params.sendAmount),
+          sdk.computeUnifiedCommitment(params.changePubKeyX, changeAmount),
+        ]);
 
-        // 4. Compute nullifier hash
-        const nullifier = computeNullifier(params.privKey, leafIndex);
-        const nullifierHash = hashNullifier(nullifier);
+        // 4. Compute nullifier hash (async)
+        const nullifier = await sdk.computeNullifier(params.privKey, leafIndex);
+        const nullifierHash = await sdk.hashNullifier(nullifier);
 
         const inputs: SpendSplitInputs = {
           privKey: params.privKey,
@@ -160,7 +188,7 @@ export function useProver() {
         setState((s) => ({ ...s, progress: "Generating ZK proof (this may take 30-60s)..." }));
 
         // 5. Generate proof
-        const proof = await generateSpendSplitProof(inputs);
+        const proof = await prover.generateSpendSplitProof(inputs);
 
         setState((s) => ({ ...s, isGenerating: false, progress: "Proof generated!" }));
 
@@ -210,6 +238,9 @@ export function useProver() {
       setState((s) => ({ ...s, isGenerating: true, error: null, progress: "Fetching merkle proof..." }));
 
       try {
+        // Ensure modules are loaded
+        const { prover, sdk } = await loadProverModules();
+
         // 1. Fetch merkle proof
         const merkleProof = await fetchMerkleProof(params.commitmentHex);
 
@@ -241,12 +272,12 @@ export function useProver() {
           );
         }
 
-        // 4. Compute change commitment
-        const changeCommitment = computeUnifiedCommitment(params.changePubKeyX, changeAmount);
+        // 4. Compute change commitment (async)
+        const changeCommitment = await sdk.computeUnifiedCommitment(params.changePubKeyX, changeAmount);
 
-        // 5. Compute nullifier hash
-        const nullifier = computeNullifier(params.privKey, leafIndex);
-        const nullifierHash = hashNullifier(nullifier);
+        // 5. Compute nullifier hash (async)
+        const nullifier = await sdk.computeNullifier(params.privKey, leafIndex);
+        const nullifierHash = await sdk.hashNullifier(nullifier);
 
         const inputs: SpendPartialPublicInputs = {
           privKey: params.privKey,
@@ -264,7 +295,7 @@ export function useProver() {
         setState((s) => ({ ...s, progress: "Generating ZK proof (this may take 30-60s)..." }));
 
         // 6. Generate proof
-        const proof = await generateSpendPartialPublicProof(inputs);
+        const proof = await prover.generateSpendPartialPublicProof(inputs);
 
         setState((s) => ({ ...s, isGenerating: false, progress: "Proof generated!" }));
 
