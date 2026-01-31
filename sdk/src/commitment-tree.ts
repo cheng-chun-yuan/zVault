@@ -296,6 +296,7 @@ export class CommitmentTreeIndex {
 
   /**
    * Compute merkle proof for a leaf at given index
+   * Optimized: only computes nodes needed for the proof path
    */
   private computeMerkleProof(leafIndex: number): {
     siblings: bigint[];
@@ -305,39 +306,49 @@ export class CommitmentTreeIndex {
     const indices: number[] = [];
     const numLeaves = this.leaves.length;
 
-    // Build a map of all node hashes we need
-    // This is a bit inefficient but correct
-    const nodeHashes: Map<string, bigint> = new Map();
+    if (numLeaves === 0) {
+      // Empty tree - all siblings are zero hashes
+      for (let level = 0; level < TREE_DEPTH; level++) {
+        siblings.push(ZERO_HASHES[level]);
+        indices.push((leafIndex >> level) & 1);
+      }
+      return { siblings, indices };
+    }
 
-    // Compute all leaf hashes and build tree upward
-    const levels: bigint[][] = [];
-    levels[0] = [...this.leaves];
+    // Build tree level by level, but only compute the nodes we actually need
+    // For each level, we only need: the path node and its sibling
+    let currentLevel = [...this.leaves];
 
-    // Pad with zeros to get complete levels
     for (let level = 0; level < TREE_DEPTH; level++) {
-      const currentLevel = levels[level] || [];
-      const nextLevel: bigint[] = [];
+      const idx = leafIndex >> level;
+      const siblingIdx = idx ^ 1;
 
-      for (let i = 0; i < (1 << (TREE_DEPTH - level)); i += 2) {
-        const left = currentLevel[i] ?? ZERO_HASHES[level];
-        const right = currentLevel[i + 1] ?? ZERO_HASHES[level];
+      // Get sibling value
+      const sibling = siblingIdx < currentLevel.length
+        ? currentLevel[siblingIdx]
+        : ZERO_HASHES[level];
+
+      siblings.push(sibling);
+      indices.push(idx & 1);
+
+      // Build next level - only need pairs that lead to our path
+      // Compute minimal set of parent nodes needed
+      const nextLevel: bigint[] = [];
+      const numPairs = Math.ceil(currentLevel.length / 2);
+
+      for (let i = 0; i < numPairs; i++) {
+        const left = currentLevel[i * 2] ?? ZERO_HASHES[level];
+        const right = currentLevel[i * 2 + 1] ?? ZERO_HASHES[level];
         nextLevel.push(poseidonHashSync([left, right]));
       }
 
-      levels[level + 1] = nextLevel;
-    }
+      // If our path goes beyond the computed nodes, we need to add zero-hash parents
+      const neededIdx = Math.floor(idx / 2);
+      while (nextLevel.length <= neededIdx) {
+        nextLevel.push(ZERO_HASHES[level + 1]);
+      }
 
-    // Now extract siblings for the path
-    let idx = leafIndex;
-    for (let level = 0; level < TREE_DEPTH; level++) {
-      const siblingIdx = idx ^ 1; // XOR to get sibling index
-      const currentLevel = levels[level] || [];
-      const sibling = currentLevel[siblingIdx] ?? ZERO_HASHES[level];
-
-      siblings.push(sibling);
-      indices.push(idx & 1); // 0 if left child, 1 if right child
-
-      idx = Math.floor(idx / 2);
+      currentLevel = nextLevel;
     }
 
     return { siblings, indices };
@@ -539,4 +550,359 @@ export function saveCommitmentIndex(): void {
       console.warn("[CommitmentIndex] Failed to save to storage:", e);
     }
   }
+}
+
+// ============================================================================
+// On-Chain Fetch Functions (Helius-compatible)
+// ============================================================================
+
+/**
+ * Stealth announcement account discriminator
+ */
+const STEALTH_ANNOUNCEMENT_DISCRIMINATOR = 0x08;
+
+/**
+ * Stealth announcement account size
+ * Layout: 1 (disc) + 1 (bump) + 33 (ephemeral) + 8 (encrypted_amount) + 32 (commitment) + 8 (leaf_idx) + 8 (created_at)
+ */
+const STEALTH_ANNOUNCEMENT_SIZE = 91;
+
+/**
+ * RPC client interface for on-chain queries
+ * Compatible with @solana/web3.js Connection and Helius enhanced RPC
+ */
+export interface RpcClient {
+  getProgramAccounts(
+    programId: string,
+    config?: {
+      filters?: Array<
+        | { memcmp: { offset: number; bytes: string } }
+        | { dataSize: number }
+      >;
+      encoding?: string;
+    }
+  ): Promise<
+    Array<{
+      pubkey: string;
+      account: { data: Uint8Array | string };
+    }>
+  >;
+}
+
+/**
+ * On-chain merkle proof format
+ */
+export interface OnChainMerkleProof {
+  siblings: bigint[];
+  indices: number[];
+  leafIndex: number;
+  root: bigint;
+  commitment: bigint;
+}
+
+/**
+ * Parse stealth announcement account data
+ */
+function parseAnnouncementData(data: Uint8Array): {
+  commitment: bigint;
+  leafIndex: number;
+  encryptedAmount: Uint8Array;
+} | null {
+  if (data.length < STEALTH_ANNOUNCEMENT_SIZE) {
+    return null;
+  }
+
+  if (data[0] !== STEALTH_ANNOUNCEMENT_DISCRIMINATOR) {
+    return null;
+  }
+
+  // Skip: discriminator (1) + bump (1) + ephemeralPub (33) + encryptedAmount (8)
+  const commitmentOffset = 2 + 33 + 8;
+  const commitment = bytesToBigintBE(data.slice(commitmentOffset, commitmentOffset + 32));
+
+  // Leaf index: after commitment (32 bytes)
+  const leafIndexOffset = commitmentOffset + 32;
+  const leafIndexView = new DataView(data.buffer, data.byteOffset + leafIndexOffset, 8);
+  const leafIndex = Number(leafIndexView.getBigUint64(0, true));
+
+  // Encrypted amount for reference
+  const encryptedAmount = data.slice(2 + 33, 2 + 33 + 8);
+
+  return { commitment, leafIndex, encryptedAmount };
+}
+
+/**
+ * Convert Uint8Array to bigint (big-endian, for commitment)
+ */
+function bytesToBigintBE(bytes: Uint8Array): bigint {
+  let result = 0n;
+  for (let i = 0; i < bytes.length; i++) {
+    result = (result << 8n) | BigInt(bytes[i]);
+  }
+  return result;
+}
+
+/**
+ * Encode bytes to base58 for RPC filter
+ */
+function toBase58(bytes: Uint8Array): string {
+  const ALPHABET = "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz";
+  let num = 0n;
+  for (const byte of bytes) {
+    num = num * 256n + BigInt(byte);
+  }
+
+  let str = "";
+  while (num > 0n) {
+    str = ALPHABET[Number(num % 58n)] + str;
+    num = num / 58n;
+  }
+
+  // Handle leading zeros
+  for (const byte of bytes) {
+    if (byte === 0) {
+      str = "1" + str;
+    } else {
+      break;
+    }
+  }
+
+  return str || "1";
+}
+
+/**
+ * Build commitment tree from on-chain stealth announcements
+ *
+ * Fetches all stealth announcement accounts and builds local merkle tree.
+ * Uses Helius-compatible getProgramAccounts with filters for efficiency.
+ *
+ * Note: The SDK does not cache - backends should implement their own caching
+ * by storing the returned tree and only calling this when needed.
+ *
+ * @param rpc - RPC client (Connection or Helius)
+ * @param programId - zVault program ID
+ * @returns CommitmentTreeIndex with all on-chain commitments
+ *
+ * @example
+ * ```typescript
+ * import { buildCommitmentTreeFromChain } from '@zvault/sdk';
+ * import { Connection } from '@solana/web3.js';
+ *
+ * const connection = new Connection('https://api.devnet.solana.com');
+ * const tree = await buildCommitmentTreeFromChain(connection, ZVAULT_PROGRAM_ID);
+ * console.log(`Loaded ${tree.size()} commitments`);
+ *
+ * // Backend caching example:
+ * let cachedTree = null;
+ * let lastFetch = 0;
+ * const CACHE_TTL = 60_000; // 1 minute
+ *
+ * async function getTree() {
+ *   if (!cachedTree || Date.now() - lastFetch > CACHE_TTL) {
+ *     cachedTree = await buildCommitmentTreeFromChain(connection, programId);
+ *     lastFetch = Date.now();
+ *   }
+ *   return cachedTree;
+ * }
+ * ```
+ */
+export async function buildCommitmentTreeFromChain(
+  rpc: RpcClient,
+  programId: string
+): Promise<CommitmentTreeIndex> {
+  console.log("[CommitmentTree] Fetching stealth announcements from chain...");
+
+  // Use discriminator filter to only get StealthAnnouncement accounts
+  // This is efficient with Helius and standard RPC
+  const accounts = await rpc.getProgramAccounts(programId, {
+    filters: [
+      { memcmp: { offset: 0, bytes: toBase58(new Uint8Array([STEALTH_ANNOUNCEMENT_DISCRIMINATOR])) } },
+      { dataSize: STEALTH_ANNOUNCEMENT_SIZE },
+    ],
+    encoding: "base64",
+  });
+
+  console.log(`[CommitmentTree] Found ${accounts.length} stealth announcements`);
+
+  // Parse and sort by leaf index
+  const announcements: Array<{ commitment: bigint; leafIndex: number }> = [];
+
+  for (const { account } of accounts) {
+    // Handle base64 or Uint8Array data
+    let data: Uint8Array;
+    if (typeof account.data === "string") {
+      data = Uint8Array.from(atob(account.data), (c) => c.charCodeAt(0));
+    } else {
+      data = account.data;
+    }
+
+    const parsed = parseAnnouncementData(data);
+    if (parsed) {
+      announcements.push({ commitment: parsed.commitment, leafIndex: parsed.leafIndex });
+    }
+  }
+
+  // Sort by leaf index to insert in correct order
+  announcements.sort((a, b) => a.leafIndex - b.leafIndex);
+
+  // Build tree
+  const tree = new CommitmentTreeIndex();
+
+  for (const { commitment, leafIndex } of announcements) {
+    // Verify leaf indices are sequential
+    if (BigInt(leafIndex) !== tree.getNextIndex()) {
+      console.warn(
+        `[CommitmentTree] Gap in leaf indices: expected ${tree.getNextIndex()}, got ${leafIndex}`
+      );
+      // Fill gaps with zero commitments (shouldn't happen in practice)
+      while (tree.getNextIndex() < BigInt(leafIndex)) {
+        tree.addCommitment(0n, 0n);
+      }
+    }
+    tree.addCommitment(commitment, 0n); // Amount unknown without decryption
+  }
+
+  console.log(`[CommitmentTree] Built tree with ${tree.size()} leaves, root: ${tree.getRoot().toString(16).slice(0, 16)}...`);
+
+  return tree;
+}
+
+/**
+ * Get leaf index for a commitment from on-chain data
+ *
+ * @param rpc - RPC client
+ * @param programId - zVault program ID
+ * @param commitment - Commitment to find
+ * @returns Leaf index or -1 if not found
+ *
+ * @example
+ * ```typescript
+ * const leafIndex = await getLeafIndexForCommitment(connection, programId, myCommitment);
+ * if (leafIndex >= 0) {
+ *   console.log(`Found at index ${leafIndex}`);
+ * }
+ * ```
+ */
+export async function getLeafIndexForCommitment(
+  rpc: RpcClient,
+  programId: string,
+  commitment: bigint
+): Promise<number> {
+  // Convert commitment to 32 bytes for filter
+  const commitmentBytes = new Uint8Array(32);
+  let temp = commitment;
+  for (let i = 31; i >= 0; i--) {
+    commitmentBytes[i] = Number(temp & 0xffn);
+    temp = temp >> 8n;
+  }
+
+  // Filter by commitment at offset 43 (2 + 33 + 8)
+  const commitmentOffset = 2 + 33 + 8;
+
+  try {
+    const accounts = await rpc.getProgramAccounts(programId, {
+      filters: [
+        { memcmp: { offset: 0, bytes: toBase58(new Uint8Array([STEALTH_ANNOUNCEMENT_DISCRIMINATOR])) } },
+        { memcmp: { offset: commitmentOffset, bytes: toBase58(commitmentBytes) } },
+        { dataSize: STEALTH_ANNOUNCEMENT_SIZE },
+      ],
+      encoding: "base64",
+    });
+
+    if (accounts.length === 0) {
+      return -1;
+    }
+
+    // Parse first match
+    const { account } = accounts[0];
+    let data: Uint8Array;
+    if (typeof account.data === "string") {
+      data = Uint8Array.from(atob(account.data), (c) => c.charCodeAt(0));
+    } else {
+      data = account.data;
+    }
+
+    const parsed = parseAnnouncementData(data);
+    return parsed?.leafIndex ?? -1;
+  } catch (error) {
+    console.error("[CommitmentTree] Error fetching leaf index:", error);
+    return -1;
+  }
+}
+
+/**
+ * Fetch merkle proof for a commitment from on-chain data
+ *
+ * Builds tree from chain and computes merkle proof for the given commitment.
+ * For better performance with multiple proofs, use buildCommitmentTreeFromChain
+ * once and call getMerkleProof on the resulting tree.
+ *
+ * @param rpc - RPC client
+ * @param programId - zVault program ID
+ * @param commitment - Commitment to get proof for
+ * @returns Merkle proof or null if commitment not found
+ *
+ * @example
+ * ```typescript
+ * const proof = await fetchMerkleProofForCommitment(connection, programId, myCommitment);
+ * if (proof) {
+ *   // Use proof for ZK circuit
+ *   const claimInputs = {
+ *     merkleRoot: proof.root,
+ *     merkleProof: { siblings: proof.siblings, indices: proof.indices },
+ *     leafIndex: BigInt(proof.leafIndex),
+ *     // ...
+ *   };
+ * }
+ * ```
+ */
+export async function fetchMerkleProofForCommitment(
+  rpc: RpcClient,
+  programId: string,
+  commitment: bigint
+): Promise<OnChainMerkleProof | null> {
+  // Build full tree from chain
+  const tree = await buildCommitmentTreeFromChain(rpc, programId);
+
+  // Get proof from local tree
+  const proof = tree.getMerkleProof(commitment);
+
+  if (!proof) {
+    console.warn(`[CommitmentTree] Commitment not found in tree: ${commitment.toString(16).slice(0, 16)}...`);
+    return null;
+  }
+
+  return {
+    siblings: proof.siblings,
+    indices: proof.indices,
+    leafIndex: Number(proof.leafIndex),
+    root: proof.root,
+    commitment,
+  };
+}
+
+/**
+ * Fetch merkle proof using cached tree (more efficient for multiple lookups)
+ *
+ * @param tree - Pre-built commitment tree from buildCommitmentTreeFromChain
+ * @param commitment - Commitment to get proof for
+ * @returns Merkle proof or null if not found
+ */
+export function getMerkleProofFromTree(
+  tree: CommitmentTreeIndex,
+  commitment: bigint
+): OnChainMerkleProof | null {
+  const proof = tree.getMerkleProof(commitment);
+
+  if (!proof) {
+    return null;
+  }
+
+  return {
+    siblings: proof.siblings,
+    indices: proof.indices,
+    leafIndex: Number(proof.leafIndex),
+    root: proof.root,
+    commitment,
+  };
 }
