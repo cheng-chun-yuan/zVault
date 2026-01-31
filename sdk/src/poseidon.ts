@@ -103,7 +103,8 @@ export async function computePoolCommitment(
 }
 
 // ============================================================================
-// Synchronous versions (require prior initPoseidon call)
+// Synchronous versions (internal use only - require prior initPoseidon call)
+// These are used by prover.ts which needs sync computation for circuit inputs
 // ============================================================================
 
 export function computeUnifiedCommitmentSync(pubKeyX: bigint, amount: bigint): bigint {
@@ -125,4 +126,3 @@ export function computePoolCommitmentSync(
 ): bigint {
   return poseidonHashSync([pubKeyX, principal, depositEpoch]);
 }
-
