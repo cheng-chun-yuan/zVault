@@ -3,7 +3,10 @@
   "version": "0.1.0",
   "description": "zVault Solana smart contracts (Pinocchio)",
   "scripts": {
-    "build": "cargo build-sbf",
+    "build": "cargo build-sbf --features devnet",
+    "build:devnet": "cargo build-sbf --features devnet",
+    "build:localnet": "cargo build-sbf --features localnet",
+    "build:mainnet": "cargo build-sbf",
     "deploy": "solana program deploy target/deploy/zvault_pinocchio.so",
     "deploy:localnet": "bun run scripts/deploy-localnet.ts",
     "deploy:localnet:skip": "bun run scripts/deploy-localnet.ts --skip-deploy",
