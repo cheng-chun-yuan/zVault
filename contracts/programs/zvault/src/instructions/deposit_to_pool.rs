@@ -1,4 +1,8 @@
 //! Deposit to pool instruction - Deposit zkBTC into yield pool (UltraHonk)
+//!
+//! ## Proof Sources
+//! - **Inline (proof_source=0)**: Proof data included directly in instruction data
+//! - **Buffer (proof_source=1)**: Proof read from ChadBuffer account (for large proofs)
 
 use pinocchio::{
     account_info::AccountInfo,
@@ -15,57 +19,125 @@ use crate::state::{
 };
 use crate::utils::{verify_ultrahonk_pool_deposit_proof, validate_program_owner, validate_account_writable, MAX_ULTRAHONK_PROOF_SIZE};
 
+/// ChadBuffer authority size (first 32 bytes of account data)
+const CHADBUFFER_AUTHORITY_SIZE: usize = 32;
+
+/// Proof source indicator
+#[repr(u8)]
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub enum PoolDepositProofSource {
+    Inline = 0,
+    Buffer = 1,
+}
+
+impl PoolDepositProofSource {
+    pub fn from_u8(value: u8) -> Option<Self> {
+        match value {
+            0 => Some(PoolDepositProofSource::Inline),
+            1 => Some(PoolDepositProofSource::Buffer),
+            _ => None,
+        }
+    }
+}
+
 /// Deposit to pool instruction data (UltraHonk proof)
 pub struct DepositToPoolData<'a> {
-    pub proof: &'a [u8],
-    pub input_nullifier_hash: [u8; 32],
-    pub pool_commitment: [u8; 32],
+    pub proof_source: PoolDepositProofSource,
+    pub proof: Option<&'a [u8]>,
+    pub input_nullifier_hash: &'a [u8; 32],
+    pub pool_commitment: &'a [u8; 32],
     pub principal: u64,
-    pub input_merkle_root: [u8; 32],
-    pub vk_hash: [u8; 32],
+    pub input_merkle_root: &'a [u8; 32],
+    pub vk_hash: &'a [u8; 32],
 }
 
 impl<'a> DepositToPoolData<'a> {
-    pub const MIN_SIZE: usize = 4 + 32 + 32 + 8 + 32 + 32; // 140 bytes + proof
+    pub const MIN_SIZE_INLINE: usize = 1 + 4 + 32 + 32 + 8 + 32 + 32; // 141 bytes + proof
+    pub const MIN_SIZE_BUFFER: usize = 1 + 32 + 32 + 8 + 32 + 32; // 137 bytes
 
     pub fn from_bytes(data: &'a [u8]) -> Result<Self, ProgramError> {
-        if data.len() < Self::MIN_SIZE {
+        if data.is_empty() {
             return Err(ProgramError::InvalidInstructionData);
         }
 
-        let proof_len = u32::from_le_bytes([data[0], data[1], data[2], data[3]]) as usize;
+        let proof_source = PoolDepositProofSource::from_u8(data[0]).ok_or_else(|| {
+            pinocchio::msg!("Invalid proof source");
+            ProgramError::InvalidInstructionData
+        })?;
+
+        match proof_source {
+            PoolDepositProofSource::Inline => Self::parse_inline(data),
+            PoolDepositProofSource::Buffer => Self::parse_buffer(data),
+        }
+    }
+
+    fn parse_inline(data: &'a [u8]) -> Result<Self, ProgramError> {
+        if data.len() < Self::MIN_SIZE_INLINE {
+            return Err(ProgramError::InvalidInstructionData);
+        }
+
+        let proof_len = u32::from_le_bytes([data[1], data[2], data[3], data[4]]) as usize;
         if proof_len > MAX_ULTRAHONK_PROOF_SIZE {
             return Err(ProgramError::InvalidInstructionData);
         }
 
-        let expected_size = 4 + proof_len + 32 + 32 + 8 + 32 + 32;
+        let expected_size = 1 + 4 + proof_len + 32 + 32 + 8 + 32 + 32;
         if data.len() < expected_size {
             return Err(ProgramError::InvalidInstructionData);
         }
 
-        let proof = &data[4..4 + proof_len];
-        let mut offset = 4 + proof_len;
+        let proof = &data[5..5 + proof_len];
+        let mut offset = 5 + proof_len;
 
-        let mut input_nullifier_hash = [0u8; 32];
-        input_nullifier_hash.copy_from_slice(&data[offset..offset + 32]);
+        let input_nullifier_hash: &[u8; 32] = data[offset..offset + 32].try_into().unwrap();
         offset += 32;
 
-        let mut pool_commitment = [0u8; 32];
-        pool_commitment.copy_from_slice(&data[offset..offset + 32]);
+        let pool_commitment: &[u8; 32] = data[offset..offset + 32].try_into().unwrap();
         offset += 32;
 
         let principal = u64::from_le_bytes(data[offset..offset + 8].try_into().unwrap());
         offset += 8;
 
-        let mut input_merkle_root = [0u8; 32];
-        input_merkle_root.copy_from_slice(&data[offset..offset + 32]);
+        let input_merkle_root: &[u8; 32] = data[offset..offset + 32].try_into().unwrap();
         offset += 32;
 
-        let mut vk_hash = [0u8; 32];
-        vk_hash.copy_from_slice(&data[offset..offset + 32]);
+        let vk_hash: &[u8; 32] = data[offset..offset + 32].try_into().unwrap();
 
         Ok(Self {
-            proof,
+            proof_source: PoolDepositProofSource::Inline,
+            proof: Some(proof),
+            input_nullifier_hash,
+            pool_commitment,
+            principal,
+            input_merkle_root,
+            vk_hash,
+        })
+    }
+
+    fn parse_buffer(data: &'a [u8]) -> Result<Self, ProgramError> {
+        if data.len() < Self::MIN_SIZE_BUFFER {
+            return Err(ProgramError::InvalidInstructionData);
+        }
+
+        let mut offset = 1;
+
+        let input_nullifier_hash: &[u8; 32] = data[offset..offset + 32].try_into().unwrap();
+        offset += 32;
+
+        let pool_commitment: &[u8; 32] = data[offset..offset + 32].try_into().unwrap();
+        offset += 32;
+
+        let principal = u64::from_le_bytes(data[offset..offset + 8].try_into().unwrap());
+        offset += 8;
+
+        let input_merkle_root: &[u8; 32] = data[offset..offset + 32].try_into().unwrap();
+        offset += 32;
+
+        let vk_hash: &[u8; 32] = data[offset..offset + 32].try_into().unwrap();
+
+        Ok(Self {
+            proof_source: PoolDepositProofSource::Buffer,
+            proof: None,
             input_nullifier_hash,
             pool_commitment,
             principal,
@@ -84,11 +156,13 @@ pub struct DepositToPoolAccounts<'a> {
     pub depositor: &'a AccountInfo,
     pub system_program: &'a AccountInfo,
     pub ultrahonk_verifier: &'a AccountInfo,
+    pub proof_buffer: Option<&'a AccountInfo>,
 }
 
 impl<'a> DepositToPoolAccounts<'a> {
-    pub fn from_accounts(accounts: &'a [AccountInfo]) -> Result<Self, ProgramError> {
-        if accounts.len() < 7 {
+    pub fn from_accounts(accounts: &'a [AccountInfo], use_buffer: bool) -> Result<Self, ProgramError> {
+        let min_accounts = if use_buffer { 8 } else { 7 };
+        if accounts.len() < min_accounts {
             return Err(ProgramError::NotEnoughAccountKeys);
         }
 
@@ -99,6 +173,7 @@ impl<'a> DepositToPoolAccounts<'a> {
         let depositor = &accounts[4];
         let system_program = &accounts[5];
         let ultrahonk_verifier = &accounts[6];
+        let proof_buffer = if use_buffer { Some(&accounts[7]) } else { None };
 
         if !depositor.is_signer() {
             return Err(ProgramError::MissingRequiredSignature);
@@ -112,6 +187,7 @@ impl<'a> DepositToPoolAccounts<'a> {
             depositor,
             system_program,
             ultrahonk_verifier,
+            proof_buffer,
         })
     }
 }
@@ -122,7 +198,12 @@ pub fn process_deposit_to_pool(
     accounts: &[AccountInfo],
     data: &[u8],
 ) -> ProgramResult {
-    let accounts = DepositToPoolAccounts::from_accounts(accounts)?;
+    if data.is_empty() {
+        return Err(ProgramError::InvalidInstructionData);
+    }
+    let use_buffer = data[0] == PoolDepositProofSource::Buffer as u8;
+
+    let accounts = DepositToPoolAccounts::from_accounts(accounts, use_buffer)?;
     let ix_data = DepositToPoolData::from_bytes(data)?;
 
     validate_program_owner(accounts.yield_pool, program_id)?;
@@ -168,12 +249,12 @@ pub fn process_deposit_to_pool(
         let tree_data = accounts.main_commitment_tree.try_borrow_data()?;
         let tree = CommitmentTree::from_bytes(&tree_data)?;
 
-        if !tree.is_valid_root(&ix_data.input_merkle_root) {
+        if !tree.is_valid_root(ix_data.input_merkle_root) {
             return Err(ZVaultError::InvalidRoot.into());
         }
     }
 
-    let nullifier_seeds: &[&[u8]] = &[NullifierRecord::SEED, &ix_data.input_nullifier_hash];
+    let nullifier_seeds: &[&[u8]] = &[NullifierRecord::SEED, ix_data.input_nullifier_hash];
     let (expected_nullifier_pda, _) = find_program_address(nullifier_seeds, program_id);
     if accounts.input_nullifier_record.key() != &expected_nullifier_pda {
         return Err(ProgramError::InvalidSeeds);
@@ -187,19 +268,50 @@ pub fn process_deposit_to_pool(
     }
 
     // Verify UltraHonk proof via CPI
-    pinocchio::msg!("Verifying UltraHonk pool deposit proof...");
-    verify_ultrahonk_pool_deposit_proof(
-        accounts.ultrahonk_verifier,
-        ix_data.proof,
-        &ix_data.input_merkle_root,
-        &ix_data.input_nullifier_hash,
-        &ix_data.pool_commitment,
-        ix_data.principal,
-        &ix_data.vk_hash,
-    ).map_err(|_| {
-        pinocchio::msg!("UltraHonk proof verification failed");
-        ZVaultError::ZkVerificationFailed
-    })?;
+    match ix_data.proof_source {
+        PoolDepositProofSource::Inline => {
+            let proof = ix_data.proof.ok_or(ProgramError::InvalidInstructionData)?;
+            pinocchio::msg!("Verifying UltraHonk pool deposit proof (inline)...");
+            verify_ultrahonk_pool_deposit_proof(
+                accounts.ultrahonk_verifier,
+                proof,
+                ix_data.input_merkle_root,
+                ix_data.input_nullifier_hash,
+                ix_data.pool_commitment,
+                ix_data.principal,
+                ix_data.vk_hash,
+            ).map_err(|_| {
+                pinocchio::msg!("UltraHonk proof verification failed");
+                ZVaultError::ZkVerificationFailed
+            })?;
+        }
+        PoolDepositProofSource::Buffer => {
+            let proof_buffer_account = accounts.proof_buffer.ok_or(ProgramError::NotEnoughAccountKeys)?;
+            let buffer_data = proof_buffer_account.try_borrow_data()?;
+            if buffer_data.len() <= CHADBUFFER_AUTHORITY_SIZE {
+                pinocchio::msg!("ChadBuffer too small");
+                return Err(ProgramError::InvalidAccountData);
+            }
+            let proof = &buffer_data[CHADBUFFER_AUTHORITY_SIZE..];
+            if proof.len() > MAX_ULTRAHONK_PROOF_SIZE {
+                pinocchio::msg!("Proof in buffer too large");
+                return Err(ZVaultError::InvalidProofLength.into());
+            }
+            pinocchio::msg!("Verifying UltraHonk pool deposit proof (buffer)...");
+            verify_ultrahonk_pool_deposit_proof(
+                accounts.ultrahonk_verifier,
+                proof,
+                ix_data.input_merkle_root,
+                ix_data.input_nullifier_hash,
+                ix_data.pool_commitment,
+                ix_data.principal,
+                ix_data.vk_hash,
+            ).map_err(|_| {
+                pinocchio::msg!("UltraHonk proof verification failed");
+                ZVaultError::ZkVerificationFailed
+            })?;
+        }
+    }
 
     let clock = Clock::get()?;
 
@@ -207,7 +319,7 @@ pub fn process_deposit_to_pool(
         let mut nullifier_data = accounts.input_nullifier_record.try_borrow_mut_data()?;
         let nullifier = NullifierRecord::init(&mut nullifier_data)?;
 
-        nullifier.nullifier_hash.copy_from_slice(&ix_data.input_nullifier_hash);
+        nullifier.nullifier_hash.copy_from_slice(ix_data.input_nullifier_hash);
         nullifier.set_spent_at(clock.unix_timestamp);
         nullifier.spent_by.copy_from_slice(accounts.depositor.key().as_ref());
         nullifier.set_operation_type(NullifierOperationType::PrivateTransfer);
@@ -216,7 +328,7 @@ pub fn process_deposit_to_pool(
     {
         let mut tree_data = accounts.pool_commitment_tree.try_borrow_mut_data()?;
         let tree = PoolCommitmentTree::from_bytes_mut(&mut tree_data)?;
-        tree.insert_leaf(&ix_data.pool_commitment)?;
+        tree.insert_leaf(ix_data.pool_commitment)?;
     }
 
     {

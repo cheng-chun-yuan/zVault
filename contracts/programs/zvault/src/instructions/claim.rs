@@ -34,7 +34,8 @@ use crate::state::{
 };
 use crate::utils::{
     transfer_zbtc, validate_account_writable, validate_program_owner, validate_token_2022_owner,
-    validate_token_program_key, verify_ultrahonk_claim_proof, MAX_ULTRAHONK_PROOF_SIZE,
+    validate_token_program_key, verify_ultrahonk_claim_proof, verify_ultrahonk_claim_proof_from_buffer,
+    MAX_ULTRAHONK_PROOF_SIZE,
 };
 
 /// ChadBuffer authority size (first 32 bytes of account data)
@@ -412,26 +413,13 @@ pub fn process_claim(
                 .proof_buffer
                 .ok_or(ProgramError::NotEnoughAccountKeys)?;
 
-            // Read proof from ChadBuffer (data starts after 32-byte authority)
-            let buffer_data = proof_buffer_account.try_borrow_data()?;
-
-            if buffer_data.len() <= CHADBUFFER_AUTHORITY_SIZE {
-                pinocchio::msg!("ChadBuffer too small");
-                return Err(ProgramError::InvalidAccountData);
-            }
-
-            let proof = &buffer_data[CHADBUFFER_AUTHORITY_SIZE..];
-
-            if proof.len() > MAX_ULTRAHONK_PROOF_SIZE {
-                pinocchio::msg!("Proof in buffer too large");
-                return Err(ZVaultError::InvalidProofLength.into());
-            }
-
             pinocchio::msg!("Verifying UltraHonk proof (buffer) via CPI...");
 
-            verify_ultrahonk_claim_proof(
+            // Use buffer-mode verification (passes buffer account to verifier)
+            // This avoids CPI data size limits for large proofs
+            verify_ultrahonk_claim_proof_from_buffer(
                 accounts.ultrahonk_verifier,
-                proof,
+                proof_buffer_account,
                 &ix_data.root,
                 &ix_data.nullifier_hash,
                 ix_data.amount_sats,
