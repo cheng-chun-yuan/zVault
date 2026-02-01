@@ -138,27 +138,27 @@ export const LOCALNET_CHADBUFFER_PROGRAM_ID: Address = address(
 // =============================================================================
 
 /**
- * Devnet Configuration (v1.3.0)
+ * Devnet Configuration (v2.0.1)
  *
- * Fresh deployment 2026-02-01 (second):
- * - Fixed commitment tree with clean state (no corrupted test commitments)
- * - New program ID: DjnHwqqY5zezADnmSEFdXixyQwRBe9p9V9rG5bQkmWkr
+ * Updated deployment 2026-02-01:
+ * - Stealth output data now circuit public inputs (relayer-safe)
+ * - Program ID: zKeyrLmpT8W9o8iRvhizuSihLAFLhfAGBvfM638Pbw8
  */
 export const DEVNET_CONFIG: NetworkConfig = {
   network: "devnet",
 
-  // Program IDs (fresh deployment 2026-02-01)
-  zvaultProgramId: address("DjnHwqqY5zezADnmSEFdXixyQwRBe9p9V9rG5bQkmWkr"),
+  // Program IDs (updated deployment 2026-02-01)
+  zvaultProgramId: address("zKeyrLmpT8W9o8iRvhizuSihLAFLhfAGBvfM638Pbw8"),
   btcLightClientProgramId: address("S6rgPjCeBhkYBejWyDR1zzU3sYCMob36LAf8tjwj8pn"),
   chadbufferProgramId: CHADBUFFER_PROGRAM_ID,
   token2022ProgramId: TOKEN_2022_PROGRAM_ID,
   ataProgramId: ATA_PROGRAM_ID,
 
-  // Deployed Accounts (fresh deployment 2026-02-01)
-  poolStatePda: address("HtSvVLHGPB5E3doY9xECjnoEGuvDaGwoVTfBvt48kzKR"),
-  commitmentTreePda: address("5bppRDwiELngwtfYfEzTR3eh44nZVqxXMRhvYY6aV8jy"),
-  zbtcMint: address("8YfEdVFFzvXEqkanyvLD1naspJsHMbVrs7ibn8Xaff5f"),
-  poolVault: address("GU3S583UtNVdoGy2nzdh4csZnw3kkpt2DY3RGdDz4bm1"),
+  // Deployed Accounts (updated deployment 2026-02-01)
+  poolStatePda: address("ELGSdquznDBd6uUkWsBAmguMBmtuur7D5kapwoyZq44J"),
+  commitmentTreePda: address("5p7WERgzB6AHcga19QehvaTfbiVoM1Bg6drkwzYHYamq"),
+  zbtcMint: address("56gihX59Zy3coM9B1PYXLPoFEzjNuPEVhskCZcKq3VKx"),
+  poolVault: address("J3dRjxc441qNitZBhPNrrmS5moWY89Fp1g97ayuQSDSj"),
 
   // RPC Endpoints
   solanaRpcUrl: "https://api.devnet.solana.com",
@@ -344,7 +344,7 @@ export function createConfig(
 // Convenience Exports (for backwards compatibility)
 // =============================================================================
 
-/** Default zVault program ID (from current config) - DjnHwqqY5zezADnmSEFdXixyQwRBe9p9V9rG5bQkmWkr */
+/** Default zVault program ID (from current config) - zKeyrLmpT8W9o8iRvhizuSihLAFLhfAGBvfM638Pbw8 */
 export const ZVAULT_PROGRAM_ID: Address = DEVNET_CONFIG.zvaultProgramId;
 
 /** Default BTC Light Client program ID (from current config) */
