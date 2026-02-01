@@ -362,6 +362,50 @@ export async function createStealthDeposit(
   };
 }
 
+/**
+ * Create stealth deposit with stealthPubKeyX for circuit input
+ *
+ * Used for recipient outputs in spend_split. Returns the derived stealth
+ * pub key X coordinate which must be used as the circuit's pub_key_x input.
+ *
+ * The commitment is: Poseidon(stealthPub.x, amount)
+ * The circuit expects: output1PubKeyX = stealthPub.x
+ *
+ * @param recipientMeta - Recipient's stealth meta-address
+ * @param amountSats - Amount in satoshis
+ * @returns Stealth output data including stealthPubKeyX for circuit
+ */
+export async function createStealthDepositWithKeys(
+  recipientMeta: StealthMetaAddress,
+  amountSats: bigint
+): Promise<StealthOutputWithKeys> {
+  // Parse recipient's public keys
+  const { spendingPubKey, viewingPubKey } = parseStealthMetaAddress(recipientMeta);
+
+  // Generate ephemeral keypair
+  const ephemeral = generateGrumpkinKeyPair();
+
+  // Compute shared secret with viewing key
+  const sharedSecret = grumpkinEcdh(ephemeral.privKey, viewingPubKey);
+
+  // Derive stealth public key
+  const stealthPub = deriveStealthPubKey(spendingPubKey, sharedSecret);
+
+  // Compute commitment using stealth pub key
+  const commitmentBigint = poseidonHashSync([stealthPub.x, amountSats]);
+  const commitment = bigintToBytes(commitmentBigint);
+
+  // Encrypt amount
+  const encryptedAmount = encryptAmount(amountSats, sharedSecret);
+
+  return {
+    ephemeralPub: pointToCompressedBytes(ephemeral.pubKey),
+    encryptedAmount,
+    commitment,
+    stealthPubKeyX: stealthPub.x, // For circuit input
+  };
+}
+
 // ========== Recipient Scanning (Viewing Key Only) ==========
 
 /**
@@ -422,11 +466,18 @@ export async function scanAnnouncements(
       const stealthPub = deriveStealthPubKey(keys.spendingPubKey, sharedSecret);
 
       // Verify commitment matches decrypted amount
-      const expectedCommitment = poseidonHashSync([stealthPub.x, amount]);
+      // Try standard stealth commitment first: Poseidon(stealthPub.x, amount)
+      const expectedCommitmentStealth = poseidonHashSync([stealthPub.x, amount]);
       const actualCommitment = bytesToBigint(ann.commitment);
 
-      if (expectedCommitment !== actualCommitment) {
-        // Not for us - commitment doesn't match our decrypted amount
+      // Also try raw commitment for change outputs from current circuit
+      // The circuit computes: Poseidon(rawSpendingPub.x, amount) for change outputs
+      // This is a workaround for circuit/announcement mismatch
+      const expectedCommitmentRaw = poseidonHashSync([keys.spendingPubKey.x, amount]);
+
+      if (expectedCommitmentStealth !== actualCommitment &&
+          expectedCommitmentRaw !== actualCommitment) {
+        // Not for us - commitment doesn't match either formula
         continue;
       }
 
@@ -871,6 +922,17 @@ export interface StealthOutputData {
 }
 
 /**
+ * Extended stealth output data including the derived stealth pub key
+ *
+ * Used for passing correct pub key to circuit inputs. The circuit expects
+ * the stealth-derived pub key X coordinate, not the raw spending pub key.
+ */
+export interface StealthOutputWithKeys extends StealthOutputData {
+  /** Derived stealth public key x-coordinate (for circuit input) */
+  stealthPubKeyX: bigint;
+}
+
+/**
  * Circuit-ready stealth output data
  *
  * Used for spend_split and spend_partial_public circuit inputs.
@@ -1036,6 +1098,48 @@ export async function createStealthOutput(
 }
 
 /**
+ * Create stealth output with stealthPubKeyX for circuit input
+ *
+ * Used for change outputs in spend_partial_public and spend_split.
+ * Returns the derived stealth pub key X coordinate which must be used
+ * as the circuit's pub_key_x input (NOT the raw spending pub key).
+ *
+ * The commitment is: Poseidon(stealthPub.x, amount)
+ * The circuit expects: changePubKeyX = stealthPub.x
+ *
+ * @param keys - Your ZVaultKeys (change is sent to yourself)
+ * @param amountSats - Change amount in satoshis
+ * @returns Stealth output data including stealthPubKeyX for circuit
+ */
+export async function createStealthOutputWithKeys(
+  keys: ZVaultKeys,
+  amountSats: bigint
+): Promise<StealthOutputWithKeys> {
+  // Generate a fresh ephemeral keypair
+  const ephemeral = generateGrumpkinKeyPair();
+
+  // Compute shared secret with own viewing key
+  const sharedSecret = grumpkinEcdh(ephemeral.privKey, keys.viewingPubKey);
+
+  // Derive stealth public key
+  const stealthPub = deriveStealthPubKey(keys.spendingPubKey, sharedSecret);
+
+  // Compute commitment using stealth pub key
+  const commitmentBigint = poseidonHashSync([stealthPub.x, amountSats]);
+  const commitment = bigintToBytes(commitmentBigint);
+
+  // Encrypt amount
+  const encryptedAmount = encryptAmount(amountSats, sharedSecret);
+
+  return {
+    ephemeralPub: pointToCompressedBytes(ephemeral.pubKey),
+    encryptedAmount,
+    commitment,
+    stealthPubKeyX: stealthPub.x, // For circuit input
+  };
+}
+
+/**
  * Create stealth output data with pre-computed commitment
  *
  * Used when the commitment is computed by the ZK circuit.
@@ -1077,6 +1181,44 @@ export async function createStealthOutputForCommitment(
     encryptedAmount,
     commitment: existingCommitment,
   };
+}
+
+// ========== Nullifier Computation (for spent checking) ==========
+
+/**
+ * Compute nullifier hash for a scanned note
+ *
+ * Used to check if a note has already been spent by looking up the
+ * nullifier record PDA on-chain.
+ *
+ * Derivation:
+ * 1. sharedSecret = ECDH(viewingPriv, ephemeralPub)
+ * 2. stealthPriv = spendingPriv + hash(sharedSecret)
+ * 3. nullifier = Poseidon(stealthPriv, leafIndex)
+ * 4. nullifierHash = Poseidon(nullifier)
+ *
+ * @param keys - Full ZVaultKeys (requires spending key)
+ * @param note - Scanned note from scanning phase
+ * @returns 32-byte nullifier hash for PDA lookup
+ */
+export function computeNullifierHashForNote(
+  keys: ZVaultKeys,
+  note: ScannedNote
+): Uint8Array {
+  // 1. Recompute shared secret (viewing key + ephemeral pub)
+  const sharedSecret = grumpkinEcdh(keys.viewingPrivKey, note.ephemeralPub);
+
+  // 2. Derive stealth private key (spending key + shared secret)
+  const stealthPrivKey = deriveStealthPrivKey(keys.spendingPrivKey, sharedSecret);
+
+  // 3. Compute nullifier = Poseidon(stealthPriv, leafIndex)
+  const nullifier = poseidonComputeNullifier(stealthPrivKey, BigInt(note.leafIndex));
+
+  // 4. Hash nullifier for on-chain lookup
+  const nullifierHash = poseidonHashSync([nullifier]);
+
+  // 5. Convert to bytes for PDA derivation
+  return bigintToBytes(nullifierHash);
 }
 
 /**

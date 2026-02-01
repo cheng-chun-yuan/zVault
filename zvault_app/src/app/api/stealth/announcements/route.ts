@@ -41,7 +41,7 @@ const CACHE_TTL_MS = 30_000; // 30 seconds
 const ZVAULT_PROGRAM_ID = new PublicKey(DEVNET_CONFIG.zvaultProgramId);
 
 // In-memory cache
-let cache: CacheData | null = null;
+let announcementCache: CacheData | null = null;
 let fetchPromise: Promise<CacheData> | null = null;
 
 // =============================================================================
@@ -97,12 +97,17 @@ async function fetchAnnouncements(): Promise<CacheData> {
   return cacheData;
 }
 
-async function getAnnouncementsWithCache(): Promise<CacheData> {
+async function getAnnouncementsWithCache(forceRefresh = false): Promise<CacheData> {
   const now = Date.now();
 
+  // Force refresh clears the cache
+  if (forceRefresh) {
+    announcementCache = null;
+  }
+
   // Return cache if still valid
-  if (cache && now - cache.fetchedAt < CACHE_TTL_MS) {
-    return cache;
+  if (announcementCache && now - announcementCache.fetchedAt < CACHE_TTL_MS) {
+    return announcementCache;
   }
 
   // If already fetching, wait for that promise
@@ -113,7 +118,7 @@ async function getAnnouncementsWithCache(): Promise<CacheData> {
   // Start new fetch
   fetchPromise = fetchAnnouncements()
     .then((data) => {
-      cache = data;
+      announcementCache = data;
       fetchPromise = null;
       return data;
     })
@@ -129,9 +134,13 @@ async function getAnnouncementsWithCache(): Promise<CacheData> {
 // API Handler
 // =============================================================================
 
-export async function GET() {
+export async function GET(request: Request) {
   try {
-    const data = await getAnnouncementsWithCache();
+    // Check for refresh query param
+    const url = new URL(request.url);
+    const forceRefresh = url.searchParams.get('refresh') === 'true';
+
+    const data = await getAnnouncementsWithCache(forceRefresh);
 
     return NextResponse.json({
       success: true,
@@ -156,7 +165,7 @@ export async function GET() {
 export async function POST() {
   try {
     // Clear cache and force refresh
-    cache = null;
+    announcementCache = null;
     fetchPromise = null;
 
     const data = await getAnnouncementsWithCache();
