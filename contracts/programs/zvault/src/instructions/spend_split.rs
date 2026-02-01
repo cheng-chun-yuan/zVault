@@ -63,6 +63,10 @@ impl SplitProofSource {
 /// - output_commitment_1: [u8; 32]
 /// - output_commitment_2: [u8; 32]
 /// - vk_hash: [u8; 32]
+/// - output1_ephemeral_pub_x: [u8; 32] - x-coordinate of ephemeral pubkey for output 1 (circuit public input)
+/// - output1_encrypted_amount_with_sign: [u8; 32] - bits 0-63: encrypted amount, bit 64: y_sign (circuit public input)
+/// - output2_ephemeral_pub_x: [u8; 32] - x-coordinate of ephemeral pubkey for output 2 (circuit public input)
+/// - output2_encrypted_amount_with_sign: [u8; 32] - bits 0-63: encrypted amount, bit 64: y_sign (circuit public input)
 ///
 /// ## Buffer Mode (proof_source=1)
 /// Layout:
@@ -72,11 +76,14 @@ impl SplitProofSource {
 /// - output_commitment_1: [u8; 32]
 /// - output_commitment_2: [u8; 32]
 /// - vk_hash: [u8; 32]
-/// - ephemeral_pub_1: [u8; 33] - Grumpkin pubkey for first output stealth announcement
-/// - encrypted_amount_1: [u8; 8] - XOR encrypted first output amount
-/// - ephemeral_pub_2: [u8; 33] - Grumpkin pubkey for second output stealth announcement
-/// - encrypted_amount_2: [u8; 8] - XOR encrypted second output amount
+/// - output1_ephemeral_pub_x: [u8; 32]
+/// - output1_encrypted_amount_with_sign: [u8; 32]
+/// - output2_ephemeral_pub_x: [u8; 32]
+/// - output2_encrypted_amount_with_sign: [u8; 32]
 /// (proof is read from ChadBuffer account passed as additional account)
+///
+/// Note: The ephemeral pubkey and encrypted amount fields are circuit public inputs,
+/// so the proof commits to these values. A malicious relayer cannot tamper with them.
 pub struct SpendSplitData<'a> {
     pub proof_source: SplitProofSource,
     pub proof: Option<&'a [u8]>,
@@ -85,22 +92,22 @@ pub struct SpendSplitData<'a> {
     pub output_commitment_1: [u8; 32],
     pub output_commitment_2: [u8; 32],
     pub vk_hash: [u8; 32],
-    /// Grumpkin ephemeral pubkey for first output stealth announcement (33 bytes compressed)
-    pub ephemeral_pub_1: [u8; 33],
-    /// XOR encrypted first output amount (8 bytes)
-    pub encrypted_amount_1: [u8; 8],
-    /// Grumpkin ephemeral pubkey for second output stealth announcement (33 bytes compressed)
-    pub ephemeral_pub_2: [u8; 33],
-    /// XOR encrypted second output amount (8 bytes)
-    pub encrypted_amount_2: [u8; 8],
+    /// Ephemeral pubkey x-coordinate for first output (32 bytes) - circuit public input
+    pub output1_ephemeral_pub_x: [u8; 32],
+    /// Packed: bits 0-63 = encrypted amount, bit 64 = y_sign for output 1 - circuit public input
+    pub output1_encrypted_amount_with_sign: [u8; 32],
+    /// Ephemeral pubkey x-coordinate for second output (32 bytes) - circuit public input
+    pub output2_ephemeral_pub_x: [u8; 32],
+    /// Packed: bits 0-63 = encrypted amount, bit 64 = y_sign for output 2 - circuit public input
+    pub output2_encrypted_amount_with_sign: [u8; 32],
 }
 
 impl<'a> SpendSplitData<'a> {
-    /// Minimum size for inline mode: proof_source(1) + proof_len(4) + root(32) + nullifier(32) + out1(32) + out2(32) + vk_hash(32) + ephemeral_pub_1(33) + encrypted_amount_1(8) + ephemeral_pub_2(33) + encrypted_amount_2(8) = 247 bytes + proof
-    pub const MIN_SIZE_INLINE: usize = 1 + 4 + 32 + 32 + 32 + 32 + 32 + 33 + 8 + 33 + 8;
+    /// Minimum size for inline mode: proof_source(1) + proof_len(4) + root(32) + nullifier(32) + out1(32) + out2(32) + vk_hash(32) + output1_ephemeral_pub_x(32) + output1_encrypted_amount_with_sign(32) + output2_ephemeral_pub_x(32) + output2_encrypted_amount_with_sign(32) = 293 bytes + proof
+    pub const MIN_SIZE_INLINE: usize = 1 + 4 + 32 + 32 + 32 + 32 + 32 + 32 + 32 + 32 + 32;
 
-    /// Minimum size for buffer mode: proof_source(1) + root(32) + nullifier(32) + out1(32) + out2(32) + vk_hash(32) + ephemeral_pub_1(33) + encrypted_amount_1(8) + ephemeral_pub_2(33) + encrypted_amount_2(8) = 243 bytes
-    pub const MIN_SIZE_BUFFER: usize = 1 + 32 + 32 + 32 + 32 + 32 + 33 + 8 + 33 + 8;
+    /// Minimum size for buffer mode: proof_source(1) + root(32) + nullifier(32) + out1(32) + out2(32) + vk_hash(32) + output1_ephemeral_pub_x(32) + output1_encrypted_amount_with_sign(32) + output2_ephemeral_pub_x(32) + output2_encrypted_amount_with_sign(32) = 289 bytes
+    pub const MIN_SIZE_BUFFER: usize = 1 + 32 + 32 + 32 + 32 + 32 + 32 + 32 + 32 + 32;
 
     pub fn from_bytes(data: &'a [u8]) -> Result<Self, ProgramError> {
         if data.is_empty() {
@@ -130,7 +137,7 @@ impl<'a> SpendSplitData<'a> {
             return Err(ProgramError::InvalidInstructionData);
         }
 
-        let expected_size = 1 + 4 + proof_len + 32 + 32 + 32 + 32 + 32 + 33 + 8 + 33 + 8;
+        let expected_size = 1 + 4 + proof_len + 32 + 32 + 32 + 32 + 32 + 32 + 32 + 32 + 32;
         if data.len() < expected_size {
             return Err(ProgramError::InvalidInstructionData);
         }
@@ -158,20 +165,20 @@ impl<'a> SpendSplitData<'a> {
         vk_hash.copy_from_slice(&data[offset..offset + 32]);
         offset += 32;
 
-        let mut ephemeral_pub_1 = [0u8; 33];
-        ephemeral_pub_1.copy_from_slice(&data[offset..offset + 33]);
-        offset += 33;
+        let mut output1_ephemeral_pub_x = [0u8; 32];
+        output1_ephemeral_pub_x.copy_from_slice(&data[offset..offset + 32]);
+        offset += 32;
 
-        let mut encrypted_amount_1 = [0u8; 8];
-        encrypted_amount_1.copy_from_slice(&data[offset..offset + 8]);
-        offset += 8;
+        let mut output1_encrypted_amount_with_sign = [0u8; 32];
+        output1_encrypted_amount_with_sign.copy_from_slice(&data[offset..offset + 32]);
+        offset += 32;
 
-        let mut ephemeral_pub_2 = [0u8; 33];
-        ephemeral_pub_2.copy_from_slice(&data[offset..offset + 33]);
-        offset += 33;
+        let mut output2_ephemeral_pub_x = [0u8; 32];
+        output2_ephemeral_pub_x.copy_from_slice(&data[offset..offset + 32]);
+        offset += 32;
 
-        let mut encrypted_amount_2 = [0u8; 8];
-        encrypted_amount_2.copy_from_slice(&data[offset..offset + 8]);
+        let mut output2_encrypted_amount_with_sign = [0u8; 32];
+        output2_encrypted_amount_with_sign.copy_from_slice(&data[offset..offset + 32]);
 
         Ok(Self {
             proof_source: SplitProofSource::Inline,
@@ -181,10 +188,10 @@ impl<'a> SpendSplitData<'a> {
             output_commitment_1,
             output_commitment_2,
             vk_hash,
-            ephemeral_pub_1,
-            encrypted_amount_1,
-            ephemeral_pub_2,
-            encrypted_amount_2,
+            output1_ephemeral_pub_x,
+            output1_encrypted_amount_with_sign,
+            output2_ephemeral_pub_x,
+            output2_encrypted_amount_with_sign,
         })
     }
 
@@ -215,20 +222,20 @@ impl<'a> SpendSplitData<'a> {
         vk_hash.copy_from_slice(&data[offset..offset + 32]);
         offset += 32;
 
-        let mut ephemeral_pub_1 = [0u8; 33];
-        ephemeral_pub_1.copy_from_slice(&data[offset..offset + 33]);
-        offset += 33;
+        let mut output1_ephemeral_pub_x = [0u8; 32];
+        output1_ephemeral_pub_x.copy_from_slice(&data[offset..offset + 32]);
+        offset += 32;
 
-        let mut encrypted_amount_1 = [0u8; 8];
-        encrypted_amount_1.copy_from_slice(&data[offset..offset + 8]);
-        offset += 8;
+        let mut output1_encrypted_amount_with_sign = [0u8; 32];
+        output1_encrypted_amount_with_sign.copy_from_slice(&data[offset..offset + 32]);
+        offset += 32;
 
-        let mut ephemeral_pub_2 = [0u8; 33];
-        ephemeral_pub_2.copy_from_slice(&data[offset..offset + 33]);
-        offset += 33;
+        let mut output2_ephemeral_pub_x = [0u8; 32];
+        output2_ephemeral_pub_x.copy_from_slice(&data[offset..offset + 32]);
+        offset += 32;
 
-        let mut encrypted_amount_2 = [0u8; 8];
-        encrypted_amount_2.copy_from_slice(&data[offset..offset + 8]);
+        let mut output2_encrypted_amount_with_sign = [0u8; 32];
+        output2_encrypted_amount_with_sign.copy_from_slice(&data[offset..offset + 32]);
 
         Ok(Self {
             proof_source: SplitProofSource::Buffer,
@@ -238,11 +245,51 @@ impl<'a> SpendSplitData<'a> {
             output_commitment_1,
             output_commitment_2,
             vk_hash,
-            ephemeral_pub_1,
-            encrypted_amount_1,
-            ephemeral_pub_2,
-            encrypted_amount_2,
+            output1_ephemeral_pub_x,
+            output1_encrypted_amount_with_sign,
+            output2_ephemeral_pub_x,
+            output2_encrypted_amount_with_sign,
         })
+    }
+
+    /// Extract the y_sign bit from output1_encrypted_amount_with_sign (bit 64)
+    pub fn get_output1_y_sign(&self) -> bool {
+        (self.output1_encrypted_amount_with_sign[8] & 0x01) != 0
+    }
+
+    /// Extract encrypted amount from output1_encrypted_amount_with_sign (bits 0-63)
+    pub fn get_output1_encrypted_amount(&self) -> [u8; 8] {
+        let mut amount = [0u8; 8];
+        amount.copy_from_slice(&self.output1_encrypted_amount_with_sign[0..8]);
+        amount
+    }
+
+    /// Reconstruct the 33-byte compressed public key for output 1
+    pub fn get_output1_ephemeral_pub_compressed(&self) -> [u8; 33] {
+        let mut compressed = [0u8; 33];
+        compressed[0] = if self.get_output1_y_sign() { 0x03 } else { 0x02 };
+        compressed[1..33].copy_from_slice(&self.output1_ephemeral_pub_x);
+        compressed
+    }
+
+    /// Extract the y_sign bit from output2_encrypted_amount_with_sign (bit 64)
+    pub fn get_output2_y_sign(&self) -> bool {
+        (self.output2_encrypted_amount_with_sign[8] & 0x01) != 0
+    }
+
+    /// Extract encrypted amount from output2_encrypted_amount_with_sign (bits 0-63)
+    pub fn get_output2_encrypted_amount(&self) -> [u8; 8] {
+        let mut amount = [0u8; 8];
+        amount.copy_from_slice(&self.output2_encrypted_amount_with_sign[0..8]);
+        amount
+    }
+
+    /// Reconstruct the 33-byte compressed public key for output 2
+    pub fn get_output2_ephemeral_pub_compressed(&self) -> [u8; 33] {
+        let mut compressed = [0u8; 33];
+        compressed[0] = if self.get_output2_y_sign() { 0x03 } else { 0x02 };
+        compressed[1..33].copy_from_slice(&self.output2_ephemeral_pub_x);
+        compressed
     }
 }
 
@@ -343,9 +390,13 @@ pub fn process_spend_split(
     validate_account_writable(accounts.stealth_announcement_1)?;
     validate_account_writable(accounts.stealth_announcement_2)?;
 
+    // Reconstruct compressed pubkeys from x-coordinates and y_sign bits
+    let ephemeral_pub_1_compressed = ix_data.get_output1_ephemeral_pub_compressed();
+    let ephemeral_pub_2_compressed = ix_data.get_output2_ephemeral_pub_compressed();
+
     // Verify stealth announcement PDA for first output
     // Use bytes 1-32 of ephemeral_pub (skip prefix byte) - max seed length is 32 bytes
-    let stealth_seeds_1: &[&[u8]] = &[StealthAnnouncement::SEED, &ix_data.ephemeral_pub_1[1..33]];
+    let stealth_seeds_1: &[&[u8]] = &[StealthAnnouncement::SEED, &ephemeral_pub_1_compressed[1..33]];
     let (expected_stealth_pda_1, stealth_bump_1) = find_program_address(stealth_seeds_1, program_id);
     if accounts.stealth_announcement_1.key() != &expected_stealth_pda_1 {
         pinocchio::msg!("Invalid stealth announcement PDA for first output");
@@ -353,7 +404,7 @@ pub fn process_spend_split(
     }
 
     // Verify stealth announcement PDA for second output
-    let stealth_seeds_2: &[&[u8]] = &[StealthAnnouncement::SEED, &ix_data.ephemeral_pub_2[1..33]];
+    let stealth_seeds_2: &[&[u8]] = &[StealthAnnouncement::SEED, &ephemeral_pub_2_compressed[1..33]];
     let (expected_stealth_pda_2, stealth_bump_2) = find_program_address(stealth_seeds_2, program_id);
     if accounts.stealth_announcement_2.key() != &expected_stealth_pda_2 {
         pinocchio::msg!("Invalid stealth announcement PDA for second output");
@@ -421,6 +472,8 @@ pub fn process_spend_split(
     }
 
     // Get proof bytes and verify (either inline or from ChadBuffer)
+    // Note: The ephemeral pubkey and encrypted amount fields are circuit public inputs,
+    // so the proof commits to these values. If a relayer tries to tamper with them, verification fails.
     match ix_data.proof_source {
         SplitProofSource::Inline => {
             let proof = ix_data.proof.ok_or(ProgramError::InvalidInstructionData)?;
@@ -434,6 +487,10 @@ pub fn process_spend_split(
                 &ix_data.nullifier_hash,
                 &ix_data.output_commitment_1,
                 &ix_data.output_commitment_2,
+                &ix_data.output1_ephemeral_pub_x,
+                &ix_data.output1_encrypted_amount_with_sign,
+                &ix_data.output2_ephemeral_pub_x,
+                &ix_data.output2_encrypted_amount_with_sign,
                 &ix_data.vk_hash,
             )
             .map_err(|_| {
@@ -470,6 +527,10 @@ pub fn process_spend_split(
                 &ix_data.nullifier_hash,
                 &ix_data.output_commitment_1,
                 &ix_data.output_commitment_2,
+                &ix_data.output1_ephemeral_pub_x,
+                &ix_data.output1_encrypted_amount_with_sign,
+                &ix_data.output2_ephemeral_pub_x,
+                &ix_data.output2_encrypted_amount_with_sign,
                 &ix_data.vk_hash,
             )
             .map_err(|_| {
@@ -521,7 +582,7 @@ pub fn process_spend_split(
         let stealth_bump_1_bytes = [stealth_bump_1];
         let signer_seeds: &[&[u8]] = &[
             StealthAnnouncement::SEED,
-            &ix_data.ephemeral_pub_1[1..33],
+            &ephemeral_pub_1_compressed[1..33],
             &stealth_bump_1_bytes,
         ];
 
@@ -536,13 +597,15 @@ pub fn process_spend_split(
     }
 
     // Initialize stealth announcement for first output
+    // Extract encrypted amount from the packed field (bits 0-63)
+    let encrypted_amount_1 = ix_data.get_output1_encrypted_amount();
     {
         let mut ann_data = accounts.stealth_announcement_1.try_borrow_mut_data()?;
         let announcement = StealthAnnouncement::init(&mut ann_data)?;
 
         announcement.bump = stealth_bump_1;
-        announcement.ephemeral_pub = ix_data.ephemeral_pub_1;
-        announcement.set_encrypted_amount(ix_data.encrypted_amount_1);
+        announcement.ephemeral_pub = ephemeral_pub_1_compressed;
+        announcement.set_encrypted_amount(encrypted_amount_1);
         announcement.commitment.copy_from_slice(&ix_data.output_commitment_1);
         announcement.set_leaf_index(leaf_index_1);
         announcement.set_created_at(clock.unix_timestamp);
@@ -561,7 +624,7 @@ pub fn process_spend_split(
         let stealth_bump_2_bytes = [stealth_bump_2];
         let signer_seeds: &[&[u8]] = &[
             StealthAnnouncement::SEED,
-            &ix_data.ephemeral_pub_2[1..33],
+            &ephemeral_pub_2_compressed[1..33],
             &stealth_bump_2_bytes,
         ];
 
@@ -576,13 +639,14 @@ pub fn process_spend_split(
     }
 
     // Initialize stealth announcement for second output
+    let encrypted_amount_2 = ix_data.get_output2_encrypted_amount();
     {
         let mut ann_data = accounts.stealth_announcement_2.try_borrow_mut_data()?;
         let announcement = StealthAnnouncement::init(&mut ann_data)?;
 
         announcement.bump = stealth_bump_2;
-        announcement.ephemeral_pub = ix_data.ephemeral_pub_2;
-        announcement.set_encrypted_amount(ix_data.encrypted_amount_2);
+        announcement.ephemeral_pub = ephemeral_pub_2_compressed;
+        announcement.set_encrypted_amount(encrypted_amount_2);
         announcement.commitment.copy_from_slice(&ix_data.output_commitment_2);
         announcement.set_leaf_index(leaf_index_2);
         announcement.set_created_at(clock.unix_timestamp);
