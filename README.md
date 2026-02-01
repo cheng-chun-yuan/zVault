@@ -30,7 +30,7 @@ Bitcoin's transparent blockchain makes privacy challenging:
 
 | Layer | Technology | Innovation |
 |-------|------------|------------|
-| **ZK Circuits** | Noir + UltraHonk | 8 specialized privacy circuits |
+| **ZK Circuits** | Noir + UltraHonk | 6 specialized privacy circuits |
 | **On-Chain Verifier** | BN254 alt_bn128 syscalls | Client-side proof generation |
 | **Smart Contracts** | Pinocchio (Solana) | Zero-copy, ~95k CU verification |
 | **Bitcoin Integration** | Taproot + SPV | Permissionless light client |
@@ -47,7 +47,7 @@ Bitcoin's transparent blockchain makes privacy challenging:
 
 ## Key Innovations
 
-### 1. Noir ZK Circuits (8 Specialized Circuits)
+### 1. Noir ZK Circuits (6 Specialized Circuits)
 
 Built on Aztec's Noir language with UltraHonk proofs for efficient client-side proving:
 
@@ -59,7 +59,6 @@ Built on Aztec's Noir language with UltraHonk proofs for efficient client-side p
 | `pool_deposit` | Enter yield pool | Unified → Pool commitment |
 | `pool_withdraw` | Exit with yield | Yield calculation in-circuit |
 | `pool_claim_yield` | Compound yields | Re-stake with epoch reset |
-| `proof_of_innocence` | Regulatory compliance | Dual Merkle tree verification |
 
 **Unified Commitment Model:**
 ```
@@ -85,6 +84,31 @@ Sender:                              Recipient:
 - **Viewing Key**: Detect and decrypt incoming transfers (cannot spend)
 - **Spending Key**: Generate nullifier and claim funds
 - **Grumpkin Curve**: ~2,000 constraints (vs ~300,000 for X25519)
+
+### Key Model (Viewing/Spending Key Separation)
+
+```
+Spending Key (private) ─► Can spend funds, must keep secret
+       │
+       └─► Viewing Key (derived) ─► Can view balances/history, safe to share with auditors
+```
+
+| Key Type | Capabilities | Share With |
+|----------|--------------|------------|
+| **Spending Key** | Full control - generate nullifiers, sign transactions | Keep secret |
+| **Viewing Key** | Read-only - scan for payments, view history | Accountants, regulators, compliance |
+
+**Use case**: Share viewing key with accountants, regulators, or compliance without risking fund loss.
+
+### Key Privacy Features
+
+| Feature | Description |
+|---------|-------------|
+| **Client-Side Proving** | All ZK proofs generated in browser/app - no trusted backend required |
+| **UltraHonk (No Trusted Setup)** | Unlike Groth16, UltraHonk requires no ceremony - fully trustless |
+| **Viewing/Spending Key Separation** | Share viewing key for audits without compromising spend ability |
+| **Stealth Addresses** | Unlinkable one-time addresses via DKSAP (EIP-5564) |
+| **.zkey Names** | Human-readable stealth addresses (SNS-style registry) |
 
 ### 3. ChadBuffer Integration
 
@@ -177,7 +201,8 @@ console.log('Share this link:', result.claimLink);
 zVault/
 ├── contracts/                  # Solana programs
 │   ├── programs/zvault/        # Main zVault program (Pinocchio)
-│   └── programs/btc-light-client/  # Bitcoin header tracking
+│   ├── programs/btc-light-client/  # Bitcoin header tracking
+│   └── programs/ultrahonk-verifier/  # UltraHonk proof verification
 ├── noir-circuits/              # Zero-knowledge circuits
 │   ├── claim/                  # Claim zkBTC from deposit
 │   ├── spend_split/            # Split 1 → 2 notes
@@ -185,12 +210,12 @@ zVault/
 │   ├── pool_deposit/           # Enter yield pool
 │   ├── pool_withdraw/          # Exit pool with yield
 │   ├── pool_claim_yield/       # Compound yields
-│   ├── proof_of_innocence/     # Compliance proof
 │   └── utils/                  # Shared crypto (Grumpkin, Poseidon2)
 ├── sdk/                        # @zvault/sdk TypeScript client
-├── frontend/                   # Next.js web interface
+├── zvault_app/                 # Next.js web interface
 ├── mobile-app/                 # Expo React Native app
-├── backend/                    # Rust API + redemption service
+├── frost_server/               # FROST threshold signing for BTC
+├── backend/                    # Rust API server
 │   └── header-relayer/         # Bitcoin header sync
 └── docs/                       # Technical documentation
 ```
@@ -215,37 +240,81 @@ zVault/
 - Rust (for backend/contracts)
 - Solana CLI
 
-### Frontend
+### Frontend (Next.js) - `/zvault_app`
 
 ```bash
-cd frontend
+cd zvault_app
 bun install
 bun run dev          # Start dev server (port 3000)
+bun run build        # Production build (builds SDK first)
+bun run lint         # ESLint
+bun run test         # Vitest tests
 ```
 
-### SDK
+### SDK - `/sdk`
 
 ```bash
 cd sdk
 bun install
 bun run build        # Compile TypeScript
 bun test             # Run tests
+bun run e2e          # End-to-end tests (localnet)
+bun run e2e:devnet   # E2E tests on devnet
 ```
 
-### Contracts
+### Contracts (Pinocchio) - `/contracts`
 
 ```bash
 cd contracts
 anchor build         # Build programs
 anchor deploy        # Deploy to devnet
+bun run test         # TypeScript tests
 ```
 
-### Noir Circuits
+### FROST Server - `/frost_server`
+
+```bash
+cd frost_server
+cargo run --bin frost-server       # Start FROST signing server
+cargo run --bin generate_deposit_address  # Generate Taproot address
+cargo run --bin spend_utxo         # Spend UTXO with threshold sig
+cargo test                         # Run tests
+```
+
+### Backend (Rust) - `/backend`
+
+```bash
+cd backend
+cargo run            # Start API server
+cargo test           # Run tests
+```
+
+### Mobile App (Expo) - `/mobile-app`
+
+```bash
+cd mobile-app
+bun install
+bun run start        # Start Expo dev server
+bun run ios          # Run on iOS simulator
+bun run android      # Run on Android emulator
+```
+
+### Noir Circuits - `/noir-circuits`
 
 ```bash
 cd noir-circuits
-bun run compile:all  # Compile all circuits
-bun run test         # Run circuit tests
+bun run compile:all  # Compile all 6 circuits
+bun run compile:claim  # Single circuit
+bun run test         # Noir + JS tests
+bun run prove        # Generate proof
+```
+
+### Header Relayer - `/backend/header-relayer`
+
+```bash
+cd backend/header-relayer
+bun run init         # Initialize light client (first time)
+bun run start        # Start header relay service
 ```
 
 ---
@@ -254,8 +323,8 @@ bun run test         # Run circuit tests
 
 | Program | Network | Address |
 |---------|---------|---------|
-| zVault | Devnet | `5S5ynMni8Pgd6tKkpYaXiPJiEXgw927s7T2txDtDivRK` |
-| BTC Light Client | Devnet | `95vWurTc9BhjBvEbBdUKoTZHMPPyB1iQZEuXEaR7wPpd` |
+| zVault | Devnet | `zKeyrLmpT8W9o8iRvhizuSihLAFLhfAGBvfM638Pbw8` |
+| BTC Light Client | Devnet | `S6rgPjCeBhkYBejWyDR1zzU3sYCMob36LAf8tjwj8pn` |
 | ChadBuffer | Devnet | `C5RpjtTMFXKVZCtXSzKXD4CDNTaWBg3dVeMfYvjZYHDF` |
 
 ---
@@ -283,6 +352,18 @@ bun run test         # Run circuit tests
 | Stealth | Grumpkin ECDH (EIP-5564) |
 | BTC Deposits | Taproot (BIP-341) |
 | Merkle Tree | Depth 20 (~1M leaves) |
+
+### Why UltraHonk over Groth16
+
+| Aspect | UltraHonk | Groth16 |
+|--------|-----------|---------|
+| Trusted Setup | None (transparent) | Required (ceremony) |
+| Proof Size | ~2-4 KB | ~200 bytes |
+| Prover Time | Fast (client-side viable) | Slower |
+| Verifier Cost | Higher on-chain | Lower on-chain |
+| Security Model | Transparent | Trusted setup assumption |
+
+We chose UltraHonk for **trustlessness** and **client-side proving capability** - no trusted ceremony required.
 
 ---
 
