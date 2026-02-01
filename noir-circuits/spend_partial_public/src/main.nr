@@ -35,6 +35,11 @@ fn main(
     public_amount: pub u64,           // Amount being publicly claimed
     change_commitment: pub Field,     // Commitment for the change
     recipient: pub Field,             // Solana wallet address (32 bytes as Field)
+
+    // Stealth output data (for change StealthAnnouncement - relayer-safe)
+    // These are public inputs so relayer cannot tamper with them
+    change_ephemeral_pub_x: pub Field,           // 32 bytes - ephemeral pubkey x-coordinate
+    change_encrypted_amount_with_sign: pub Field, // bits 0-63: encrypted amount, bit 64: y_sign
 ) {
     // 1. Verify input commitment exists in Merkle tree
     let input_commitment = zvault_utils::compute_commitment(pub_key_x, amount as Field);
@@ -107,6 +112,10 @@ fn test_partial_claim_with_change() {
     }
     let merkle_root = current;
 
+    // Stealth output data (mock values for testing)
+    let change_ephemeral_pub_x: Field = 123456789;
+    let change_encrypted_amount_with_sign: Field = 987654321;
+
     // Execute circuit
     main(
         priv_key,
@@ -121,7 +130,9 @@ fn test_partial_claim_with_change() {
         nullifier_hash,
         public_amount,
         change_commitment,
-        recipient
+        recipient,
+        change_ephemeral_pub_x,
+        change_encrypted_amount_with_sign
     );
 }
 
@@ -157,6 +168,10 @@ fn test_full_claim_no_change() {
     }
     let merkle_root = current;
 
+    // Stealth output data (mock values - can be 0 when no change)
+    let change_ephemeral_pub_x: Field = 0;
+    let change_encrypted_amount_with_sign: Field = 0;
+
     // Execute circuit
     main(
         priv_key,
@@ -171,7 +186,9 @@ fn test_full_claim_no_change() {
         nullifier_hash,
         public_amount,
         change_commitment,
-        recipient
+        recipient,
+        change_ephemeral_pub_x,
+        change_encrypted_amount_with_sign
     );
 }
 
@@ -207,6 +224,10 @@ fn test_amount_mismatch_should_fail() {
     }
     let merkle_root = current;
 
+    // Stealth output data
+    let change_ephemeral_pub_x: Field = 111;
+    let change_encrypted_amount_with_sign: Field = 222;
+
     // This should fail due to amount mismatch
     main(
         priv_key,
@@ -221,7 +242,9 @@ fn test_amount_mismatch_should_fail() {
         nullifier_hash,
         public_amount,
         change_commitment,
-        recipient
+        recipient,
+        change_ephemeral_pub_x,
+        change_encrypted_amount_with_sign
     );
 }
 
@@ -258,6 +281,10 @@ fn test_wrong_change_commitment_should_fail() {
     }
     let merkle_root = current;
 
+    // Stealth output data
+    let change_ephemeral_pub_x: Field = 333;
+    let change_encrypted_amount_with_sign: Field = 444;
+
     // This should fail due to wrong change commitment
     main(
         priv_key,
@@ -272,7 +299,9 @@ fn test_wrong_change_commitment_should_fail() {
         nullifier_hash,
         public_amount,
         wrong_change_commitment,
-        recipient
+        recipient,
+        change_ephemeral_pub_x,
+        change_encrypted_amount_with_sign
     );
 }
 
@@ -311,6 +340,10 @@ fn test_wrong_nullifier_should_fail() {
     }
     let merkle_root = current;
 
+    // Stealth output data
+    let change_ephemeral_pub_x: Field = 555;
+    let change_encrypted_amount_with_sign: Field = 666;
+
     // This should fail due to nullifier mismatch
     main(
         priv_key,
@@ -325,7 +358,9 @@ fn test_wrong_nullifier_should_fail() {
         wrong_nullifier_hash, // Wrong nullifier hash!
         public_amount,
         change_commitment,
-        recipient
+        recipient,
+        change_ephemeral_pub_x,
+        change_encrypted_amount_with_sign
     );
 }
 
@@ -356,6 +391,10 @@ fn test_wrong_merkle_root_should_fail() {
     // Wrong Merkle root
     let wrong_merkle_root = 123456789;
 
+    // Stealth output data
+    let change_ephemeral_pub_x: Field = 777;
+    let change_encrypted_amount_with_sign: Field = 888;
+
     // This should fail due to Merkle proof failure
     main(
         priv_key,
@@ -370,6 +409,8 @@ fn test_wrong_merkle_root_should_fail() {
         nullifier_hash,
         public_amount,
         change_commitment,
-        recipient
+        recipient,
+        change_ephemeral_pub_x,
+        change_encrypted_amount_with_sign
     );
 }

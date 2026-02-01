@@ -328,7 +328,13 @@ pub fn verify_ultrahonk_claim_proof_from_buffer(
 
 /// Verify split proof for UltraHonk
 ///
-/// Public inputs: [root, nullifier_hash, output_commitment_1, output_commitment_2]
+/// Public inputs: [root, nullifier_hash, output_commitment_1, output_commitment_2,
+///                 output1_ephemeral_pub_x, output1_encrypted_amount_with_sign,
+///                 output2_ephemeral_pub_x, output2_encrypted_amount_with_sign]
+///
+/// The stealth output data for both outputs are included as circuit public inputs
+/// to make them relayer-safe - the proof commits to these values.
+#[allow(clippy::too_many_arguments)]
 pub fn verify_ultrahonk_split_proof(
     verifier_program: &AccountInfo,
     proof_bytes: &[u8],
@@ -336,6 +342,10 @@ pub fn verify_ultrahonk_split_proof(
     nullifier_hash: &[u8; 32],
     output_commitment_1: &[u8; 32],
     output_commitment_2: &[u8; 32],
+    output1_ephemeral_pub_x: &[u8; 32],
+    output1_encrypted_amount_with_sign: &[u8; 32],
+    output2_ephemeral_pub_x: &[u8; 32],
+    output2_encrypted_amount_with_sign: &[u8; 32],
     vk_hash: &[u8; 32],
 ) -> Result<(), ProgramError> {
     let public_inputs = [
@@ -343,6 +353,10 @@ pub fn verify_ultrahonk_split_proof(
         *nullifier_hash,
         *output_commitment_1,
         *output_commitment_2,
+        *output1_ephemeral_pub_x,
+        *output1_encrypted_amount_with_sign,
+        *output2_ephemeral_pub_x,
+        *output2_encrypted_amount_with_sign,
     ];
 
     verify_ultrahonk_proof_cpi(verifier_program, proof_bytes, &public_inputs, vk_hash)
@@ -350,7 +364,13 @@ pub fn verify_ultrahonk_split_proof(
 
 /// Verify spend partial public proof for UltraHonk
 ///
-/// Public inputs: [root, nullifier_hash, public_amount, change_commitment, recipient]
+/// Public inputs: [root, nullifier_hash, public_amount, change_commitment, recipient,
+///                 change_ephemeral_pub_x, change_encrypted_amount_with_sign]
+///
+/// The stealth output data (ephemeral_pub_x and encrypted_amount_with_sign) are included
+/// as circuit public inputs to make them relayer-safe - the proof commits to these values,
+/// so a malicious relayer cannot tamper with them.
+#[allow(clippy::too_many_arguments)]
 pub fn verify_ultrahonk_spend_partial_public_proof(
     verifier_program: &AccountInfo,
     proof_bytes: &[u8],
@@ -359,6 +379,8 @@ pub fn verify_ultrahonk_spend_partial_public_proof(
     public_amount: u64,
     change_commitment: &[u8; 32],
     recipient: &[u8; 32],
+    change_ephemeral_pub_x: &[u8; 32],
+    change_encrypted_amount_with_sign: &[u8; 32],
     vk_hash: &[u8; 32],
 ) -> Result<(), ProgramError> {
     // Encode amount as 32-byte field element
@@ -371,6 +393,8 @@ pub fn verify_ultrahonk_spend_partial_public_proof(
         amount_bytes,
         *change_commitment,
         *recipient,
+        *change_ephemeral_pub_x,
+        *change_encrypted_amount_with_sign,
     ];
 
     verify_ultrahonk_proof_cpi(verifier_program, proof_bytes, &public_inputs, vk_hash)

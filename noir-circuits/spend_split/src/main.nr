@@ -13,6 +13,10 @@
 // - Input commitment must exist in Merkle tree
 // - Nullifier hash prevents double-spend
 // - Output public keys must be unique (different recipients)
+//
+// Stealth output data (relayer-safe):
+// - Ephemeral pubkey x-coordinates and encrypted amounts are public inputs
+// - This ensures relayer cannot tamper with stealth announcement data
 
 use dep::zvault_utils;
 use dep::poseidon::poseidon::bn254::hash_2;
@@ -39,6 +43,13 @@ fn main(
     nullifier_hash: pub Field,
     output_commitment1: pub Field,
     output_commitment2: pub Field,
+
+    // Stealth output data (for StealthAnnouncements - relayer-safe)
+    // These are public inputs so relayer cannot tamper with them
+    output1_ephemeral_pub_x: pub Field,           // 32 bytes - ephemeral pubkey x-coordinate for output 1
+    output1_encrypted_amount_with_sign: pub Field, // bits 0-63: encrypted amount, bit 64: y_sign
+    output2_ephemeral_pub_x: pub Field,           // 32 bytes - ephemeral pubkey x-coordinate for output 2
+    output2_encrypted_amount_with_sign: pub Field, // bits 0-63: encrypted amount, bit 64: y_sign
 ) {
     // 1. Verify amount conservation
     assert(amount == output1_amount + output2_amount, "Amount conservation failed");
@@ -118,6 +129,12 @@ fn test_spend_split_basic() {
     }
     let merkle_root = current;
 
+    // Stealth output data (mock values for testing)
+    let output1_ephemeral_pub_x: Field = 123456789;
+    let output1_encrypted_amount_with_sign: Field = 111222333;
+    let output2_ephemeral_pub_x: Field = 987654321;
+    let output2_encrypted_amount_with_sign: Field = 444555666;
+
     // Execute circuit
     main(
         priv_key,
@@ -133,7 +150,11 @@ fn test_spend_split_basic() {
         merkle_root,
         nullifier_hash,
         output_commitment1,
-        output_commitment2
+        output_commitment2,
+        output1_ephemeral_pub_x,
+        output1_encrypted_amount_with_sign,
+        output2_ephemeral_pub_x,
+        output2_encrypted_amount_with_sign
     );
 }
 
@@ -170,6 +191,12 @@ fn test_spend_split_amount_mismatch() {
     }
     let merkle_root = current;
 
+    // Stealth output data
+    let output1_ephemeral_pub_x: Field = 111;
+    let output1_encrypted_amount_with_sign: Field = 222;
+    let output2_ephemeral_pub_x: Field = 333;
+    let output2_encrypted_amount_with_sign: Field = 444;
+
     // This should FAIL due to amount mismatch
     main(
         priv_key,
@@ -185,7 +212,11 @@ fn test_spend_split_amount_mismatch() {
         merkle_root,
         nullifier_hash,
         output_commitment1,
-        output_commitment2
+        output_commitment2,
+        output1_ephemeral_pub_x,
+        output1_encrypted_amount_with_sign,
+        output2_ephemeral_pub_x,
+        output2_encrypted_amount_with_sign
     );
 }
 
@@ -222,6 +253,12 @@ fn test_spend_split_duplicate_output_keys() {
     }
     let merkle_root = current;
 
+    // Stealth output data
+    let output1_ephemeral_pub_x: Field = 555;
+    let output1_encrypted_amount_with_sign: Field = 666;
+    let output2_ephemeral_pub_x: Field = 777;
+    let output2_encrypted_amount_with_sign: Field = 888;
+
     // This should FAIL due to duplicate output public keys
     main(
         priv_key,
@@ -237,7 +274,11 @@ fn test_spend_split_duplicate_output_keys() {
         merkle_root,
         nullifier_hash,
         output_commitment1,
-        output_commitment2
+        output_commitment2,
+        output1_ephemeral_pub_x,
+        output1_encrypted_amount_with_sign,
+        output2_ephemeral_pub_x,
+        output2_encrypted_amount_with_sign
     );
 }
 
@@ -274,6 +315,12 @@ fn test_spend_split_unequal_amounts() {
     }
     let merkle_root = current;
 
+    // Stealth output data
+    let output1_ephemeral_pub_x: Field = 1111;
+    let output1_encrypted_amount_with_sign: Field = 2222;
+    let output2_ephemeral_pub_x: Field = 3333;
+    let output2_encrypted_amount_with_sign: Field = 4444;
+
     main(
         priv_key,
         pub_key_x,
@@ -288,7 +335,11 @@ fn test_spend_split_unequal_amounts() {
         merkle_root,
         nullifier_hash,
         output_commitment1,
-        output_commitment2
+        output_commitment2,
+        output1_ephemeral_pub_x,
+        output1_encrypted_amount_with_sign,
+        output2_ephemeral_pub_x,
+        output2_encrypted_amount_with_sign
     );
 }
 
@@ -325,6 +376,12 @@ fn test_spend_split_zero_amount() {
     }
     let merkle_root = current;
 
+    // Stealth output data
+    let output1_ephemeral_pub_x: Field = 5555;
+    let output1_encrypted_amount_with_sign: Field = 6666;
+    let output2_ephemeral_pub_x: Field = 7777;
+    let output2_encrypted_amount_with_sign: Field = 8888;
+
     // This should FAIL due to zero amount
     main(
         priv_key,
@@ -340,6 +397,10 @@ fn test_spend_split_zero_amount() {
         merkle_root,
         nullifier_hash,
         output_commitment1,
-        output_commitment2
+        output_commitment2,
+        output1_ephemeral_pub_x,
+        output1_encrypted_amount_with_sign,
+        output2_ephemeral_pub_x,
+        output2_encrypted_amount_with_sign
     );
 }
