@@ -81,14 +81,28 @@ export interface SplitInstructionOptions {
   outputCommitment2: Uint8Array;
   /** VK hash */
   vkHash: Uint8Array;
-  /** Grumpkin ephemeral pubkey for first output stealth announcement (33 bytes compressed) */
-  ephemeralPub1: Uint8Array;
-  /** XOR encrypted first output amount (8 bytes) */
-  encryptedAmount1: Uint8Array;
-  /** Grumpkin ephemeral pubkey for second output stealth announcement (33 bytes compressed) */
-  ephemeralPub2: Uint8Array;
-  /** XOR encrypted second output amount (8 bytes) */
-  encryptedAmount2: Uint8Array;
+  /**
+   * Ephemeral pubkey x-coordinate for first output stealth announcement (32 bytes)
+   * This is a circuit public input - proof commits to this value.
+   */
+  output1EphemeralPubX: Uint8Array;
+  /**
+   * Packed encrypted amount with y_sign for first output (32 bytes)
+   * bits 0-63: XOR encrypted amount, bit 64: y-coordinate sign bit
+   * This is a circuit public input - proof commits to this value.
+   */
+  output1EncryptedAmountWithSign: Uint8Array;
+  /**
+   * Ephemeral pubkey x-coordinate for second output stealth announcement (32 bytes)
+   * This is a circuit public input - proof commits to this value.
+   */
+  output2EphemeralPubX: Uint8Array;
+  /**
+   * Packed encrypted amount with y_sign for second output (32 bytes)
+   * bits 0-63: XOR encrypted amount, bit 64: y-coordinate sign bit
+   * This is a circuit public input - proof commits to this value.
+   */
+  output2EncryptedAmountWithSign: Uint8Array;
   /** Account addresses */
   accounts: {
     poolState: Address;
@@ -122,10 +136,17 @@ export interface SpendPartialPublicInstructionOptions {
   recipient: Address;
   /** VK hash */
   vkHash: Uint8Array;
-  /** Grumpkin ephemeral pubkey for change output stealth announcement (33 bytes compressed) */
-  ephemeralPubChange: Uint8Array;
-  /** XOR encrypted change amount (8 bytes) */
-  encryptedAmountChange: Uint8Array;
+  /**
+   * Ephemeral pubkey x-coordinate for change stealth announcement (32 bytes)
+   * This is a circuit public input - proof commits to this value.
+   */
+  changeEphemeralPubX: Uint8Array;
+  /**
+   * Packed encrypted amount with y_sign (32 bytes)
+   * bits 0-63: XOR encrypted amount, bit 64: y-coordinate sign bit
+   * This is a circuit public input - proof commits to this value.
+   */
+  changeEncryptedAmountWithSign: Uint8Array;
   /** Account addresses */
   accounts: {
     poolState: Address;
@@ -509,10 +530,10 @@ export function buildClaimInstruction(options: ClaimInstructionOptions): Instruc
  * - output_commitment_1: [u8; 32]
  * - output_commitment_2: [u8; 32]
  * - vk_hash: [u8; 32]
- * - ephemeral_pub_1: [u8; 33]
- * - encrypted_amount_1: [u8; 8]
- * - ephemeral_pub_2: [u8; 33]
- * - encrypted_amount_2: [u8; 8]
+ * - output1_ephemeral_pub_x: [u8; 32]
+ * - output1_encrypted_amount_with_sign: [u8; 32]
+ * - output2_ephemeral_pub_x: [u8; 32]
+ * - output2_encrypted_amount_with_sign: [u8; 32]
  */
 export function buildSplitInstructionData(options: {
   proofSource: ProofSource;
@@ -522,20 +543,20 @@ export function buildSplitInstructionData(options: {
   outputCommitment1: Uint8Array;
   outputCommitment2: Uint8Array;
   vkHash: Uint8Array;
-  ephemeralPub1: Uint8Array;
-  encryptedAmount1: Uint8Array;
-  ephemeralPub2: Uint8Array;
-  encryptedAmount2: Uint8Array;
+  output1EphemeralPubX: Uint8Array;
+  output1EncryptedAmountWithSign: Uint8Array;
+  output2EphemeralPubX: Uint8Array;
+  output2EncryptedAmountWithSign: Uint8Array;
 }): Uint8Array {
-  const { proofSource, proofBytes, root, nullifierHash, outputCommitment1, outputCommitment2, vkHash, ephemeralPub1, encryptedAmount1, ephemeralPub2, encryptedAmount2 } = options;
+  const { proofSource, proofBytes, root, nullifierHash, outputCommitment1, outputCommitment2, vkHash, output1EphemeralPubX, output1EncryptedAmountWithSign, output2EphemeralPubX, output2EncryptedAmountWithSign } = options;
 
   if (proofSource === "inline") {
     if (!proofBytes) {
       throw new Error("proofBytes required for inline mode");
     }
 
-    // Inline format: discriminator(1) + proof_source(1) + proof_len(4) + proof + root(32) + nullifier(32) + out1(32) + out2(32) + vk_hash(32) + ephemeral_pub_1(33) + encrypted_amount_1(8) + ephemeral_pub_2(33) + encrypted_amount_2(8)
-    const totalSize = 1 + 1 + 4 + proofBytes.length + 32 + 32 + 32 + 32 + 32 + 33 + 8 + 33 + 8;
+    // Inline format: discriminator(1) + proof_source(1) + proof_len(4) + proof + root(32) + nullifier(32) + out1(32) + out2(32) + vk_hash(32) + output1_ephemeral_pub_x(32) + output1_encrypted_amount_with_sign(32) + output2_ephemeral_pub_x(32) + output2_encrypted_amount_with_sign(32)
+    const totalSize = 1 + 1 + 4 + proofBytes.length + 32 + 32 + 32 + 32 + 32 + 32 + 32 + 32 + 32;
     const data = new Uint8Array(totalSize);
     const view = new DataView(data.buffer);
 
@@ -575,25 +596,25 @@ export function buildSplitInstructionData(options: {
     data.set(vkHash, offset);
     offset += 32;
 
-    // Ephemeral pub 1 (33 bytes)
-    data.set(ephemeralPub1, offset);
-    offset += 33;
+    // Output 1 ephemeral pub x (32 bytes)
+    data.set(output1EphemeralPubX, offset);
+    offset += 32;
 
-    // Encrypted amount 1 (8 bytes)
-    data.set(encryptedAmount1, offset);
-    offset += 8;
+    // Output 1 encrypted amount with sign (32 bytes)
+    data.set(output1EncryptedAmountWithSign, offset);
+    offset += 32;
 
-    // Ephemeral pub 2 (33 bytes)
-    data.set(ephemeralPub2, offset);
-    offset += 33;
+    // Output 2 ephemeral pub x (32 bytes)
+    data.set(output2EphemeralPubX, offset);
+    offset += 32;
 
-    // Encrypted amount 2 (8 bytes)
-    data.set(encryptedAmount2, offset);
+    // Output 2 encrypted amount with sign (32 bytes)
+    data.set(output2EncryptedAmountWithSign, offset);
 
     return data;
   } else {
-    // Buffer format: discriminator(1) + proof_source(1) + root(32) + nullifier(32) + out1(32) + out2(32) + vk_hash(32) + ephemeral_pub_1(33) + encrypted_amount_1(8) + ephemeral_pub_2(33) + encrypted_amount_2(8)
-    const totalSize = 1 + 1 + 32 + 32 + 32 + 32 + 32 + 33 + 8 + 33 + 8;
+    // Buffer format: discriminator(1) + proof_source(1) + root(32) + nullifier(32) + out1(32) + out2(32) + vk_hash(32) + output1_ephemeral_pub_x(32) + output1_encrypted_amount_with_sign(32) + output2_ephemeral_pub_x(32) + output2_encrypted_amount_with_sign(32)
+    const totalSize = 1 + 1 + 32 + 32 + 32 + 32 + 32 + 32 + 32 + 32 + 32;
     const data = new Uint8Array(totalSize);
 
     let offset = 0;
@@ -624,20 +645,20 @@ export function buildSplitInstructionData(options: {
     data.set(vkHash, offset);
     offset += 32;
 
-    // Ephemeral pub 1 (33 bytes)
-    data.set(ephemeralPub1, offset);
-    offset += 33;
+    // Output 1 ephemeral pub x (32 bytes)
+    data.set(output1EphemeralPubX, offset);
+    offset += 32;
 
-    // Encrypted amount 1 (8 bytes)
-    data.set(encryptedAmount1, offset);
-    offset += 8;
+    // Output 1 encrypted amount with sign (32 bytes)
+    data.set(output1EncryptedAmountWithSign, offset);
+    offset += 32;
 
-    // Ephemeral pub 2 (33 bytes)
-    data.set(ephemeralPub2, offset);
-    offset += 33;
+    // Output 2 ephemeral pub x (32 bytes)
+    data.set(output2EphemeralPubX, offset);
+    offset += 32;
 
-    // Encrypted amount 2 (8 bytes)
-    data.set(encryptedAmount2, offset);
+    // Output 2 encrypted amount with sign (32 bytes)
+    data.set(output2EncryptedAmountWithSign, offset);
 
     return data;
   }
@@ -658,10 +679,10 @@ export function buildSplitInstruction(options: SplitInstructionOptions): Instruc
     outputCommitment1: options.outputCommitment1,
     outputCommitment2: options.outputCommitment2,
     vkHash: options.vkHash,
-    ephemeralPub1: options.ephemeralPub1,
-    encryptedAmount1: options.encryptedAmount1,
-    ephemeralPub2: options.ephemeralPub2,
-    encryptedAmount2: options.encryptedAmount2,
+    output1EphemeralPubX: options.output1EphemeralPubX,
+    output1EncryptedAmountWithSign: options.output1EncryptedAmountWithSign,
+    output2EphemeralPubX: options.output2EphemeralPubX,
+    output2EncryptedAmountWithSign: options.output2EncryptedAmountWithSign,
   });
 
   // Build accounts list (updated to include stealth announcement accounts)
@@ -713,7 +734,7 @@ export function buildSplitInstruction(options: SplitInstructionOptions): Instruc
  * Contract format (buffer):
  *   discriminator(1) + proof_source(1) + root(32) + nullifier(32) +
  *   public_amount(8) + change_commitment(32) + recipient(32) + vk_hash(32) +
- *   ephemeral_pub_change(33) + encrypted_amount_change(8)
+ *   change_ephemeral_pub_x(32) + change_encrypted_amount_with_sign(32)
  */
 export function buildSpendPartialPublicInstructionData(options: {
   proofSource: ProofSource;
@@ -724,10 +745,10 @@ export function buildSpendPartialPublicInstructionData(options: {
   changeCommitment: Uint8Array;
   recipient: Address;
   vkHash: Uint8Array;
-  ephemeralPubChange: Uint8Array;
-  encryptedAmountChange: Uint8Array;
+  changeEphemeralPubX: Uint8Array;
+  changeEncryptedAmountWithSign: Uint8Array;
 }): Uint8Array {
-  const { proofSource, proofBytes, root, nullifierHash, publicAmountSats, changeCommitment, recipient, vkHash, ephemeralPubChange, encryptedAmountChange } = options;
+  const { proofSource, proofBytes, root, nullifierHash, publicAmountSats, changeCommitment, recipient, vkHash, changeEphemeralPubX, changeEncryptedAmountWithSign } = options;
   const recipientBytes = addressToBytes(recipient);
 
   if (proofSource === "inline") {
@@ -736,8 +757,8 @@ export function buildSpendPartialPublicInstructionData(options: {
     }
 
     // Inline mode: discriminator(1) + proof_source(1) + proof_len(4) + proof + root(32) + nullifier(32) +
-    // public_amount(8) + change_commitment(32) + recipient(32) + vk_hash(32) + ephemeral_pub_change(33) + encrypted_amount_change(8)
-    const totalSize = 1 + 1 + 4 + proofBytes.length + 32 + 32 + 8 + 32 + 32 + 32 + 33 + 8;
+    // public_amount(8) + change_commitment(32) + recipient(32) + vk_hash(32) + change_ephemeral_pub_x(32) + change_encrypted_amount_with_sign(32)
+    const totalSize = 1 + 1 + 4 + proofBytes.length + 32 + 32 + 8 + 32 + 32 + 32 + 32 + 32;
     const data = new Uint8Array(totalSize);
     const view = new DataView(data.buffer);
 
@@ -760,15 +781,15 @@ export function buildSpendPartialPublicInstructionData(options: {
     offset += 32;
     data.set(vkHash, offset);
     offset += 32;
-    data.set(ephemeralPubChange, offset);
-    offset += 33;
-    data.set(encryptedAmountChange, offset);
+    data.set(changeEphemeralPubX, offset);
+    offset += 32;
+    data.set(changeEncryptedAmountWithSign, offset);
 
     return data;
   } else {
     // Buffer mode: discriminator(1) + proof_source(1) + root(32) + nullifier(32) +
-    // public_amount(8) + change_commitment(32) + recipient(32) + vk_hash(32) + ephemeral_pub_change(33) + encrypted_amount_change(8)
-    const totalSize = 1 + 1 + 32 + 32 + 8 + 32 + 32 + 32 + 33 + 8;
+    // public_amount(8) + change_commitment(32) + recipient(32) + vk_hash(32) + change_ephemeral_pub_x(32) + change_encrypted_amount_with_sign(32)
+    const totalSize = 1 + 1 + 32 + 32 + 8 + 32 + 32 + 32 + 32 + 32;
     const data = new Uint8Array(totalSize);
     const view = new DataView(data.buffer);
 
@@ -787,9 +808,9 @@ export function buildSpendPartialPublicInstructionData(options: {
     offset += 32;
     data.set(vkHash, offset);
     offset += 32;
-    data.set(ephemeralPubChange, offset);
-    offset += 33;
-    data.set(encryptedAmountChange, offset);
+    data.set(changeEphemeralPubX, offset);
+    offset += 32;
+    data.set(changeEncryptedAmountWithSign, offset);
 
     return data;
   }
@@ -810,8 +831,8 @@ export function buildSpendPartialPublicInstruction(options: SpendPartialPublicIn
     changeCommitment: options.changeCommitment,
     recipient: options.recipient,
     vkHash: options.vkHash,
-    ephemeralPubChange: options.ephemeralPubChange,
-    encryptedAmountChange: options.encryptedAmountChange,
+    changeEphemeralPubX: options.changeEphemeralPubX,
+    changeEncryptedAmountWithSign: options.changeEncryptedAmountWithSign,
   });
 
   // Build accounts list (updated to include stealth announcement account for change)
