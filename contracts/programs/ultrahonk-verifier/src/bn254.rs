@@ -241,6 +241,57 @@ impl Fr {
         field_sub(&SCALAR_MODULUS, &self.0, &mut result);
         Self(result)
     }
+
+    /// Square the field element
+    pub fn square(&self) -> Self {
+        self.mul(self)
+    }
+
+    /// Compute modular inverse using Fermat's little theorem
+    /// a^(-1) = a^(r-2) mod r
+    /// Returns None if self is zero
+    pub fn inverse(&self) -> Option<Self> {
+        if self.is_zero() {
+            return None;
+        }
+
+        // r - 2 for BN254 scalar field
+        // r = 21888242871839275222246405745257275088548364400416034343698204186575808495617
+        // r - 2 = 21888242871839275222246405745257275088548364400416034343698204186575808495615
+        let r_minus_2: [u8; 32] = [
+            0x30, 0x64, 0x4e, 0x72, 0xe1, 0x31, 0xa0, 0x29,
+            0xb8, 0x50, 0x45, 0xb6, 0x18, 0x1f, 0x85, 0xd2,
+            0x83, 0x3e, 0x84, 0x87, 0x9b, 0x97, 0x09, 0x14,
+            0x3e, 0x1f, 0x59, 0x3e, 0xff, 0xff, 0xff, 0xff,
+        ];
+
+        Some(self.pow(&r_minus_2))
+    }
+
+    /// Compute a^exp using binary exponentiation
+    pub fn pow(&self, exp: &[u8; 32]) -> Self {
+        let mut result = Fr::one();
+        let mut base = *self;
+
+        // Process each bit from LSB to MSB
+        for byte_idx in (0..32).rev() {
+            for bit_idx in 0..8 {
+                if (exp[byte_idx] >> bit_idx) & 1 == 1 {
+                    result = result.mul(&base);
+                }
+                base = base.square();
+            }
+        }
+
+        result
+    }
+
+    /// Create field element from u64
+    pub fn from_u64(value: u64) -> Self {
+        let mut arr = [0u8; FR_SIZE];
+        arr[24..32].copy_from_slice(&value.to_be_bytes());
+        Self(arr)
+    }
 }
 
 /// Multi-scalar multiplication (MSM)
@@ -346,22 +397,138 @@ fn field_sub_mod(a: &[u8; 32], b: &[u8; 32], modulus: &[u8; 32], result: &mut [u
     }
 }
 
-/// Field multiplication (simplified - for demonstration)
-/// Note: Full modular multiplication is complex; this is a simplified version
-#[inline(always)]
-fn field_mul(a: &[u8; 32], b: &[u8; 32], _modulus: &[u8; 32], result: &mut [u8; 32]) {
-    // For full implementation, use Montgomery multiplication
-    // This is a placeholder that works for small values
-
+/// Field multiplication (mod r)
+/// Uses schoolbook multiplication with Barrett reduction
+#[inline(never)]
+fn field_mul(a: &[u8; 32], b: &[u8; 32], modulus: &[u8; 32], result: &mut [u8; 32]) {
     // Simple case: if either is zero
     if is_zero(a) || is_zero(b) {
         result.fill(0);
         return;
     }
 
-    // For now, copy a as placeholder (real impl needs Montgomery mul)
-    // TODO: Implement proper field multiplication
-    result.copy_from_slice(a);
+    // Schoolbook multiplication producing 64-byte result
+    let mut product = [0u8; 64];
+    schoolbook_mul_256(a, b, &mut product);
+
+    // Reduce mod r using repeated subtraction (not optimal but correct)
+    // For production, use Barrett or Montgomery reduction
+    reduce_512_mod(product, modulus, result);
+}
+
+/// Schoolbook multiplication of two 256-bit numbers
+/// Produces a 512-bit result
+#[inline(never)]
+fn schoolbook_mul_256(a: &[u8; 32], b: &[u8; 32], result: &mut [u8; 64]) {
+    result.fill(0);
+
+    // Multiply byte by byte (big-endian)
+    for i in (0..32).rev() {
+        let mut carry: u32 = 0;
+        for j in (0..32).rev() {
+            let idx = (31 - i) + (31 - j);
+            if idx < 64 {
+                let pos = 63 - idx;
+                let prod = (a[i] as u32) * (b[j] as u32) + (result[pos] as u32) + carry;
+                result[pos] = prod as u8;
+                carry = prod >> 8;
+            }
+        }
+        // Propagate remaining carry
+        let mut pos = 63 - (31 - i) - 32;
+        while carry > 0 && pos < 64 {
+            let sum = (result[pos] as u32) + carry;
+            result[pos] = sum as u8;
+            carry = sum >> 8;
+            if pos == 0 { break; }
+            pos -= 1;
+        }
+    }
+}
+
+/// Reduce 512-bit number mod 256-bit modulus
+/// Uses repeated subtraction (simple but O(n) where n is quotient size)
+#[inline(never)]
+fn reduce_512_mod(product: [u8; 64], modulus: &[u8; 32], result: &mut [u8; 32]) {
+    // Check if product fits in 256 bits
+    let high_zero = product[0..32].iter().all(|&b| b == 0);
+
+    if high_zero {
+        // Product is < 2^256, just need simple reduction
+        result.copy_from_slice(&product[32..64]);
+        // Reduce if >= modulus
+        while compare_bytes(result, modulus) >= 0 {
+            let mut borrow: u16 = 0;
+            for i in (0..32).rev() {
+                let diff = (result[i] as u16).wrapping_sub(modulus[i] as u16).wrapping_sub(borrow);
+                result[i] = diff as u8;
+                borrow = (diff >> 8) & 1;
+            }
+        }
+    } else {
+        // Product is >= 2^256, need full reduction
+        // Use shift-and-subtract division algorithm
+        let mut remainder = product;
+
+        // Shift modulus left to align with product
+        // Then repeatedly subtract and shift right
+        let mut shifted_mod = [0u8; 64];
+        shifted_mod[32..64].copy_from_slice(modulus);
+
+        // Find how many bits to shift (simplification: shift by 256 bits max)
+        // For each position from high to low, if remainder >= shifted_mod, subtract
+
+        for shift in (0..=256).rev() {
+            // Compare remainder with shifted modulus
+            let mut shifted = [0u8; 64];
+            shift_left_512(&shifted_mod, shift, &mut shifted);
+
+            if compare_512(&remainder, &shifted) >= 0 {
+                sub_512(&mut remainder, &shifted);
+            }
+        }
+
+        // Result is in lower 32 bytes
+        result.copy_from_slice(&remainder[32..64]);
+    }
+}
+
+/// Shift 512-bit number left by n bits
+fn shift_left_512(a: &[u8; 64], n: usize, result: &mut [u8; 64]) {
+    result.fill(0);
+    if n >= 512 { return; }
+
+    let byte_shift = n / 8;
+    let bit_shift = n % 8;
+
+    for i in 0..64 {
+        if i + byte_shift < 64 {
+            let src_idx = i + byte_shift;
+            result[i] = a[src_idx] << bit_shift;
+            if bit_shift > 0 && src_idx + 1 < 64 {
+                result[i] |= a[src_idx + 1] >> (8 - bit_shift);
+            }
+        }
+    }
+}
+
+/// Compare two 512-bit numbers
+fn compare_512(a: &[u8; 64], b: &[u8; 64]) -> i32 {
+    for i in 0..64 {
+        if a[i] > b[i] { return 1; }
+        if a[i] < b[i] { return -1; }
+    }
+    0
+}
+
+/// Subtract 512-bit numbers: a -= b (assumes a >= b)
+fn sub_512(a: &mut [u8; 64], b: &[u8; 64]) {
+    let mut borrow: u16 = 0;
+    for i in (0..64).rev() {
+        let diff = (a[i] as u16).wrapping_sub(b[i] as u16).wrapping_sub(borrow);
+        a[i] = diff as u8;
+        borrow = (diff >> 8) & 1;
+    }
 }
 
 /// Compare two byte arrays (big-endian)

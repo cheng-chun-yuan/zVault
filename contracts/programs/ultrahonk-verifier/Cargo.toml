@@ -17,6 +17,7 @@ devnet = []
 [dependencies]
 pinocchio = "0.9"
 solana-bn254 = "~2.1"
+solana-nostd-keccak = "0.1"
 
 [dev-dependencies]
 solana-sdk = "2.1"

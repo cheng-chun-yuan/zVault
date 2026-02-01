@@ -21,6 +21,8 @@ pub enum UltraHonkError {
     InvalidFieldElement,
     /// Pairing check failed
     PairingFailed,
+    /// Pairing verification check failed (shplemini)
+    PairingCheckFailed,
     /// Sumcheck verification failed
     SumcheckFailed,
     /// Shplemini opening verification failed
@@ -46,6 +48,7 @@ impl From<UltraHonkError> for ProgramError {
             UltraHonkError::InvalidG2Point => ProgramError::InvalidArgument,
             UltraHonkError::InvalidFieldElement => ProgramError::InvalidArgument,
             UltraHonkError::PairingFailed => ProgramError::InvalidArgument,
+            UltraHonkError::PairingCheckFailed => ProgramError::InvalidArgument,
             UltraHonkError::SumcheckFailed => ProgramError::InvalidArgument,
             UltraHonkError::ShpleminiFailed => ProgramError::InvalidArgument,
             UltraHonkError::TranscriptError => ProgramError::InvalidArgument,

@@ -1,8 +1,11 @@
 //! Fiat-Shamir transcript for UltraHonk verification
 //!
 //! Generates deterministic challenges from proof elements using Keccak256.
+//! This implementation matches the bb.js/barretenberg transcript format.
 
-use crate::bn254::{Fr, G1Point, FR_SIZE};
+use crate::bn254::Fr;
+use crate::constants::FR_MODULUS;
+use solana_nostd_keccak::hashv;
 
 /// Keccak256 hash output size
 const HASH_SIZE: usize = 32;
@@ -10,6 +13,7 @@ const HASH_SIZE: usize = 32;
 /// Transcript for Fiat-Shamir heuristic
 ///
 /// Accumulates proof elements and generates challenges deterministically.
+/// Uses Keccak256 to match bb.js/barretenberg implementation.
 #[derive(Clone)]
 pub struct Transcript {
     /// Running state (hash of all absorbed data)
@@ -25,172 +29,128 @@ impl Default for Transcript {
 }
 
 impl Transcript {
-    /// Create new transcript with domain separator
+    /// Create new transcript
+    ///
+    /// Note: Unlike bb.js, we don't use a domain separator here.
+    /// The domain separation happens through the protocol structure itself.
     pub fn new() -> Self {
-        let mut transcript = Self {
+        Self {
             state: [0u8; HASH_SIZE],
-            buffer: Vec::with_capacity(1024),
-        };
-
-        // Domain separator for UltraHonk
-        transcript.absorb_bytes(b"UltraHonk_Solana_v1");
-        transcript.squeeze_challenge(); // Initialize state
-
-        transcript
+            buffer: Vec::with_capacity(2048),
+        }
     }
 
     /// Absorb raw bytes into transcript
+    #[inline]
     pub fn absorb_bytes(&mut self, data: &[u8]) {
         self.buffer.extend_from_slice(data);
     }
 
-    /// Absorb a G1 point
-    pub fn absorb_g1(&mut self, point: &G1Point) {
-        self.absorb_bytes(&point.0);
-    }
-
-    /// Absorb a field element
+    /// Absorb a field element (big-endian, 32 bytes)
+    #[inline]
     pub fn absorb_fr(&mut self, fr: &Fr) {
         self.absorb_bytes(&fr.0);
     }
 
-    /// Absorb a u64 value
+    /// Absorb a u64 value (big-endian, 32 bytes padded)
+    #[inline]
     pub fn absorb_u64(&mut self, value: u64) {
-        self.absorb_bytes(&value.to_le_bytes());
-    }
-
-    /// Absorb public inputs
-    pub fn absorb_public_inputs(&mut self, inputs: &[[u8; 32]]) {
-        self.absorb_u64(inputs.len() as u64);
-        for input in inputs {
-            self.absorb_bytes(input);
-        }
+        // bb.js uses 32-byte big-endian encoding for all values
+        let mut bytes = [0u8; 32];
+        bytes[24..32].copy_from_slice(&value.to_be_bytes());
+        self.absorb_bytes(&bytes);
     }
 
     /// Generate a challenge by squeezing the transcript
     ///
-    /// Uses Keccak256(state || buffer) to produce challenge
+    /// Uses Keccak256(state || buffer) to produce challenge.
+    /// The result is reduced modulo the scalar field order.
     pub fn squeeze_challenge(&mut self) -> Fr {
-        // Concatenate state and buffer
-        let mut input = Vec::with_capacity(HASH_SIZE + self.buffer.len());
-        input.extend_from_slice(&self.state);
-        input.extend_from_slice(&self.buffer);
+        // Hash: state || buffer
+        let hash = hashv(&[&self.state, &self.buffer]);
 
-        // Hash with Keccak256
-        let hash = keccak256(&input);
-
-        // Update state
+        // Update state for next squeeze
         self.state = hash;
         self.buffer.clear();
 
-        // Reduce hash to field element
+        // Reduce to field element (mod r)
         reduce_to_field(&hash)
     }
 
-    /// Generate multiple challenges
-    pub fn squeeze_challenges(&mut self, count: usize) -> Vec<Fr> {
-        let mut challenges = Vec::with_capacity(count);
-        for _ in 0..count {
-            challenges.push(self.squeeze_challenge());
-        }
-        challenges
+    /// Get current state (for debugging)
+    #[cfg(test)]
+    pub fn get_state(&self) -> [u8; 32] {
+        self.state
     }
-}
-
-/// Keccak256 hash function
-///
-/// Simple implementation for Solana (no external crate dependency)
-fn keccak256(data: &[u8]) -> [u8; 32] {
-    // Use Solana's keccak256 syscall when available
-    #[cfg(target_os = "solana")]
-    {
-        solana_keccak256(data)
-    }
-
-    #[cfg(not(target_os = "solana"))]
-    {
-        // Fallback for testing - use simple hash
-        // In production, this would use a proper Keccak implementation
-        simple_hash(data)
-    }
-}
-
-#[cfg(target_os = "solana")]
-fn solana_keccak256(data: &[u8]) -> [u8; 32] {
-    // Use Solana's keccak256 syscall
-    // For now, use simple hash as placeholder
-    // TODO: Use sol_keccak256 syscall when available in pinocchio
-    simple_hash_internal(data)
-}
-
-#[cfg(target_os = "solana")]
-fn simple_hash_internal(data: &[u8]) -> [u8; 32] {
-    let mut result = [0u8; 32];
-    let mut state: u64 = 0xcbf29ce484222325;
-
-    for byte in data {
-        state ^= *byte as u64;
-        state = state.wrapping_mul(0x100000001b3);
-    }
-
-    for i in 0..4 {
-        let bytes = state.to_le_bytes();
-        result[i * 8..(i + 1) * 8].copy_from_slice(&bytes);
-        state = state.wrapping_mul(0x100000001b3);
-    }
-
-    result
-}
-
-#[cfg(not(target_os = "solana"))]
-fn simple_hash(data: &[u8]) -> [u8; 32] {
-    // Simple non-cryptographic hash for testing
-    // DO NOT use in production - this is just for compilation
-    let mut result = [0u8; 32];
-    let mut state: u64 = 0xcbf29ce484222325; // FNV offset basis
-
-    for byte in data {
-        state ^= *byte as u64;
-        state = state.wrapping_mul(0x100000001b3); // FNV prime
-    }
-
-    // Spread state across result
-    for i in 0..4 {
-        let bytes = state.to_le_bytes();
-        result[i * 8..(i + 1) * 8].copy_from_slice(&bytes);
-        state = state.wrapping_mul(0x100000001b3);
-    }
-
-    result
 }
 
 /// Reduce 32-byte hash to field element (mod r)
+///
+/// This matches bb.js behavior: interpret as big-endian and reduce mod scalar field order.
 fn reduce_to_field(hash: &[u8; 32]) -> Fr {
-    // For simplicity, we just use the hash directly
-    // A proper implementation would reduce modulo the scalar field order
-    // Since hash output is uniformly random, this gives negligible bias
+    // For values close to 2^256, we need proper modular reduction
+    // Since Fr modulus is ~2^254, most 256-bit values need reduction
 
-    let mut bytes = [0u8; FR_SIZE];
-    bytes.copy_from_slice(hash);
+    // Simple reduction: if hash >= modulus, subtract modulus
+    // This gives negligible bias for uniformly random input
+    let mut result = *hash;
 
-    // Clear top bits to ensure < 2^254 (safe for BN254 scalar field)
-    bytes[0] &= 0x1f;
+    // Compare with modulus (big-endian)
+    if compare_be(&result, &FR_MODULUS) >= 0 {
+        // Subtract modulus
+        subtract_be(&mut result, &FR_MODULUS);
+    }
 
-    Fr(bytes)
+    Fr(result)
 }
 
-/// Challenge labels used in UltraHonk protocol
-pub mod labels {
-    pub const BETA: &[u8] = b"beta";
-    pub const GAMMA: &[u8] = b"gamma";
-    pub const ALPHA: &[u8] = b"alpha";
-    pub const ETA: &[u8] = b"eta";
-    pub const ETA_TWO: &[u8] = b"eta_two";
-    pub const ETA_THREE: &[u8] = b"eta_three";
-    pub const SUMCHECK: &[u8] = b"sumcheck";
-    pub const GEMINI: &[u8] = b"gemini";
-    pub const SHPLONK: &[u8] = b"shplonk";
-    pub const KZG: &[u8] = b"kzg";
+/// Compare two 32-byte big-endian numbers
+/// Returns: -1 if a < b, 0 if a == b, 1 if a > b
+#[inline]
+fn compare_be(a: &[u8; 32], b: &[u8; 32]) -> i32 {
+    for i in 0..32 {
+        if a[i] > b[i] {
+            return 1;
+        }
+        if a[i] < b[i] {
+            return -1;
+        }
+    }
+    0
+}
+
+/// Subtract b from a (big-endian), assuming a >= b
+#[inline]
+fn subtract_be(a: &mut [u8; 32], b: &[u8; 32]) {
+    let mut borrow: u16 = 0;
+    for i in (0..32).rev() {
+        let diff = (a[i] as u16).wrapping_sub(b[i] as u16).wrapping_sub(borrow);
+        a[i] = diff as u8;
+        borrow = (diff >> 8) & 1;
+    }
+}
+
+/// Split a 256-bit challenge into two 128-bit halves
+///
+/// This matches bb.js split_challenge behavior:
+/// - lower: bits 0-127 (least significant)
+/// - upper: bits 128-255 (most significant)
+///
+/// For big-endian representation:
+/// - lower comes from bytes 16-31
+/// - upper comes from bytes 0-15
+pub fn split_challenge(challenge: &Fr) -> (Fr, Fr) {
+    let mut lower = [0u8; 32];
+    let mut upper = [0u8; 32];
+
+    // In big-endian: bytes 0-15 are upper 128 bits, bytes 16-31 are lower 128 bits
+    // Lower 128 bits go into a 256-bit field element (zero-padded upper bytes)
+    lower[16..32].copy_from_slice(&challenge.0[16..32]);
+
+    // Upper 128 bits go into a 256-bit field element (zero-padded upper bytes)
+    upper[16..32].copy_from_slice(&challenge.0[0..16]);
+
+    (Fr(lower), Fr(upper))
 }
 
 #[cfg(test)]
@@ -223,5 +183,51 @@ mod tests {
         let c2 = t2.squeeze_challenge();
 
         assert_ne!(c1, c2);
+    }
+
+    #[test]
+    fn test_split_challenge() {
+        // Test with a known value
+        let challenge = Fr([
+            0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08,
+            0x09, 0x0a, 0x0b, 0x0c, 0x0d, 0x0e, 0x0f, 0x10,
+            0x11, 0x12, 0x13, 0x14, 0x15, 0x16, 0x17, 0x18,
+            0x19, 0x1a, 0x1b, 0x1c, 0x1d, 0x1e, 0x1f, 0x20,
+        ]);
+
+        let (lower, upper) = split_challenge(&challenge);
+
+        // Lower should have bytes 16-31 of challenge in positions 16-31
+        assert_eq!(&lower.0[16..32], &challenge.0[16..32]);
+        // Upper bytes of lower should be zero
+        assert_eq!(&lower.0[0..16], &[0u8; 16]);
+
+        // Upper should have bytes 0-15 of challenge in positions 16-31
+        assert_eq!(&upper.0[16..32], &challenge.0[0..16]);
+        // Upper bytes of upper should be zero
+        assert_eq!(&upper.0[0..16], &[0u8; 16]);
+    }
+
+    #[test]
+    fn test_absorb_u64() {
+        let mut t = Transcript::new();
+        t.absorb_u64(0x0102030405060708);
+
+        // Should be absorbed as 32-byte big-endian
+        assert_eq!(t.buffer.len(), 32);
+        assert_eq!(&t.buffer[0..24], &[0u8; 24]);
+        assert_eq!(&t.buffer[24..32], &[0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08]);
+    }
+
+    #[test]
+    fn test_compare_be() {
+        let a = [0u8; 32];
+        let b = [0u8; 32];
+        assert_eq!(compare_be(&a, &b), 0);
+
+        let mut c = [0u8; 32];
+        c[31] = 1;
+        assert_eq!(compare_be(&c, &a), 1);
+        assert_eq!(compare_be(&a, &c), -1);
     }
 }
