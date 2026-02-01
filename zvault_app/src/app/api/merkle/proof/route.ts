@@ -5,6 +5,8 @@ import {
   getMerkleProofFromTree,
   DEVNET_CONFIG,
   initPoseidon,
+  parseCommitmentTreeData,
+  bytesToBigint,
 } from "@zvault/sdk";
 import { getHeliusConnection } from "@/lib/helius-server";
 
@@ -138,11 +140,30 @@ export async function GET(request: NextRequest) {
 
     console.log(`[Merkle Proof API] Found commitment at leaf index ${proof.leafIndex}`);
 
+    // CRITICAL: Fetch the actual on-chain root from the commitment tree account
+    // The locally computed root may differ from the on-chain root
+    const commitmentTreePda = new PublicKey(DEVNET_CONFIG.commitmentTreePda);
+    const treeAccountInfo = await connection.getAccountInfo(commitmentTreePda);
+
+    let onChainRoot: string;
+    if (treeAccountInfo) {
+      const treeState = parseCommitmentTreeData(new Uint8Array(treeAccountInfo.data));
+      onChainRoot = bytesToBigint(treeState.currentRoot).toString(16).padStart(64, "0");
+      console.log(`[Merkle Proof API] On-chain root: ${onChainRoot.slice(0, 16)}...`);
+      console.log(`[Merkle Proof API] Computed root: ${proof.root.toString(16).padStart(64, "0").slice(0, 16)}...`);
+      console.log(`[Merkle Proof API] Roots match: ${onChainRoot === proof.root.toString(16).padStart(64, "0")}`);
+    } else {
+      // Fallback to computed root if account fetch fails
+      console.warn("[Merkle Proof API] Could not fetch on-chain tree, using computed root");
+      onChainRoot = proof.root.toString(16).padStart(64, "0");
+    }
+
     return NextResponse.json({
       success: true,
       commitment: commitment,
       leafIndex: proof.leafIndex.toString(),
-      root: proof.root.toString(16).padStart(64, "0"),
+      root: onChainRoot,  // Use on-chain root, not computed root
+      computedRoot: proof.root.toString(16).padStart(64, "0"),  // Include computed for debugging
       siblings: proof.siblings.map((s) => s.toString(16).padStart(64, "0")),
       indices: proof.indices,
     });

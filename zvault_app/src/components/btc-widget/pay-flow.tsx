@@ -287,7 +287,10 @@ export function PayFlow({ initialMode, preselectedNote }: PayFlowProps) {
       // IMPORTANT: Ensure bigint types are preserved (might have been serialized to string/number)
       const scannedNote: ScannedNote = {
         amount: typeof selectedNote.amount === 'bigint' ? selectedNote.amount : BigInt(selectedNote.amount || 0),
-        ephemeralPub: selectedNote.ephemeralPub,
+        ephemeralPub: {
+          x: typeof selectedNote.ephemeralPub?.x === 'bigint' ? selectedNote.ephemeralPub.x : BigInt(selectedNote.ephemeralPub?.x || 0),
+          y: typeof selectedNote.ephemeralPub?.y === 'bigint' ? selectedNote.ephemeralPub.y : BigInt(selectedNote.ephemeralPub?.y || 0),
+        },
         stealthPub: {
           x: typeof selectedNote.stealthPub?.x === 'bigint' ? selectedNote.stealthPub.x : BigInt(selectedNote.stealthPub?.x || 0),
           y: typeof selectedNote.stealthPub?.y === 'bigint' ? selectedNote.stealthPub.y : BigInt(selectedNote.stealthPub?.y || 0),
@@ -298,6 +301,8 @@ export function PayFlow({ initialMode, preselectedNote }: PayFlowProps) {
 
       console.log("[Pay] === Scanned Note (normalized) ===");
       console.log("[Pay] amount:", scannedNote.amount.toString());
+      console.log("[Pay] ephemeralPub.x:", scannedNote.ephemeralPub.x.toString(16).slice(0, 20) + "...");
+      console.log("[Pay] ephemeralPub.y:", scannedNote.ephemeralPub.y.toString(16).slice(0, 20) + "...");
       console.log("[Pay] stealthPub.x:", scannedNote.stealthPub.x.toString(16).slice(0, 20) + "...");
       console.log("[Pay] stealthPub.y:", scannedNote.stealthPub.y.toString(16).slice(0, 20) + "...");
       console.log("[Pay] leafIndex:", scannedNote.leafIndex);
@@ -344,6 +349,26 @@ export function PayFlow({ initialMode, preselectedNote }: PayFlowProps) {
 
       // Final verification - the derived commitment MUST match the stored one
       const derivedCommitmentHex = commitmentFromDerivedKey.toString(16).padStart(64, "0");
+
+      // Log to server for debugging
+      try {
+        await fetch("/api/debug/commitment", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            source: "pay-flow",
+            stealthPrivKey: stealthPrivKey.toString(16).padStart(64, "0"),
+            derivedPubKeyX: derivedStealthPub.x.toString(16).padStart(64, "0"),
+            scannedPubKeyX: scannedNote.stealthPub.x.toString(16).padStart(64, "0"),
+            amount: scannedNote.amount.toString(),
+            derivedCommitment: derivedCommitmentHex,
+            storedCommitment: selectedNote.commitmentHex,
+            match: derivedCommitmentHex === selectedNote.commitmentHex.toLowerCase(),
+            leafIndex: selectedNote.leafIndex,
+          }),
+        }).catch(() => {}); // Ignore errors from debug endpoint
+      } catch {}
+
       if (derivedCommitmentHex !== selectedNote.commitmentHex.toLowerCase()) {
         console.error("[Pay] FATAL: Derived commitment doesn't match stored commitment!");
         console.error("[Pay] Stored commitment:", selectedNote.commitmentHex);
@@ -388,6 +413,7 @@ export function PayFlow({ initialMode, preselectedNote }: PayFlowProps) {
           publicAmount: BigInt(amountSats),
           changePubKeyX: verifiedPubKeyX,     // Change goes back to same key (derived value)
           recipient: recipientPubkey.toBytes(),
+          keys: keys!,                        // Pass keys for generating change stealth output
         });
 
         setProofStatus("Proof generated! Building transaction...");
@@ -418,6 +444,8 @@ export function PayFlow({ initialMode, preselectedNote }: PayFlowProps) {
           recipient: recipientPubkey,
           recipientTokenAccount,
           vkHash,
+          changeEphemeralPubX: bigintTo32Bytes(proofResult.changeEphemeralPubX),
+          changeEncryptedAmountWithSign: bigintTo32Bytes(proofResult.changeEncryptedAmountWithSign),
         });
 
         setProofStatus("Sending transaction...");
@@ -470,6 +498,8 @@ export function PayFlow({ initialMode, preselectedNote }: PayFlowProps) {
         }
 
         // Build transaction
+        // TODO: Add proper stealth output data when Split flow is fully implemented
+        const placeholderBytes = new Uint8Array(32);
         const tx = await buildSplitTransaction(connection, {
           userPubkey: publicKey,
           zkProof: proofResult.proof.proof,
@@ -478,6 +508,10 @@ export function PayFlow({ initialMode, preselectedNote }: PayFlowProps) {
           outputCommitment2: bigintTo32Bytes(proofResult.outputCommitment2),
           merkleRoot: bigintTo32Bytes(proofResult.merkleRoot),
           vkHash: splitVkHash,
+          output1EphemeralPubX: placeholderBytes,
+          output1EncryptedAmountWithSign: placeholderBytes,
+          output2EphemeralPubX: placeholderBytes,
+          output2EncryptedAmountWithSign: placeholderBytes,
         });
 
         setProofStatus("Sending transaction...");

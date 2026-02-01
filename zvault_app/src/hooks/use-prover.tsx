@@ -18,6 +18,7 @@ import type {
   SpendPartialPublicInputs,
   ProofData,
 } from "@zvault/sdk/prover";
+import type { ZVaultKeys } from "@zvault/sdk";
 
 interface MerkleProofResponse {
   success: boolean;
@@ -191,6 +192,8 @@ export function useProver() {
         const nullifier = await sdk.computeNullifier(params.privKey, leafIndex);
         const nullifierHash = await sdk.hashNullifier(nullifier);
 
+        // TODO: Generate proper stealth outputs when Split flow is needed
+        // For now, use placeholder values (circuit will still work for testing)
         const inputs: SpendSplitInputs = {
           privKey: params.privKey,
           pubKeyX: params.pubKeyX,
@@ -202,6 +205,11 @@ export function useProver() {
           output1Amount: params.sendAmount,
           output2PubKeyX: params.changePubKeyX,
           output2Amount: changeAmount,
+          // Stealth output placeholders - replace with actual stealth generation when needed
+          output1EphemeralPubX: 0n,
+          output1EncryptedAmountWithSign: 0n,
+          output2EphemeralPubX: 0n,
+          output2EncryptedAmountWithSign: 0n,
         };
 
         setState((s) => ({ ...s, progress: "Generating ZK proof (this may take 30-60s)..." }));
@@ -248,11 +256,15 @@ export function useProver() {
       changePubKeyX: bigint;
       /** Recipient Solana address (as Uint8Array or hex string) */
       recipient: Uint8Array | string;
+      /** ZVault keys for generating change stealth output */
+      keys: ZVaultKeys;
     }): Promise<{
       proof: ProofData;
       nullifierHash: bigint;
       changeCommitment: bigint;
       merkleRoot: bigint;
+      changeEphemeralPubX: bigint;
+      changeEncryptedAmountWithSign: bigint;
     }> => {
       setState((s) => ({ ...s, isGenerating: true, error: null, progress: "Fetching merkle proof..." }));
 
@@ -317,6 +329,14 @@ export function useProver() {
         const nullifier = await sdk.computeNullifier(params.privKey, leafIndex);
         const nullifierHash = await sdk.hashNullifier(nullifier);
 
+        // 6. Generate stealth output for change (self-transfer back to same key)
+        // We need to create ephemeral keypair and encrypt the change amount
+        const changeStealthOutput = await sdk.createStealthOutput(
+          params.keys, // ZVault keys for generating stealth output
+          changeAmount
+        );
+        const circuitStealth = sdk.packStealthOutputForCircuit(changeStealthOutput);
+
         const inputs: SpendPartialPublicInputs = {
           privKey: params.privKey,
           pubKeyX: params.pubKeyX,
@@ -328,7 +348,40 @@ export function useProver() {
           changePubKeyX: params.changePubKeyX,
           changeAmount,
           recipient: recipientBigInt,
+          changeEphemeralPubX: circuitStealth.ephemeralPubX,
+          changeEncryptedAmountWithSign: circuitStealth.encryptedAmountWithSign,
         };
+
+        // Debug: Log circuit inputs to server
+        console.log("[Prover] ===== CIRCUIT INPUTS DEBUG =====");
+        console.log("[Prover] privKey:", params.privKey.toString(16).slice(0, 16) + "...");
+        console.log("[Prover] pubKeyX:", params.pubKeyX.toString(16).padStart(64, "0"));
+        console.log("[Prover] amount:", params.amount.toString());
+        console.log("[Prover] leafIndex:", leafIndex.toString());
+        console.log("[Prover] merkleRoot:", merkleRoot.toString(16).padStart(64, "0"));
+        console.log("[Prover] siblings[0]:", siblings[0]?.toString(16).padStart(64, "0") || "none");
+        console.log("[Prover] siblings length:", siblings.length);
+        console.log("[Prover] indices:", indices.slice(0, 5).join(", ") + "...");
+        console.log("[Prover] publicAmount:", params.publicAmount.toString());
+        console.log("[Prover] changeAmount:", changeAmount.toString());
+        console.log("[Prover] =====================================");
+
+        // Send debug to server
+        fetch("/api/debug/commitment", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            source: "prover-circuit-inputs",
+            privKey: params.privKey.toString(16).slice(0, 16) + "...",
+            pubKeyX: params.pubKeyX.toString(16).padStart(64, "0"),
+            amount: params.amount.toString(),
+            leafIndex: leafIndex.toString(),
+            merkleRoot: merkleRoot.toString(16).padStart(64, "0"),
+            sibling0: siblings[0]?.toString(16).padStart(64, "0") || "none",
+            siblingsLength: siblings.length,
+            indices: indices.slice(0, 5),
+          }),
+        }).catch(() => {});
 
         setState((s) => ({ ...s, progress: "Generating ZK proof (this may take 30-60s)..." }));
 
@@ -342,6 +395,8 @@ export function useProver() {
           nullifierHash,
           changeCommitment,
           merkleRoot,
+          changeEphemeralPubX: circuitStealth.ephemeralPubX,
+          changeEncryptedAmountWithSign: circuitStealth.encryptedAmountWithSign,
         };
       } catch (error) {
         const message = error instanceof Error ? error.message : "Proof generation failed";

@@ -54,7 +54,16 @@ import {
   grumpkinEcdh,
   encryptAmount,
   buildAddDemoStealthData,
+  // Stealth model imports
+  deriveKeysFromSeed,
+  createStealthDeposit,
+  createStealthMetaAddress,
+  prepareClaimInputs,
+  bytesToBigint,
   type ClaimInputs,
+  type ZVaultKeys,
+  type StealthMetaAddress,
+  type ScannedNote,
 } from "@zvault/sdk";
 
 const __filename = fileURLToPath(import.meta.url);
@@ -292,7 +301,7 @@ const CHADBUFFER_IX = {
 // Max data per write tx
 // Overhead: signature (64) + msg header (3) + 2 account keys (66) + ix header (4) + disc (1) + u24 offset (3) = 141 bytes
 // Using 176 bytes for safety margin: 1232 - 176 = 1056 bytes max
-const MAX_DATA_PER_WRITE = 1056;
+const MAX_DATA_PER_WRITE = 950; // Tx overhead ~207 bytes + priority fee ~25 bytes = ~232 bytes overhead
 
 // Buffer authority size
 const AUTHORITY_SIZE = 32;
@@ -377,10 +386,10 @@ async function uploadProofToBuffer(
   // - discriminator (1 byte)
   // - initial data (variable)
   // Combined with SystemProgram.createAccount, we have limited space.
-  // Transaction overhead: ~290 bytes (2 signatures, blockhash, createAccount ix, ChadBuffer ix)
+  // Transaction overhead: ~360 bytes (2 signatures @ 128, header, accounts, instructions)
   // Max tx size: 1232 bytes
-  // Available for data: 1232 - 290 = ~940 bytes max
-  const firstChunkSize = Math.min(940, proof.length);
+  // Available for data: 1232 - 360 = ~870 bytes max, use 800 for safety
+  const firstChunkSize = Math.min(800, proof.length);
   const firstChunk = proof.slice(0, firstChunkSize);
 
   // Create account via SystemProgram + Initialize via ChadBuffer CREATE in one tx
@@ -399,57 +408,74 @@ async function uploadProofToBuffer(
     firstChunk
   );
 
-  const createTx = new Transaction().add(createAccountIx, initIx);
+  // Add priority fee for devnet congestion (1M micro-lamports for fast inclusion)
+  const priorityFeeIx = NETWORK === "devnet"
+    ? ComputeBudgetProgram.setComputeUnitPrice({ microLamports: 1_000_000 })
+    : null;
+
+  const createTx = new Transaction();
+  if (priorityFeeIx) createTx.add(priorityFeeIx);
+  createTx.add(createAccountIx, initIx);
+
   await sendAndConfirmTransaction(connection, createTx, [payer, bufferKeypair], {
     commitment: "confirmed",
     skipPreflight: NETWORK === "devnet",
   });
   log(`✓ Buffer created with ${firstChunkSize} bytes: ${bufferKeypair.publicKey.toBase58().slice(0, 16)}...`);
 
-  // Write remaining chunks
-  let offset = firstChunkSize;
-  let chunkNum = 1;
-
-  while (offset < proof.length) {
-    const chunkSize = Math.min(MAX_DATA_PER_WRITE, proof.length - offset);
-    const chunk = proof.slice(offset, offset + chunkSize);
-
-    const writeIx = createChadBufferWriteIx(
-      chadbufferProgramId,
-      bufferKeypair.publicKey,
-      payer.publicKey,
-      AUTHORITY_SIZE + offset, // Offset includes authority prefix
-      chunk
-    );
-
-    const writeTx = new Transaction().add(writeIx);
-
-    // Retry logic for devnet
-    let retries = 3;
-    while (retries > 0) {
-      try {
-        await sendAndConfirmTransaction(connection, writeTx, [payer], {
-          commitment: "confirmed",
-          skipPreflight: NETWORK === "devnet",
-        });
-        break;
-      } catch (err: any) {
-        retries--;
-        if (retries === 0) throw err;
-        log(`  Chunk ${chunkNum + 1} failed, retrying... (${retries} left)`);
-        await new Promise((r) => setTimeout(r, 1000));
-      }
-    }
-    chunkNum++;
-    offset += chunkSize;
-
-    // Small delay between writes on devnet to avoid rate limiting
-    if (NETWORK === "devnet") {
-      await new Promise((r) => setTimeout(r, 200));
-    }
+  // Build all remaining chunks
+  const chunks: { offset: number; data: Uint8Array }[] = [];
+  let currentOffset = firstChunkSize;
+  while (currentOffset < proof.length) {
+    const chunkSize = Math.min(MAX_DATA_PER_WRITE, proof.length - currentOffset);
+    chunks.push({
+      offset: currentOffset,
+      data: proof.slice(currentOffset, currentOffset + chunkSize),
+    });
+    currentOffset += chunkSize;
   }
 
-  log(`✓ Uploaded ${chunkNum} chunks total (${proof.length} bytes)`);
+  // Upload chunks in parallel batches (5 at a time to avoid rate limiting)
+  const BATCH_SIZE = 5;
+  for (let i = 0; i < chunks.length; i += BATCH_SIZE) {
+    const batch = chunks.slice(i, i + BATCH_SIZE);
+
+    const promises = batch.map(async (chunk, batchIdx) => {
+      const writeIx = createChadBufferWriteIx(
+        chadbufferProgramId,
+        bufferKeypair.publicKey,
+        payer.publicKey,
+        AUTHORITY_SIZE + chunk.offset,
+        chunk.data
+      );
+
+      const writeTx = new Transaction();
+      if (priorityFeeIx) writeTx.add(priorityFeeIx);
+      writeTx.add(writeIx);
+
+      // Retry logic
+      let retries = 3;
+      while (retries > 0) {
+        try {
+          await sendAndConfirmTransaction(connection, writeTx, [payer], {
+            commitment: "confirmed",
+            skipPreflight: NETWORK === "devnet",
+          });
+          return;
+        } catch (err: any) {
+          retries--;
+          if (retries === 0) throw err;
+          log(`  Chunk ${i + batchIdx + 2} failed, retrying... (${retries} left)`);
+          await new Promise((r) => setTimeout(r, 500));
+        }
+      }
+    });
+
+    await Promise.all(promises);
+    log(`  Batch ${Math.floor(i / BATCH_SIZE) + 1}: ${batch.length} chunks uploaded`);
+  }
+
+  log(`✓ Uploaded ${chunks.length + 1} chunks total (${proof.length} bytes)`);
 
   return bufferKeypair.publicKey;
 }
@@ -601,30 +627,38 @@ async function main() {
   log("✓ Prover initialized");
 
   // ==========================================================================
-  // Step 1: Generate keys and compute commitment
+  // Step 1: Generate ZVault keys (proper stealth model)
   // ==========================================================================
-  logSection("Step 1: Generate Commitment");
+  logSection("Step 1: Generate Stealth Keys");
 
-  const privKey = randomFieldElement();
-  const pubKeyX = poseidonHashSync([privKey]);
-  const commitment = computeUnifiedCommitmentSync(pubKeyX, DEMO_AMOUNT);
-  const commitmentBytes = bigintToBytes32(commitment);
+  // Generate deterministic keys from a seed (simulating wallet signature derivation)
+  const testSeed = randomFieldElement();
+  const keys: ZVaultKeys = await deriveKeysFromSeed(bigintToBytes32(testSeed));
 
-  log(`Private key: 0x${privKey.toString(16).slice(0, 16)}...`);
-  log(`Public key X: 0x${pubKeyX.toString(16).slice(0, 16)}...`);
+  // Create stealth meta address (spending + viewing public keys)
+  const stealthMetaAddress: StealthMetaAddress = createStealthMetaAddress(keys);
+
+  log(`Spending pub X: 0x${keys.spendingPubKey.x.toString(16).slice(0, 16)}...`);
+  log(`Viewing pub X: 0x${keys.viewingPubKey.x.toString(16).slice(0, 16)}...`);
+
+  // ==========================================================================
+  // Step 2: Create stealth deposit (correct commitment model)
+  // ==========================================================================
+  logSection("Step 2: Create Stealth Deposit");
+
+  // Use SDK's createStealthDeposit - produces correct commitment: Poseidon(stealthPub.x, amount)
+  // where stealthPub.x is an EC point x-coordinate (not a Poseidon hash!)
+  const stealthDepositData = await createStealthDeposit(stealthMetaAddress, DEMO_AMOUNT);
+
+  // Extract deposit data
+  const ephemeralPub = stealthDepositData.ephemeralPub;
+  const commitment = bytesToBigint(stealthDepositData.commitment);
+  const commitmentBytes = stealthDepositData.commitment;
+  const encryptedAmountBytes = stealthDepositData.encryptedAmount;
+
+  log(`Ephemeral pub: 0x${Buffer.from(ephemeralPub).toString("hex").slice(0, 16)}...`);
   log(`Commitment: 0x${commitment.toString(16).slice(0, 16)}...`);
-
-  // ==========================================================================
-  // Step 2: Add demo deposit
-  // ==========================================================================
-  logSection("Step 2: Add Demo Deposit");
-
-  // Generate ephemeral keys for stealth
-  const ephemeralKey = generateGrumpkinKeyPair();
-  const viewingKey = generateGrumpkinKeyPair();
-  const ephemeralPub = pointToCompressedBytes(ephemeralKey.pubKey);
-  const sharedSecret = grumpkinEcdh(ephemeralKey.privKey, viewingKey.pubKey);
-  const encryptedAmountBytes = encryptAmount(DEMO_AMOUNT, sharedSecret);
+  log(`Encrypted amount: 0x${Buffer.from(encryptedAmountBytes).toString("hex")}`);
 
   const [stealthAnnouncementPDA] = deriveStealthAnnouncementPDA(ephemeralPub, programId);
 
@@ -645,8 +679,29 @@ async function main() {
     data: Buffer.from(demoData),
   });
 
-  const demoTx = new Transaction().add(demoIx);
-  const demoSig = await sendAndConfirmTransaction(connection, demoTx, [authority]);
+  const demoTx = new Transaction();
+  if (NETWORK === "devnet") {
+    demoTx.add(ComputeBudgetProgram.setComputeUnitPrice({ microLamports: 1_000_000 }));
+  }
+  demoTx.add(demoIx);
+
+  // Retry logic for demo deposit
+  let demoSig = "";
+  let demoRetries = 3;
+  while (demoRetries > 0) {
+    try {
+      demoSig = await sendAndConfirmTransaction(connection, demoTx, [authority], {
+        commitment: "confirmed",
+        skipPreflight: NETWORK === "devnet",
+      });
+      break;
+    } catch (err: any) {
+      demoRetries--;
+      if (demoRetries === 0) throw err;
+      log(`  Demo deposit failed, retrying... (${demoRetries} left)`);
+      await new Promise((r) => setTimeout(r, 2000));
+    }
+  }
   log(`✓ Demo deposit: ${demoSig.slice(0, 16)}...`);
 
   // ==========================================================================
@@ -679,17 +734,67 @@ async function main() {
   }
 
   // ==========================================================================
-  // Step 5: Compute nullifier
+  // Step 5: Scan the deposit and derive stealth key
   // ==========================================================================
-  logSection("Step 5: Compute Nullifier");
+  logSection("Step 5: Scan Deposit & Derive Keys");
 
   const leafIndexBigint = BigInt(leafIndex);
-  const nullifier = computeNullifierSync(privKey, leafIndexBigint);
+
+  // Use scanAnnouncements to properly reconstruct the ScannedNote
+  // This uses the SDK's internal stealth derivation logic (SHA256 domain separator)
+  const { scanAnnouncements } = await import("@zvault/sdk");
+
+  // Format the deposit as an announcement for scanning
+  const announcements = [{
+    ephemeralPub: ephemeralPub,
+    encryptedAmount: encryptedAmountBytes,
+    commitment: commitmentBytes,
+    leafIndex: leafIndex,
+  }];
+
+  // Scan using our keys - this derives stealthPub correctly
+  const scannedNotes = await scanAnnouncements(keys, announcements);
+
+  if (scannedNotes.length === 0) {
+    throw new Error("Failed to scan deposit - commitment mismatch or decryption failed");
+  }
+
+  const scannedNote = scannedNotes[0];
+  log(`✓ Deposit scanned successfully`);
+  log(`  Amount: ${scannedNote.amount.toString()} sats`);
+  log(`  StealthPub.x: 0x${scannedNote.stealthPub.x.toString(16).slice(0, 16)}...`);
+
+  // Use SDK's prepareClaimInputs to derive stealthPrivKey correctly
+  const claimPrepInputs = await prepareClaimInputs(keys, scannedNote, {
+    root: treeState.currentRoot,
+    pathElements: merkleProof.siblings,
+    pathIndices: merkleProof.indices,
+  });
+
+  // Extract stealthPrivKey and pubKeyX from prepared inputs
+  const stealthPrivKey = claimPrepInputs.stealthPrivKey;
+  const pubKeyX = scannedNote.stealthPub.x;
+
+  log(`Stealth priv: 0x${stealthPrivKey.toString(16).slice(0, 16)}...`);
+  log(`Stealth pub X: 0x${pubKeyX.toString(16).slice(0, 16)}...`);
+
+  // Compute nullifier using stealth private key
+  const nullifier = computeNullifierSync(stealthPrivKey, leafIndexBigint);
   const nullifierHash = hashNullifierSync(nullifier);
   const nullifierHashBytes = bigintToBytes32(nullifierHash);
 
   log(`Nullifier: 0x${nullifier.toString(16).slice(0, 16)}...`);
   log(`Nullifier hash: 0x${nullifierHash.toString(16).slice(0, 16)}...`);
+
+  // Verify commitment matches what circuit will compute
+  const expectedCommitment = computeUnifiedCommitmentSync(pubKeyX, DEMO_AMOUNT);
+  if (expectedCommitment !== commitment) {
+    log(`⚠ Commitment mismatch!`);
+    log(`  Expected: 0x${expectedCommitment.toString(16).slice(0, 16)}...`);
+    log(`  Actual: 0x${commitment.toString(16).slice(0, 16)}...`);
+    throw new Error("Commitment verification failed");
+  }
+  log(`✓ Commitment verified: Poseidon(stealthPub.x, amount)`);
 
   // ==========================================================================
   // Step 6: Generate ZK proof
@@ -700,8 +805,8 @@ async function main() {
   const recipientBigint = bytes32ToBigint(authority.publicKey.toBytes());
 
   const claimInputs: ClaimInputs = {
-    privKey,
-    pubKeyX,
+    privKey: stealthPrivKey,  // Use stealth private key (not original spending key!)
+    pubKeyX,                  // Use stealthPub.x (EC point x-coordinate)
     amount: DEMO_AMOUNT,
     leafIndex: leafIndexBigint,
     merkleRoot: treeState.currentRoot, // Use on-chain root
@@ -773,7 +878,12 @@ async function main() {
       zkbtcMint,
       TOKEN_2022_PROGRAM_ID
     );
-    await sendAndConfirmTransaction(connection, new Transaction().add(createAtaIx), [authority]);
+    const ataTx = new Transaction();
+    if (NETWORK === "devnet") {
+      ataTx.add(ComputeBudgetProgram.setComputeUnitPrice({ microLamports: 1_000_000 }));
+    }
+    ataTx.add(createAtaIx);
+    await sendAndConfirmTransaction(connection, ataTx, [authority], { commitment: "confirmed" });
     log(`✓ Created: ${recipientAta.toBase58()}`);
   }
 
@@ -789,10 +899,13 @@ async function main() {
     vkHash
   );
 
-  // Add compute budget
+  // Add compute budget and priority fee for devnet
   const computeIx = ComputeBudgetProgram.setComputeUnitLimit({
     units: 1_400_000,
   });
+  const claimPriorityIx = NETWORK === "devnet"
+    ? ComputeBudgetProgram.setComputeUnitPrice({ microLamports: 1_000_000 })
+    : null;
 
   // Build claim instruction with proof buffer account
   // Account order: pool_state, commitment_tree, nullifier, zbtc_mint, pool_vault, recipient_ata, user, token_program, system_program, ultrahonk_verifier, proof_buffer
@@ -814,7 +927,9 @@ async function main() {
     data: Buffer.from(claimData),
   });
 
-  const claimTx = new Transaction().add(computeIx, claimIx);
+  const claimTx = new Transaction();
+  if (claimPriorityIx) claimTx.add(claimPriorityIx);
+  claimTx.add(computeIx, claimIx);
 
   log(`Instruction size: ${claimData.length} bytes (buffer mode)`);
   log(`Nullifier PDA: ${nullifierPda.toBase58()}`);
@@ -859,8 +974,14 @@ async function main() {
 
   try {
     const closeIx = createChadBufferCloseIx(chadbufferProgramId, proofBuffer, authority.publicKey);
-    const closeTx = new Transaction().add(closeIx);
-    const closeSig = await sendAndConfirmTransaction(connection, closeTx, [authority]);
+    const closeTx = new Transaction();
+    if (NETWORK === "devnet") {
+      closeTx.add(ComputeBudgetProgram.setComputeUnitPrice({ microLamports: 1_000_000 }));
+    }
+    closeTx.add(closeIx);
+    const closeSig = await sendAndConfirmTransaction(connection, closeTx, [authority], {
+      commitment: "confirmed",
+    });
     log(`✓ Buffer closed, rent reclaimed: ${closeSig.slice(0, 16)}...`);
   } catch (err: any) {
     log(`⚠ Failed to close buffer: ${err.message}`);
