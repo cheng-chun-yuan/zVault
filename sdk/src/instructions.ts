@@ -2,7 +2,7 @@
  * ZVault Instruction Builders
  *
  * Low-level instruction building for ZVault operations.
- * Supports both inline proofs and ChadBuffer references.
+ * Uses instruction introspection - verifier IX must precede zVault IX in same TX.
  *
  * @module instructions
  */
@@ -15,9 +15,13 @@ import {
 
 import { getConfig, TOKEN_2022_PROGRAM_ID } from "./config";
 import { CHADBUFFER_PROGRAM_ID } from "./chadbuffer";
+import { BN254_FIELD_PRIME, bytesToBigint, bigintToBytes } from "./crypto";
 
 /** System program address */
 const SYSTEM_PROGRAM_ADDRESS = address("11111111111111111111111111111111");
+
+/** Instructions sysvar address */
+const INSTRUCTIONS_SYSVAR = address("Sysvar1nstructions1111111111111111111111111");
 
 // =============================================================================
 // Types
@@ -30,7 +34,7 @@ export interface Instruction {
   data: Uint8Array;
 }
 
-/** Proof source indicator */
+/** Proof source for legacy instructions (claim, pool operations) */
 export type ProofSource = "inline" | "buffer";
 
 /** Claim instruction options */
@@ -65,12 +69,8 @@ export interface ClaimInstructionOptions {
 
 /** Split instruction options */
 export interface SplitInstructionOptions {
-  /** Proof source mode */
-  proofSource: ProofSource;
-  /** Proof bytes (required for inline mode) */
-  proofBytes?: Uint8Array;
-  /** ChadBuffer account address (required for buffer mode) */
-  bufferAddress?: Address;
+  /** ChadBuffer account address containing the proof */
+  bufferAddress: Address;
   /** Merkle root */
   root: Uint8Array;
   /** Nullifier hash */
@@ -81,27 +81,13 @@ export interface SplitInstructionOptions {
   outputCommitment2: Uint8Array;
   /** VK hash */
   vkHash: Uint8Array;
-  /**
-   * Ephemeral pubkey x-coordinate for first output stealth announcement (32 bytes)
-   * This is a circuit public input - proof commits to this value.
-   */
+  /** Ephemeral pubkey x-coordinate for first output stealth announcement (32 bytes) */
   output1EphemeralPubX: Uint8Array;
-  /**
-   * Packed encrypted amount with y_sign for first output (32 bytes)
-   * bits 0-63: XOR encrypted amount, bit 64: y-coordinate sign bit
-   * This is a circuit public input - proof commits to this value.
-   */
+  /** Packed encrypted amount with y_sign for first output (32 bytes) */
   output1EncryptedAmountWithSign: Uint8Array;
-  /**
-   * Ephemeral pubkey x-coordinate for second output stealth announcement (32 bytes)
-   * This is a circuit public input - proof commits to this value.
-   */
+  /** Ephemeral pubkey x-coordinate for second output stealth announcement (32 bytes) */
   output2EphemeralPubX: Uint8Array;
-  /**
-   * Packed encrypted amount with y_sign for second output (32 bytes)
-   * bits 0-63: XOR encrypted amount, bit 64: y-coordinate sign bit
-   * This is a circuit public input - proof commits to this value.
-   */
+  /** Packed encrypted amount with y_sign for second output (32 bytes) */
   output2EncryptedAmountWithSign: Uint8Array;
   /** Account addresses */
   accounts: {
@@ -118,12 +104,8 @@ export interface SplitInstructionOptions {
 
 /** SpendPartialPublic instruction options */
 export interface SpendPartialPublicInstructionOptions {
-  /** Proof source mode */
-  proofSource: ProofSource;
-  /** Proof bytes (required for inline mode) */
-  proofBytes?: Uint8Array;
-  /** ChadBuffer account address (required for buffer mode) */
-  bufferAddress?: Address;
+  /** ChadBuffer account address containing the proof */
+  bufferAddress: Address;
   /** Merkle root */
   root: Uint8Array;
   /** Nullifier hash */
@@ -136,16 +118,9 @@ export interface SpendPartialPublicInstructionOptions {
   recipient: Address;
   /** VK hash */
   vkHash: Uint8Array;
-  /**
-   * Ephemeral pubkey x-coordinate for change stealth announcement (32 bytes)
-   * This is a circuit public input - proof commits to this value.
-   */
+  /** Ephemeral pubkey x-coordinate for change stealth announcement (32 bytes) */
   changeEphemeralPubX: Uint8Array;
-  /**
-   * Packed encrypted amount with y_sign (32 bytes)
-   * bits 0-63: XOR encrypted amount, bit 64: y-coordinate sign bit
-   * This is a circuit public input - proof commits to this value.
-   */
+  /** Packed encrypted amount with y_sign (32 bytes) */
   changeEncryptedAmountWithSign: Uint8Array;
   /** Account addresses */
   accounts: {
@@ -270,11 +245,6 @@ const INSTRUCTION = {
 /** Export instruction discriminators for consumers */
 export const INSTRUCTION_DISCRIMINATORS = INSTRUCTION;
 
-/** Proof source byte values */
-const PROOF_SOURCE = {
-  INLINE: 0,
-  BUFFER: 1,
-} as const;
 
 // =============================================================================
 // Utilities
@@ -389,7 +359,7 @@ export function buildClaimInstructionData(options: {
     data[offset++] = INSTRUCTION.CLAIM;
 
     // Proof source (inline = 0)
-    data[offset++] = PROOF_SOURCE.INLINE;
+    data[offset++] = 0;
 
     // Proof length (4 bytes, LE)
     view.setUint32(offset, proofBytes.length, true);
@@ -431,7 +401,7 @@ export function buildClaimInstructionData(options: {
     data[offset++] = INSTRUCTION.CLAIM;
 
     // Proof source (buffer = 1)
-    data[offset++] = PROOF_SOURCE.BUFFER;
+    data[offset++] = 1;
 
     // Root (32 bytes)
     data.set(root, offset);
@@ -507,37 +477,12 @@ export function buildClaimInstruction(options: ClaimInstructionOptions): Instruc
 // =============================================================================
 
 /**
- * Build split instruction data (UltraHonk - supports buffer mode)
+ * Build split instruction data
  *
- * ## Inline Mode (proof_source=0)
- * - proof_source: u8 (0)
- * - proof_len: u32 (LE)
- * - proof: [u8; proof_len]
- * - root: [u8; 32]
- * - nullifier_hash: [u8; 32]
- * - output_commitment_1: [u8; 32]
- * - output_commitment_2: [u8; 32]
- * - vk_hash: [u8; 32]
- * - ephemeral_pub_1: [u8; 33]
- * - encrypted_amount_1: [u8; 8]
- * - ephemeral_pub_2: [u8; 33]
- * - encrypted_amount_2: [u8; 8]
- *
- * ## Buffer Mode (proof_source=1)
- * - proof_source: u8 (1)
- * - root: [u8; 32]
- * - nullifier_hash: [u8; 32]
- * - output_commitment_1: [u8; 32]
- * - output_commitment_2: [u8; 32]
- * - vk_hash: [u8; 32]
- * - output1_ephemeral_pub_x: [u8; 32]
- * - output1_encrypted_amount_with_sign: [u8; 32]
- * - output2_ephemeral_pub_x: [u8; 32]
- * - output2_encrypted_amount_with_sign: [u8; 32]
+ * Format: disc(1) + root(32) + nullifier(32) + out1(32) + out2(32)
+ *         + vk_hash(32) + eph1_x(32) + enc1(32) + eph2_x(32) + enc2(32)
  */
 export function buildSplitInstructionData(options: {
-  proofSource: ProofSource;
-  proofBytes?: Uint8Array;
   root: Uint8Array;
   nullifierHash: Uint8Array;
   outputCommitment1: Uint8Array;
@@ -548,132 +493,36 @@ export function buildSplitInstructionData(options: {
   output2EphemeralPubX: Uint8Array;
   output2EncryptedAmountWithSign: Uint8Array;
 }): Uint8Array {
-  const { proofSource, proofBytes, root, nullifierHash, outputCommitment1, outputCommitment2, vkHash, output1EphemeralPubX, output1EncryptedAmountWithSign, output2EphemeralPubX, output2EncryptedAmountWithSign } = options;
+  const { root, nullifierHash, outputCommitment1, outputCommitment2, vkHash, output1EphemeralPubX, output1EncryptedAmountWithSign, output2EphemeralPubX, output2EncryptedAmountWithSign } = options;
 
-  if (proofSource === "inline") {
-    if (!proofBytes) {
-      throw new Error("proofBytes required for inline mode");
-    }
+  const totalSize = 1 + 32 + 32 + 32 + 32 + 32 + 32 + 32 + 32 + 32;
+  const data = new Uint8Array(totalSize);
 
-    // Inline format: discriminator(1) + proof_source(1) + proof_len(4) + proof + root(32) + nullifier(32) + out1(32) + out2(32) + vk_hash(32) + output1_ephemeral_pub_x(32) + output1_encrypted_amount_with_sign(32) + output2_ephemeral_pub_x(32) + output2_encrypted_amount_with_sign(32)
-    const totalSize = 1 + 1 + 4 + proofBytes.length + 32 + 32 + 32 + 32 + 32 + 32 + 32 + 32 + 32;
-    const data = new Uint8Array(totalSize);
-    const view = new DataView(data.buffer);
+  let offset = 0;
+  data[offset++] = INSTRUCTION.SPEND_SPLIT;
 
-    let offset = 0;
+  data.set(root, offset); offset += 32;
+  data.set(nullifierHash, offset); offset += 32;
+  data.set(outputCommitment1, offset); offset += 32;
+  data.set(outputCommitment2, offset); offset += 32;
+  data.set(vkHash, offset); offset += 32;
+  data.set(output1EphemeralPubX, offset); offset += 32;
+  data.set(output1EncryptedAmountWithSign, offset); offset += 32;
+  data.set(output2EphemeralPubX, offset); offset += 32;
+  data.set(output2EncryptedAmountWithSign, offset);
 
-    // Discriminator
-    data[offset++] = INSTRUCTION.SPEND_SPLIT;
-
-    // Proof source (inline = 0)
-    data[offset++] = PROOF_SOURCE.INLINE;
-
-    // Proof length (4 bytes, LE)
-    view.setUint32(offset, proofBytes.length, true);
-    offset += 4;
-
-    // Proof bytes
-    data.set(proofBytes, offset);
-    offset += proofBytes.length;
-
-    // Root (32 bytes)
-    data.set(root, offset);
-    offset += 32;
-
-    // Nullifier hash (32 bytes)
-    data.set(nullifierHash, offset);
-    offset += 32;
-
-    // Output commitment 1 (32 bytes)
-    data.set(outputCommitment1, offset);
-    offset += 32;
-
-    // Output commitment 2 (32 bytes)
-    data.set(outputCommitment2, offset);
-    offset += 32;
-
-    // VK hash (32 bytes)
-    data.set(vkHash, offset);
-    offset += 32;
-
-    // Output 1 ephemeral pub x (32 bytes)
-    data.set(output1EphemeralPubX, offset);
-    offset += 32;
-
-    // Output 1 encrypted amount with sign (32 bytes)
-    data.set(output1EncryptedAmountWithSign, offset);
-    offset += 32;
-
-    // Output 2 ephemeral pub x (32 bytes)
-    data.set(output2EphemeralPubX, offset);
-    offset += 32;
-
-    // Output 2 encrypted amount with sign (32 bytes)
-    data.set(output2EncryptedAmountWithSign, offset);
-
-    return data;
-  } else {
-    // Buffer format: discriminator(1) + proof_source(1) + root(32) + nullifier(32) + out1(32) + out2(32) + vk_hash(32) + output1_ephemeral_pub_x(32) + output1_encrypted_amount_with_sign(32) + output2_ephemeral_pub_x(32) + output2_encrypted_amount_with_sign(32)
-    const totalSize = 1 + 1 + 32 + 32 + 32 + 32 + 32 + 32 + 32 + 32 + 32;
-    const data = new Uint8Array(totalSize);
-
-    let offset = 0;
-
-    // Discriminator
-    data[offset++] = INSTRUCTION.SPEND_SPLIT;
-
-    // Proof source (buffer = 1)
-    data[offset++] = PROOF_SOURCE.BUFFER;
-
-    // Root (32 bytes)
-    data.set(root, offset);
-    offset += 32;
-
-    // Nullifier hash (32 bytes)
-    data.set(nullifierHash, offset);
-    offset += 32;
-
-    // Output commitment 1 (32 bytes)
-    data.set(outputCommitment1, offset);
-    offset += 32;
-
-    // Output commitment 2 (32 bytes)
-    data.set(outputCommitment2, offset);
-    offset += 32;
-
-    // VK hash (32 bytes)
-    data.set(vkHash, offset);
-    offset += 32;
-
-    // Output 1 ephemeral pub x (32 bytes)
-    data.set(output1EphemeralPubX, offset);
-    offset += 32;
-
-    // Output 1 encrypted amount with sign (32 bytes)
-    data.set(output1EncryptedAmountWithSign, offset);
-    offset += 32;
-
-    // Output 2 ephemeral pub x (32 bytes)
-    data.set(output2EphemeralPubX, offset);
-    offset += 32;
-
-    // Output 2 encrypted amount with sign (32 bytes)
-    data.set(output2EncryptedAmountWithSign, offset);
-
-    return data;
-  }
+  return data;
 }
 
 /**
  * Build a complete split instruction
+ *
+ * Contract uses instruction introspection - verifier IX must precede this in same TX.
  */
 export function buildSplitInstruction(options: SplitInstructionOptions): Instruction {
   const config = getConfig();
 
-  // Build instruction data
   const data = buildSplitInstructionData({
-    proofSource: options.proofSource,
-    proofBytes: options.proofBytes,
     root: options.root,
     nullifierHash: options.nullifierHash,
     outputCommitment1: options.outputCommitment1,
@@ -685,7 +534,7 @@ export function buildSplitInstruction(options: SplitInstructionOptions): Instruc
     output2EncryptedAmountWithSign: options.output2EncryptedAmountWithSign,
   });
 
-  // Build accounts list (updated to include stealth announcement accounts)
+  // Build accounts list (10 accounts total)
   const accounts: Instruction["accounts"] = [
     { address: options.accounts.poolState, role: AccountRole.WRITABLE },
     { address: options.accounts.commitmentTree, role: AccountRole.WRITABLE },
@@ -695,15 +544,9 @@ export function buildSplitInstruction(options: SplitInstructionOptions): Instruc
     { address: config.ultrahonkVerifierProgramId, role: AccountRole.READONLY },
     { address: options.accounts.stealthAnnouncement1, role: AccountRole.WRITABLE },
     { address: options.accounts.stealthAnnouncement2, role: AccountRole.WRITABLE },
+    { address: options.bufferAddress, role: AccountRole.READONLY },
+    { address: INSTRUCTIONS_SYSVAR, role: AccountRole.READONLY },
   ];
-
-  // Add proof buffer account for buffer mode
-  if (options.proofSource === "buffer") {
-    if (!options.bufferAddress) {
-      throw new Error("bufferAddress required for buffer mode");
-    }
-    accounts.push({ address: options.bufferAddress, role: AccountRole.READONLY });
-  }
 
   return {
     programAddress: config.zvaultProgramId,
@@ -717,28 +560,12 @@ export function buildSplitInstruction(options: SplitInstructionOptions): Instruc
 // =============================================================================
 
 /**
- * Build spend_partial_public instruction data (UltraHonk proof)
+ * Build spend_partial_public instruction data
  *
- * Allows spending a shielded note with partial public output (reveal some amount)
- * and keeping remainder in a new shielded commitment.
- *
- * Supports both inline and buffer modes:
- * - Inline (proof_source=0): proof included in instruction data
- * - Buffer (proof_source=1): proof read from ChadBuffer account
- *
- * Contract format (inline):
- *   discriminator(1) + proof_source(1) + proof_len(4) + proof + root(32) + nullifier(32) +
- *   public_amount(8) + change_commitment(32) + recipient(32) + vk_hash(32) +
- *   ephemeral_pub_change(33) + encrypted_amount_change(8)
- *
- * Contract format (buffer):
- *   discriminator(1) + proof_source(1) + root(32) + nullifier(32) +
- *   public_amount(8) + change_commitment(32) + recipient(32) + vk_hash(32) +
- *   change_ephemeral_pub_x(32) + change_encrypted_amount_with_sign(32)
+ * Format: disc(1) + root(32) + nullifier(32) + amount(8)
+ *         + change(32) + recipient(32) + vk_hash(32) + ephPubX(32) + encAmount(32)
  */
 export function buildSpendPartialPublicInstructionData(options: {
-  proofSource: ProofSource;
-  proofBytes?: Uint8Array;
   root: Uint8Array;
   nullifierHash: Uint8Array;
   publicAmountSats: bigint;
@@ -748,83 +575,37 @@ export function buildSpendPartialPublicInstructionData(options: {
   changeEphemeralPubX: Uint8Array;
   changeEncryptedAmountWithSign: Uint8Array;
 }): Uint8Array {
-  const { proofSource, proofBytes, root, nullifierHash, publicAmountSats, changeCommitment, recipient, vkHash, changeEphemeralPubX, changeEncryptedAmountWithSign } = options;
+  const { root, nullifierHash, publicAmountSats, changeCommitment, recipient, vkHash, changeEphemeralPubX, changeEncryptedAmountWithSign } = options;
   const recipientBytes = addressToBytes(recipient);
 
-  if (proofSource === "inline") {
-    if (!proofBytes) {
-      throw new Error("proofBytes required for inline mode");
-    }
+  const totalSize = 1 + 32 + 32 + 8 + 32 + 32 + 32 + 32 + 32;
+  const data = new Uint8Array(totalSize);
+  const view = new DataView(data.buffer);
 
-    // Inline mode: discriminator(1) + proof_source(1) + proof_len(4) + proof + root(32) + nullifier(32) +
-    // public_amount(8) + change_commitment(32) + recipient(32) + vk_hash(32) + change_ephemeral_pub_x(32) + change_encrypted_amount_with_sign(32)
-    const totalSize = 1 + 1 + 4 + proofBytes.length + 32 + 32 + 8 + 32 + 32 + 32 + 32 + 32;
-    const data = new Uint8Array(totalSize);
-    const view = new DataView(data.buffer);
+  let offset = 0;
+  data[offset++] = INSTRUCTION.SPEND_PARTIAL_PUBLIC;
 
-    let offset = 0;
-    data[offset++] = INSTRUCTION.SPEND_PARTIAL_PUBLIC;
-    data[offset++] = PROOF_SOURCE.INLINE;
-    view.setUint32(offset, proofBytes.length, true);
-    offset += 4;
-    data.set(proofBytes, offset);
-    offset += proofBytes.length;
-    data.set(root, offset);
-    offset += 32;
-    data.set(nullifierHash, offset);
-    offset += 32;
-    view.setBigUint64(offset, publicAmountSats, true);
-    offset += 8;
-    data.set(changeCommitment, offset);
-    offset += 32;
-    data.set(recipientBytes, offset);
-    offset += 32;
-    data.set(vkHash, offset);
-    offset += 32;
-    data.set(changeEphemeralPubX, offset);
-    offset += 32;
-    data.set(changeEncryptedAmountWithSign, offset);
+  data.set(root, offset); offset += 32;
+  data.set(nullifierHash, offset); offset += 32;
+  view.setBigUint64(offset, publicAmountSats, true); offset += 8;
+  data.set(changeCommitment, offset); offset += 32;
+  data.set(recipientBytes, offset); offset += 32;
+  data.set(vkHash, offset); offset += 32;
+  data.set(changeEphemeralPubX, offset); offset += 32;
+  data.set(changeEncryptedAmountWithSign, offset);
 
-    return data;
-  } else {
-    // Buffer mode: discriminator(1) + proof_source(1) + root(32) + nullifier(32) +
-    // public_amount(8) + change_commitment(32) + recipient(32) + vk_hash(32) + change_ephemeral_pub_x(32) + change_encrypted_amount_with_sign(32)
-    const totalSize = 1 + 1 + 32 + 32 + 8 + 32 + 32 + 32 + 32 + 32;
-    const data = new Uint8Array(totalSize);
-    const view = new DataView(data.buffer);
-
-    let offset = 0;
-    data[offset++] = INSTRUCTION.SPEND_PARTIAL_PUBLIC;
-    data[offset++] = PROOF_SOURCE.BUFFER;
-    data.set(root, offset);
-    offset += 32;
-    data.set(nullifierHash, offset);
-    offset += 32;
-    view.setBigUint64(offset, publicAmountSats, true);
-    offset += 8;
-    data.set(changeCommitment, offset);
-    offset += 32;
-    data.set(recipientBytes, offset);
-    offset += 32;
-    data.set(vkHash, offset);
-    offset += 32;
-    data.set(changeEphemeralPubX, offset);
-    offset += 32;
-    data.set(changeEncryptedAmountWithSign, offset);
-
-    return data;
-  }
+  return data;
 }
 
 /**
  * Build a complete spend_partial_public instruction
+ *
+ * Contract uses instruction introspection - verifier IX must precede this in same TX.
  */
 export function buildSpendPartialPublicInstruction(options: SpendPartialPublicInstructionOptions): Instruction {
   const config = getConfig();
 
   const data = buildSpendPartialPublicInstructionData({
-    proofSource: options.proofSource,
-    proofBytes: options.proofBytes,
     root: options.root,
     nullifierHash: options.nullifierHash,
     publicAmountSats: options.publicAmountSats,
@@ -835,7 +616,7 @@ export function buildSpendPartialPublicInstruction(options: SpendPartialPublicIn
     changeEncryptedAmountWithSign: options.changeEncryptedAmountWithSign,
   });
 
-  // Build accounts list (updated to include stealth announcement account for change)
+  // Build accounts list (13 accounts total)
   const accounts: Instruction["accounts"] = [
     { address: options.accounts.poolState, role: AccountRole.WRITABLE },
     { address: options.accounts.commitmentTree, role: AccountRole.WRITABLE },
@@ -848,14 +629,9 @@ export function buildSpendPartialPublicInstruction(options: SpendPartialPublicIn
     { address: SYSTEM_PROGRAM_ADDRESS, role: AccountRole.READONLY },
     { address: config.ultrahonkVerifierProgramId, role: AccountRole.READONLY },
     { address: options.accounts.stealthAnnouncementChange, role: AccountRole.WRITABLE },
+    { address: options.bufferAddress, role: AccountRole.READONLY },
+    { address: INSTRUCTIONS_SYSVAR, role: AccountRole.READONLY },
   ];
-
-  if (options.proofSource === "buffer") {
-    if (!options.bufferAddress) {
-      throw new Error("bufferAddress required for buffer mode");
-    }
-    accounts.push({ address: options.bufferAddress, role: AccountRole.READONLY });
-  }
 
   return {
     programAddress: config.zvaultProgramId,
@@ -894,7 +670,7 @@ export function buildPoolDepositInstructionData(options: {
 
     let offset = 0;
     data[offset++] = INSTRUCTION.DEPOSIT_TO_POOL;
-    data[offset++] = PROOF_SOURCE.INLINE;
+    data[offset++] = 0;
     view.setUint32(offset, proofBytes.length, true);
     offset += 4;
     data.set(proofBytes, offset);
@@ -918,7 +694,7 @@ export function buildPoolDepositInstructionData(options: {
 
     let offset = 0;
     data[offset++] = INSTRUCTION.DEPOSIT_TO_POOL;
-    data[offset++] = PROOF_SOURCE.BUFFER;
+    data[offset++] = 1;
     data.set(root, offset);
     offset += 32;
     data.set(nullifierHash, offset);
@@ -1004,7 +780,7 @@ export function buildPoolWithdrawInstructionData(options: {
 
     let offset = 0;
     data[offset++] = INSTRUCTION.WITHDRAW_FROM_POOL;
-    data[offset++] = PROOF_SOURCE.INLINE;
+    data[offset++] = 0;
     view.setUint32(offset, proofBytes.length, true);
     offset += 4;
     data.set(proofBytes, offset);
@@ -1028,7 +804,7 @@ export function buildPoolWithdrawInstructionData(options: {
 
     let offset = 0;
     data[offset++] = INSTRUCTION.WITHDRAW_FROM_POOL;
-    data[offset++] = PROOF_SOURCE.BUFFER;
+    data[offset++] = 1;
     data.set(poolRoot, offset);
     offset += 32;
     data.set(poolNullifierHash, offset);
@@ -1116,7 +892,7 @@ export function buildPoolClaimYieldInstructionData(options: {
 
     let offset = 0;
     data[offset++] = INSTRUCTION.CLAIM_POOL_YIELD;
-    data[offset++] = PROOF_SOURCE.INLINE;
+    data[offset++] = 0;
     view.setUint32(offset, proofBytes.length, true);
     offset += 4;
     data.set(proofBytes, offset);
@@ -1142,7 +918,7 @@ export function buildPoolClaimYieldInstructionData(options: {
 
     let offset = 0;
     data[offset++] = INSTRUCTION.CLAIM_POOL_YIELD;
-    data[offset++] = PROOF_SOURCE.BUFFER;
+    data[offset++] = 1;
     data.set(poolRoot, offset);
     offset += 32;
     data.set(poolNullifierHash, offset);
@@ -1202,6 +978,134 @@ export function buildPoolClaimYieldInstruction(options: PoolClaimYieldInstructio
     accounts,
     data,
   };
+}
+
+// =============================================================================
+// UltraHonk Verifier Instruction Builder
+// =============================================================================
+
+/** UltraHonk verifier instruction discriminators */
+const VERIFIER_INSTRUCTION = {
+  VERIFY: 0,
+  VERIFY_WITH_VK_ACCOUNT: 1,
+  INIT_VK: 2,
+  VERIFY_FROM_BUFFER: 3,
+} as const;
+
+/**
+ * Build VERIFY_FROM_BUFFER instruction for UltraHonk verifier
+ *
+ * This instruction must be called BEFORE the zVault instruction in the same TX.
+ * The zVault instruction uses instruction introspection to verify this was called.
+ *
+ * Format: [discriminator(1)] [pi_count(4)] [public_inputs(N*32)] [vk_hash(32)]
+ */
+export function buildVerifyFromBufferInstruction(options: {
+  bufferAddress: Address;
+  publicInputs: Uint8Array[];
+  vkHash: Uint8Array;
+}): Instruction {
+  const config = getConfig();
+
+  const { bufferAddress, publicInputs, vkHash } = options;
+  const piCount = publicInputs.length;
+  const totalSize = 1 + 4 + piCount * 32 + 32;
+  const data = new Uint8Array(totalSize);
+  const view = new DataView(data.buffer);
+
+  let offset = 0;
+  data[offset++] = VERIFIER_INSTRUCTION.VERIFY_FROM_BUFFER;
+
+  // Public inputs count (little-endian)
+  view.setUint32(offset, piCount, true);
+  offset += 4;
+
+  // Public inputs
+  for (const pi of publicInputs) {
+    if (pi.length !== 32) {
+      throw new Error(`Public input must be 32 bytes, got ${pi.length}`);
+    }
+    data.set(pi, offset);
+    offset += 32;
+  }
+
+  // VK hash
+  data.set(vkHash, offset);
+
+  return {
+    programAddress: config.ultrahonkVerifierProgramId,
+    accounts: [{ address: bufferAddress, role: AccountRole.READONLY }],
+    data,
+  };
+}
+
+/**
+ * Build public inputs array for spend_partial_public verifier call
+ *
+ * Order must match circuit: [root, nullifier_hash, public_amount, change_commitment,
+ *                           recipient, ephemeral_pub_x, encrypted_amount_with_sign]
+ *
+ * IMPORTANT: Recipient must be reduced modulo BN254_FIELD_PRIME to match what the prover uses.
+ * The Noir circuit represents public keys as field elements, which are always < BN254_FIELD_PRIME.
+ */
+export function buildPartialPublicVerifierInputs(options: {
+  root: Uint8Array;
+  nullifierHash: Uint8Array;
+  publicAmountSats: bigint;
+  changeCommitment: Uint8Array;
+  recipient: Address;
+  changeEphemeralPubX: Uint8Array;
+  changeEncryptedAmountWithSign: Uint8Array;
+}): Uint8Array[] {
+  // Reduce recipient modulo BN254_FIELD_PRIME to match circuit's field element representation
+  // This is critical: the prover reduces the recipient the same way in api.ts
+  const recipientRaw = addressToBytes(options.recipient);
+  const recipientReduced = bytesToBigint(recipientRaw) % BN254_FIELD_PRIME;
+  const recipientBytes = bigintToBytes(recipientReduced);
+
+  // Encode amount as 32-byte field element (big-endian)
+  const amountBytes = new Uint8Array(32);
+  const amountHex = options.publicAmountSats.toString(16).padStart(16, "0");
+  for (let i = 0; i < 8; i++) {
+    amountBytes[24 + i] = parseInt(amountHex.slice(i * 2, i * 2 + 2), 16);
+  }
+
+  return [
+    options.root,
+    options.nullifierHash,
+    amountBytes,
+    options.changeCommitment,
+    recipientBytes,
+    options.changeEphemeralPubX,
+    options.changeEncryptedAmountWithSign,
+  ];
+}
+
+/**
+ * Build public inputs array for spend_split verifier call
+ *
+ * Order must match circuit: [root, nullifier_hash, out1, out2, eph1_x, enc1, eph2_x, enc2]
+ */
+export function buildSplitVerifierInputs(options: {
+  root: Uint8Array;
+  nullifierHash: Uint8Array;
+  outputCommitment1: Uint8Array;
+  outputCommitment2: Uint8Array;
+  output1EphemeralPubX: Uint8Array;
+  output1EncryptedAmountWithSign: Uint8Array;
+  output2EphemeralPubX: Uint8Array;
+  output2EncryptedAmountWithSign: Uint8Array;
+}): Uint8Array[] {
+  return [
+    options.root,
+    options.nullifierHash,
+    options.outputCommitment1,
+    options.outputCommitment2,
+    options.output1EphemeralPubX,
+    options.output1EncryptedAmountWithSign,
+    options.output2EphemeralPubX,
+    options.output2EncryptedAmountWithSign,
+  ];
 }
 
 // =============================================================================
