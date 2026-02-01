@@ -11,6 +11,9 @@ export type { InboxNote };
 /**
  * Full zVault hook - wraps Zustand store with wallet integration.
  * Maintains backwards compatibility with the old context-based API.
+ *
+ * NOTE: Auto-refresh of inbox is handled in StoreHydration (renders once).
+ * This hook just provides wallet-aware wrappers for store actions.
  */
 export function useZVault() {
   const wallet = useWallet();
@@ -39,13 +42,6 @@ export function useZVault() {
       store.clearKeys();
     }
   }, [wallet.connected, store.clearKeys]);
-
-  // Auto-refresh inbox when keys become available
-  useEffect(() => {
-    if (store.keys && !store.inboxLoading && store.inboxNotes.length === 0) {
-      refreshInbox();
-    }
-  }, [store.keys, store.inboxLoading, store.inboxNotes.length, refreshInbox]);
 
   return {
     // Poseidon

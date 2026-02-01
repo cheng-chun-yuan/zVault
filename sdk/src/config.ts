@@ -138,27 +138,27 @@ export const LOCALNET_CHADBUFFER_PROGRAM_ID: Address = address(
 // =============================================================================
 
 /**
- * Devnet Configuration (v1.2.0)
+ * Devnet Configuration (v1.3.0)
  *
- * Fresh deployment 2026-02-01:
- * - Fixed commitment tree size (was 3312, now 3952 bytes)
- * - New program ID: Hcqp9b83Hh2gN1bFWydZWJmpYQceo3PZCXobamSEj3bt
+ * Fresh deployment 2026-02-01 (second):
+ * - Fixed commitment tree with clean state (no corrupted test commitments)
+ * - New program ID: DjnHwqqY5zezADnmSEFdXixyQwRBe9p9V9rG5bQkmWkr
  */
 export const DEVNET_CONFIG: NetworkConfig = {
   network: "devnet",
 
   // Program IDs (fresh deployment 2026-02-01)
-  zvaultProgramId: address("Hcqp9b83Hh2gN1bFWydZWJmpYQceo3PZCXobamSEj3bt"),
+  zvaultProgramId: address("DjnHwqqY5zezADnmSEFdXixyQwRBe9p9V9rG5bQkmWkr"),
   btcLightClientProgramId: address("S6rgPjCeBhkYBejWyDR1zzU3sYCMob36LAf8tjwj8pn"),
   chadbufferProgramId: CHADBUFFER_PROGRAM_ID,
   token2022ProgramId: TOKEN_2022_PROGRAM_ID,
   ataProgramId: ATA_PROGRAM_ID,
 
   // Deployed Accounts (fresh deployment 2026-02-01)
-  poolStatePda: address("DfUsWNKFfYZyEkupTpq5PEvxB1aQ8Wg2ZWVNeFuRvFcJ"),
-  commitmentTreePda: address("FdS67pn6wXCzjQ9Kc8asXMADEtHD1qZigbQ2i4wpbPKh"),
-  zbtcMint: address("Bz4B3TYBEJigE9xLxQArbDH96LEZJ7Dj1AGL9BiQU63r"),
-  poolVault: address("5hsETnbpmDrewrhjuo9f6JjL9E4qjJqoR7U8XSTArLLw"),
+  poolStatePda: address("HtSvVLHGPB5E3doY9xECjnoEGuvDaGwoVTfBvt48kzKR"),
+  commitmentTreePda: address("5bppRDwiELngwtfYfEzTR3eh44nZVqxXMRhvYY6aV8jy"),
+  zbtcMint: address("8YfEdVFFzvXEqkanyvLD1naspJsHMbVrs7ibn8Xaff5f"),
+  poolVault: address("GU3S583UtNVdoGy2nzdh4csZnw3kkpt2DY3RGdDz4bm1"),
 
   // RPC Endpoints
   solanaRpcUrl: "https://api.devnet.solana.com",
@@ -344,7 +344,7 @@ export function createConfig(
 // Convenience Exports (for backwards compatibility)
 // =============================================================================
 
-/** Default zVault program ID (from current config) */
+/** Default zVault program ID (from current config) - DjnHwqqY5zezADnmSEFdXixyQwRBe9p9V9rG5bQkmWkr */
 export const ZVAULT_PROGRAM_ID: Address = DEVNET_CONFIG.zvaultProgramId;
 
 /** Default BTC Light Client program ID (from current config) */
@@ -354,7 +354,7 @@ export const BTC_LIGHT_CLIENT_PROGRAM_ID: Address = DEVNET_CONFIG.btcLightClient
 // Version Info
 // =============================================================================
 
-export const SDK_VERSION = "1.7.0";
+export const SDK_VERSION = "2.0.1";
 
 export const DEPLOYMENT_INFO = {
   version: SDK_VERSION,

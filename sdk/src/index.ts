@@ -316,6 +316,9 @@ export {
 export {
   isWalletAdapter,
   createStealthDeposit,
+  createStealthOutput,
+  createStealthOutputForCommitment,
+  deriveStealthAnnouncementPda,
   scanAnnouncements,
   scanAnnouncementsViewOnly,
   exportViewOnlyKeys,
@@ -329,6 +332,7 @@ export {
   STEALTH_ANNOUNCEMENT_SIZE,
   STEALTH_ANNOUNCEMENT_DISCRIMINATOR,
   type StealthDeposit,
+  type StealthOutputData,
   type ScannedNote,
   type ClaimInputs as StealthClaimInputs,
   type OnChainStealthAnnouncement,

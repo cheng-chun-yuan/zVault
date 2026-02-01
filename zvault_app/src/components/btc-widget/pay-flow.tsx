@@ -16,6 +16,7 @@ import {
   initPoseidon,
   grumpkinEcdh,
   pubKeyFromBytes,
+  prepareClaimInputs,
   DEVNET_CONFIG,
   type StealthMetaAddress,
   type ScannedNote,
@@ -211,8 +212,61 @@ export function PayFlow({ initialMode, preselectedNote }: PayFlowProps) {
       console.log("[Pay] Processing payment...");
       console.log("[Pay] Amount:", amountSats, "sats");
       console.log("[Pay] Leaf index:", selectedNote.leafIndex);
-      console.log("[Pay] Commitment:", selectedNote.commitmentHex);
+      console.log("[Pay] Commitment (hex from store):", selectedNote.commitmentHex);
+      console.log("[Pay] Commitment (raw bytes):", Array.from(selectedNote.commitment).map(b => b.toString(16).padStart(2, '0')).join(''));
       console.log("[Pay] Mode:", recipientMode);
+
+      // Pre-check: Verify the commitment exists in the on-chain tree
+      setProofStatus("Verifying commitment on-chain...");
+      try {
+        const verifyResponse = await fetch(`/api/merkle/proof?commitment=${selectedNote.commitmentHex}`);
+        const verifyData = await verifyResponse.json();
+        if (!verifyData.success) {
+          console.error("[Pay] Commitment not found on-chain:", verifyData.error);
+          throw new Error(
+            `This note (${selectedNote.commitmentHex.slice(0, 16)}...) no longer exists on-chain. ` +
+            `The deposit may have been spent or the tree was reset. Please refresh your inbox.`
+          );
+        }
+        console.log("[Pay] Commitment verified on-chain at leafIndex:", verifyData.leafIndex);
+      } catch (verifyError) {
+        if (verifyError instanceof Error && verifyError.message.includes("no longer exists")) {
+          throw verifyError;
+        }
+        console.warn("[Pay] Pre-check failed, continuing:", verifyError);
+      }
+
+      // Debug: Check types of critical values
+      console.log("[Pay] === TYPE CHECKS ===");
+      console.log("[Pay] typeof stealthPub:", typeof selectedNote.stealthPub);
+      console.log("[Pay] typeof stealthPub.x:", typeof selectedNote.stealthPub?.x);
+      console.log("[Pay] typeof amount:", typeof selectedNote.amount);
+      console.log("[Pay] stealthPub object:", JSON.stringify(selectedNote.stealthPub, (_, v) => typeof v === 'bigint' ? v.toString() + 'n' : v));
+
+      // Ensure bigint types (might have been serialized to string/number)
+      const pubKeyX = typeof selectedNote.stealthPub?.x === 'bigint'
+        ? selectedNote.stealthPub.x
+        : BigInt(selectedNote.stealthPub?.x || 0);
+      const noteAmount = typeof selectedNote.amount === 'bigint'
+        ? selectedNote.amount
+        : BigInt(selectedNote.amount || 0);
+
+      console.log("[Pay] Normalized pubKeyX:", pubKeyX.toString(16));
+      console.log("[Pay] Normalized amount:", noteAmount.toString());
+
+      // Debug: Compute what the circuit will compute and compare
+      const { computeUnifiedCommitment } = await import("@zvault/sdk");
+      const expectedCommitment = await computeUnifiedCommitment(pubKeyX, noteAmount);
+      const expectedCommitmentHex = expectedCommitment.toString(16).padStart(64, "0");
+      console.log("[Pay] Expected commitment (from Poseidon):", expectedCommitmentHex);
+      console.log("[Pay] Stored commitmentHex matches expected:", selectedNote.commitmentHex.toLowerCase() === expectedCommitmentHex.toLowerCase());
+
+      // CRITICAL: If mismatch, use the stored commitment's backing data
+      if (selectedNote.commitmentHex.toLowerCase() !== expectedCommitmentHex.toLowerCase()) {
+        console.error("[Pay] COMMITMENT MISMATCH DETECTED!");
+        console.error("[Pay] This indicates the stealthPub or amount doesn't match the original commitment.");
+        console.error("[Pay] Possible causes: type coercion, serialization issue, or wrong note data.");
+      }
 
       // Validate keys and wallet
       if (!keys) {
@@ -230,40 +284,78 @@ export function PayFlow({ initialMode, preselectedNote }: PayFlowProps) {
       }
 
       // Convert InboxNote to ScannedNote format for SDK functions
+      // IMPORTANT: Ensure bigint types are preserved (might have been serialized to string/number)
       const scannedNote: ScannedNote = {
-        amount: selectedNote.amount,
+        amount: typeof selectedNote.amount === 'bigint' ? selectedNote.amount : BigInt(selectedNote.amount || 0),
         ephemeralPub: selectedNote.ephemeralPub,
-        stealthPub: selectedNote.stealthPub,
+        stealthPub: {
+          x: typeof selectedNote.stealthPub?.x === 'bigint' ? selectedNote.stealthPub.x : BigInt(selectedNote.stealthPub?.x || 0),
+          y: typeof selectedNote.stealthPub?.y === 'bigint' ? selectedNote.stealthPub.y : BigInt(selectedNote.stealthPub?.y || 0),
+        },
         leafIndex: selectedNote.leafIndex,
         commitment: selectedNote.commitment,
       };
 
-      // Derive stealth private key using ECDH (same as prepareClaimInputs)
+      console.log("[Pay] === Scanned Note (normalized) ===");
+      console.log("[Pay] amount:", scannedNote.amount.toString());
+      console.log("[Pay] stealthPub.x:", scannedNote.stealthPub.x.toString(16).slice(0, 20) + "...");
+      console.log("[Pay] stealthPub.y:", scannedNote.stealthPub.y.toString(16).slice(0, 20) + "...");
+      console.log("[Pay] leafIndex:", scannedNote.leafIndex);
+
+      // Use SDK's prepareClaimInputs to derive stealth private key correctly
+      // This ensures the same derivation as createStealthDeposit
       setProofStatus("Deriving stealth keys...");
-      const sharedSecret = grumpkinEcdh(keys.viewingPrivKey, scannedNote.ephemeralPub);
 
-      // Compute stealth scalar: hash(sharedSecret)
-      const { sha256 } = await import("@noble/hashes/sha256");
-      const secretBytes = new Uint8Array(64);
-      const xHex = sharedSecret.x.toString(16).padStart(64, "0");
-      const yHex = sharedSecret.y.toString(16).padStart(64, "0");
-      for (let i = 0; i < 32; i++) {
-        secretBytes[i] = parseInt(xHex.slice(i * 2, i * 2 + 2), 16);
-        secretBytes[32 + i] = parseInt(yHex.slice(i * 2, i * 2 + 2), 16);
+      // Create a dummy merkle proof for prepareClaimInputs (we'll get the real one from API)
+      const dummyMerkleProof = {
+        root: 0n,
+        pathElements: Array(20).fill(0n),
+        pathIndices: Array(20).fill(0),
+      };
+
+      const claimInputs = await prepareClaimInputs(keys, scannedNote, dummyMerkleProof);
+      const stealthPrivKey = claimInputs.stealthPrivKey;
+
+      console.log("[Pay] Stealth private key derived using SDK");
+
+      // CRITICAL VERIFICATION: Re-compute stealthPub from the derived stealthPrivKey
+      // This is the source of truth - the stealthPrivKey was verified in prepareClaimInputs
+      const { pointMul, GRUMPKIN_GENERATOR, computeUnifiedCommitment: computeCommitment } = await import("@zvault/sdk");
+      const derivedStealthPub = pointMul(stealthPrivKey, GRUMPKIN_GENERATOR);
+      console.log("[Pay] === STEALTH KEY VERIFICATION ===");
+      console.log("[Pay] stealthPrivKey:", stealthPrivKey.toString(16).slice(0, 20) + "...");
+      console.log("[Pay] Derived stealthPub.x:", derivedStealthPub.x.toString(16).slice(0, 20) + "...");
+      console.log("[Pay] Scanned stealthPub.x:", scannedNote.stealthPub.x.toString(16).slice(0, 20) + "...");
+      console.log("[Pay] StealthPub X matches:", derivedStealthPub.x === scannedNote.stealthPub.x);
+
+      // Compute commitment from derived stealthPub - this is the authoritative value
+      const commitmentFromDerivedKey = await computeCommitment(derivedStealthPub.x, scannedNote.amount);
+      const commitmentFromScannedNote = await computeCommitment(scannedNote.stealthPub.x, scannedNote.amount);
+      console.log("[Pay] Commitment from derived key:", commitmentFromDerivedKey.toString(16).padStart(64, "0").slice(0, 20) + "...");
+      console.log("[Pay] Commitment from scanned note:", commitmentFromScannedNote.toString(16).padStart(64, "0").slice(0, 20) + "...");
+      console.log("[Pay] Stored commitmentHex:", selectedNote.commitmentHex.slice(0, 20) + "...");
+      console.log("[Pay] Derived commitment matches stored:", commitmentFromDerivedKey.toString(16).padStart(64, "0") === selectedNote.commitmentHex.toLowerCase());
+
+      // CRITICAL FIX: Use derivedStealthPub.x instead of scannedNote.stealthPub.x
+      // The derived value is verified correct via prepareClaimInputs (which throws if mismatch)
+      // The scanned value might have been corrupted by serialization/state management
+      const verifiedPubKeyX = derivedStealthPub.x;
+      const verifiedAmount = scannedNote.amount;
+
+      // Final verification - the derived commitment MUST match the stored one
+      const derivedCommitmentHex = commitmentFromDerivedKey.toString(16).padStart(64, "0");
+      if (derivedCommitmentHex !== selectedNote.commitmentHex.toLowerCase()) {
+        console.error("[Pay] FATAL: Derived commitment doesn't match stored commitment!");
+        console.error("[Pay] Stored commitment:", selectedNote.commitmentHex);
+        console.error("[Pay] Derived commitment:", derivedCommitmentHex);
+        console.error("[Pay] Selected note leafIndex:", selectedNote.leafIndex);
+        console.error("[Pay] This indicates stale data or the note no longer exists on-chain.");
+        throw new Error(
+          `Note mismatch detected. The commitment ${selectedNote.commitmentHex.slice(0, 16)}... ` +
+          `at leafIndex=${selectedNote.leafIndex} may no longer exist on-chain. ` +
+          `Please refresh your inbox and try again.`
+        );
       }
-      const scalarHash = sha256(secretBytes);
-      let scalar = 0n;
-      for (const byte of scalarHash) {
-        scalar = (scalar << 8n) | BigInt(byte);
-      }
-      // Grumpkin order
-      const GRUMPKIN_ORDER = 0x30644e72e131a029b85045b68181585d2833e84879b9709143e1f593f0000001n;
-      scalar = scalar % GRUMPKIN_ORDER;
-
-      // Derive stealth private key: stealthPriv = spendingPriv + scalar
-      const stealthPrivKey = (keys.spendingPrivKey + scalar) % GRUMPKIN_ORDER;
-
-      console.log("[Pay] Stealth private key derived");
 
       if (recipientMode === "public") {
         // =================================================================
@@ -279,14 +371,22 @@ export function PayFlow({ initialMode, preselectedNote }: PayFlowProps) {
 
         const recipientPubkey = new PublicKey(recipientAddress);
 
-        // Generate proof
+        // Final logging before proof generation
+        console.log("[Pay] === FINAL VALUES FOR PROOF ===");
+        console.log("[Pay] stealthPrivKey:", stealthPrivKey.toString(16).padStart(64, "0"));
+        console.log("[Pay] verifiedPubKeyX:", verifiedPubKeyX.toString(16).padStart(64, "0"));
+        console.log("[Pay] verifiedAmount:", verifiedAmount.toString());
+        console.log("[Pay] commitmentHex (from store):", selectedNote.commitmentHex);
+        console.log("[Pay] === END FINAL VALUES ===");
+
+        // Generate proof using VERIFIED values (derived from stealthPrivKey, not from store)
         const proofResult = await prover.generatePartialPublicProof({
           privKey: stealthPrivKey,
-          pubKeyX: scannedNote.stealthPub.x,
-          amount: scannedNote.amount,
+          pubKeyX: verifiedPubKeyX,           // Use derived value, not scannedNote.stealthPub.x
+          amount: verifiedAmount,
           commitmentHex: selectedNote.commitmentHex,
           publicAmount: BigInt(amountSats),
-          changePubKeyX: scannedNote.stealthPub.x, // Change goes back to same key
+          changePubKeyX: verifiedPubKeyX,     // Change goes back to same key (derived value)
           recipient: recipientPubkey.toBytes(),
         });
 
@@ -349,15 +449,15 @@ export function PayFlow({ initialMode, preselectedNote }: PayFlowProps) {
         const recipientSpendingPoint = pubKeyFromBytes(resolvedMeta.spendingPubKey);
         const recipientPubKeyX = recipientSpendingPoint.x;
 
-        // Generate proof
+        // Generate proof using VERIFIED values (derived from stealthPrivKey, not from store)
         const proofResult = await prover.generateSplitProof({
           privKey: stealthPrivKey,
-          pubKeyX: scannedNote.stealthPub.x,
-          amount: scannedNote.amount,
+          pubKeyX: verifiedPubKeyX,           // Use derived value, not scannedNote.stealthPub.x
+          amount: verifiedAmount,
           commitmentHex: selectedNote.commitmentHex,
           sendAmount: BigInt(amountSats),
           recipientPubKeyX,
-          changePubKeyX: scannedNote.stealthPub.x, // Change goes back to same key
+          changePubKeyX: verifiedPubKeyX,     // Change goes back to same key (derived value)
         });
 
         setProofStatus("Proof generated! Building transaction...");

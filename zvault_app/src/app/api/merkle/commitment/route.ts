@@ -88,7 +88,7 @@ export async function POST(request: NextRequest) {
     }
 
     // Add to index
-    const result = addCommitmentToIndex(commitmentBigInt, amountBigInt);
+    const result = await addCommitmentToIndex(commitmentBigInt, amountBigInt);
 
     return NextResponse.json({
       success: true,

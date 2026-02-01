@@ -1,16 +1,34 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getMerkleProof, getTreeStatus, syncFromOnChain } from "@/lib/commitment-index";
+import { PublicKey } from "@solana/web3.js";
+import {
+  buildCommitmentTreeFromChain,
+  getMerkleProofFromTree,
+  DEVNET_CONFIG,
+  initPoseidon,
+} from "@zvault/sdk";
+import { getHeliusConnection } from "@/lib/helius-server";
 
 export const runtime = "nodejs";
 
-// Track last sync time to avoid syncing too frequently
-let lastSyncTime = 0;
-const SYNC_COOLDOWN_MS = 10000; // 10 seconds
+// Poseidon initialization state
+let poseidonInitialized = false;
+let poseidonInitPromise: Promise<void> | null = null;
+
+async function ensurePoseidonInit(): Promise<void> {
+  if (poseidonInitialized) return;
+  if (poseidonInitPromise) return poseidonInitPromise;
+  poseidonInitPromise = initPoseidon().then(() => {
+    poseidonInitialized = true;
+    console.log("[Merkle Proof API] Poseidon initialized");
+  });
+  return poseidonInitPromise;
+}
 
 /**
- * GET /api/merkle/proof?commitment=xxx&root=xxx (optional)
+ * GET /api/merkle/proof?commitment=xxx
  *
  * Get Merkle proof for a commitment.
+ * Fetches tree directly from on-chain (like SDK tests do).
  * Returns siblings and indices for Noir circuit input.
  */
 export async function GET(request: NextRequest) {
@@ -49,50 +67,76 @@ export async function GET(request: NextRequest) {
       );
     }
 
-    let proof = getMerkleProof(commitmentBigInt);
+    // Ensure Poseidon is initialized
+    await ensurePoseidonInit();
 
-    // If not found locally, try syncing from on-chain
-    if (!proof) {
-      const now = Date.now();
-      if (now - lastSyncTime > SYNC_COOLDOWN_MS) {
-        console.log("[Merkle Proof API] Commitment not found, syncing from on-chain...");
-        try {
-          await syncFromOnChain();
-          lastSyncTime = now;
-          // Try again after sync
-          proof = getMerkleProof(commitmentBigInt);
-        } catch (syncError) {
-          console.error("[Merkle Proof API] Sync failed:", syncError);
-        }
-      }
+    // Debug: Log the commitment being looked up
+    console.log("[Merkle Proof API] Looking up commitment:");
+    console.log("[Merkle Proof API]   Input hex:", commitment);
+    console.log("[Merkle Proof API]   As bigint:", commitmentBigInt.toString());
+    console.log("[Merkle Proof API]   Normalized hex:", commitmentBigInt.toString(16).padStart(64, "0"));
+
+    // Fetch tree directly from on-chain (same as SDK tests)
+    console.log("[Merkle Proof API] Building tree from on-chain...");
+    const connection = getHeliusConnection("devnet");
+
+    const tree = await buildCommitmentTreeFromChain(
+      {
+        getProgramAccounts: async (programId, config) => {
+          // Build filters array, filtering out undefined values
+          const filters = config?.filters
+            ?.map((f: { memcmp?: { offset: number; bytes: string }; dataSize?: number }) => {
+              if (f.memcmp) {
+                return { memcmp: { offset: f.memcmp.offset, bytes: f.memcmp.bytes } };
+              }
+              if (f.dataSize !== undefined) {
+                return { dataSize: f.dataSize };
+              }
+              return null;
+            })
+            .filter((f): f is NonNullable<typeof f> => f !== null);
+
+          const accounts = await connection.getProgramAccounts(
+            new PublicKey(programId),
+            { filters }
+          );
+          return accounts.map((acc) => ({
+            pubkey: acc.pubkey.toBase58(),
+            account: { data: acc.account.data },
+          }));
+        },
+      },
+      DEVNET_CONFIG.zvaultProgramId
+    );
+
+    console.log(`[Merkle Proof API] Tree built with ${tree.size()} commitments`);
+
+    // Debug: Log first few commitments in tree for comparison
+    const treeData = tree.export();
+    const firstFewCommitments = treeData.commitments.slice(0, 5);
+    console.log("[Merkle Proof API] First few tree commitments (hex):");
+    for (const [hex, entry] of firstFewCommitments) {
+      console.log(`  [${entry.index}]: ${hex}`);
     }
+    console.log("[Merkle Proof API] Looking for:", commitmentBigInt.toString(16).padStart(64, "0"));
+
+    // Get proof for commitment
+    const proof = getMerkleProofFromTree(tree, commitmentBigInt);
 
     if (!proof) {
       return NextResponse.json(
         {
           success: false,
-          error: "Commitment not found in tree",
+          error: "Commitment not found in on-chain tree",
+          treeSize: tree.size(),
+          lookingFor: commitmentBigInt.toString(16).padStart(64, "0"),
+          firstTreeCommitments: firstFewCommitments.map(([hex]) => hex),
         },
         { status: 404 }
       );
     }
 
-    // Optional root verification
-    const requestedRoot = request.nextUrl.searchParams.get("root");
-    if (requestedRoot) {
-      const currentRoot = getTreeStatus().root;
-      if (requestedRoot.toLowerCase() !== currentRoot.toLowerCase()) {
-        return NextResponse.json(
-          {
-            success: false,
-            error: "Root mismatch - tree may have been updated",
-            expectedRoot: requestedRoot,
-            currentRoot,
-          },
-          { status: 409 }
-        );
-      }
-    }
+    console.log(`[Merkle Proof API] Found commitment at leaf index ${proof.leafIndex}`);
 
     return NextResponse.json({
       success: true,

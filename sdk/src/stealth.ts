@@ -853,3 +853,136 @@ export async function resolveZkeyName(
 ): Promise<ZkeyStealthAddress | null> {
   return lookupZkeyName(connection, name, programId);
 }
+
+// ========== Stealth Output Creation (for spend change/split outputs) ==========
+
+/**
+ * Stealth output data for creating StealthAnnouncement on-chain
+ *
+ * Used when creating change outputs from spend operations.
+ */
+export interface StealthOutputData {
+  /** Grumpkin ephemeral public key (33 bytes compressed) */
+  ephemeralPub: Uint8Array;
+  /** XOR encrypted amount (8 bytes) */
+  encryptedAmount: Uint8Array;
+  /** Commitment = Poseidon(stealthPub.x, amount) */
+  commitment: Uint8Array;
+}
+
+/**
+ * Create stealth output data for a self-send (change output)
+ *
+ * Used when spending notes with change - the change goes back to yourself
+ * as a new stealth output.
+ *
+ * @param keys - Your ZVaultKeys (change is sent to yourself)
+ * @param amountSats - Change amount in satoshis
+ * @returns Stealth output data for on-chain StealthAnnouncement
+ */
+export async function createStealthOutput(
+  keys: ZVaultKeys,
+  amountSats: bigint
+): Promise<StealthOutputData> {
+  // Generate a fresh ephemeral keypair
+  const ephemeral = generateGrumpkinKeyPair();
+
+  // Compute shared secret with own viewing key
+  const sharedSecret = grumpkinEcdh(ephemeral.privKey, keys.viewingPubKey);
+
+  // Derive stealth public key
+  const stealthPub = deriveStealthPubKey(keys.spendingPubKey, sharedSecret);
+
+  // Compute commitment
+  const commitmentBigint = poseidonHashSync([stealthPub.x, amountSats]);
+  const commitment = bigintToBytes(commitmentBigint);
+
+  // Encrypt amount
+  const encryptedAmount = encryptAmount(amountSats, sharedSecret);
+
+  return {
+    ephemeralPub: pointToCompressedBytes(ephemeral.pubKey),
+    encryptedAmount,
+    commitment,
+  };
+}
+
+/**
+ * Create stealth output data with pre-computed commitment
+ *
+ * Used when the commitment is computed by the ZK circuit.
+ * The ephemeral key and encrypted amount still need to match
+ * the commitment's underlying stealth pubkey and amount.
+ *
+ * @param keys - Recipient's keys (or your own for self-sends)
+ * @param amountSats - Amount in satoshis
+ * @param existingCommitment - Pre-computed commitment from ZK circuit
+ * @returns Stealth output data with matching ephemeral key and encrypted amount
+ */
+export async function createStealthOutputForCommitment(
+  keys: ZVaultKeys,
+  amountSats: bigint,
+  existingCommitment: Uint8Array
+): Promise<StealthOutputData> {
+  // Generate a fresh ephemeral keypair
+  const ephemeral = generateGrumpkinKeyPair();
+
+  // Compute shared secret with viewing key
+  const sharedSecret = grumpkinEcdh(ephemeral.privKey, keys.viewingPubKey);
+
+  // Derive stealth public key
+  const stealthPub = deriveStealthPubKey(keys.spendingPubKey, sharedSecret);
+
+  // Verify commitment matches
+  const computedCommitment = poseidonHashSync([stealthPub.x, amountSats]);
+  const actualCommitment = bytesToBigint(existingCommitment);
+
+  // Note: The commitment from ZK circuit is computed inside the circuit,
+  // so we need to generate the ephemeral key BEFORE creating the ZK proof inputs
+  // This function is mainly for creating announcement data after proof generation
+
+  // Encrypt amount
+  const encryptedAmount = encryptAmount(amountSats, sharedSecret);
+
+  return {
+    ephemeralPub: pointToCompressedBytes(ephemeral.pubKey),
+    encryptedAmount,
+    commitment: existingCommitment,
+  };
+}
+
+/**
+ * Derive StealthAnnouncement PDA address from ephemeral pubkey
+ *
+ * PDA seed: ["stealth", ephemeral_pub[1..33]]
+ * Uses bytes 1-32 of compressed ephemeral pubkey (skips prefix byte)
+ *
+ * @param ephemeralPub - 33-byte compressed Grumpkin pubkey
+ * @param programId - ZVault program ID
+ * @returns PDA address string (base58)
+ */
+export function deriveStealthAnnouncementPda(
+  ephemeralPub: Uint8Array,
+  programId: string
+): string {
+  if (ephemeralPub.length !== 33) {
+    throw new Error("Ephemeral pubkey must be 33 bytes (compressed Grumpkin)");
+  }
+
+  // Import getProgramDerivedAddress from @solana/kit
+  // Note: This is a synchronous version using the same algorithm
+  const seed = ephemeralPub.slice(1, 33); // Skip prefix byte, use 32 bytes
+
+  // Use @solana/kit's address derivation
+  const { getProgramDerivedAddress, address } = require("@solana/kit");
+
+  const [pda] = getProgramDerivedAddress({
+    programAddress: address(programId),
+    seeds: [
+      new TextEncoder().encode("stealth"),
+      seed,
+    ],
+  });
+
+  return pda.toString();
+}

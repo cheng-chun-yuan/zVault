@@ -485,8 +485,22 @@ export async function generateSpendPartialPublicProof(inputs: SpendPartialPublic
   const nullifier = computeNullifierSync(inputs.privKey, inputs.leafIndex);
   const nullifierHash = hashNullifierSync(nullifier);
 
+  // Compute input commitment (what the circuit will compute)
+  const inputCommitment = computeUnifiedCommitmentSync(inputs.pubKeyX, inputs.amount);
+
   // Compute change commitment
   const changeCommitment = computeUnifiedCommitmentSync(inputs.changePubKeyX, inputs.changeAmount);
+
+  // Debug logging - compare circuit's commitment with expected tree leaf
+  console.log("[Prover] === SPEND_PARTIAL_PUBLIC DEBUG ===");
+  console.log("[Prover] Input pubKeyX:", inputs.pubKeyX.toString(16).padStart(64, "0"));
+  console.log("[Prover] Input amount:", inputs.amount.toString());
+  console.log("[Prover] Input leafIndex:", inputs.leafIndex.toString());
+  console.log("[Prover] Computed input commitment:", inputCommitment.toString(16).padStart(64, "0"));
+  console.log("[Prover] Merkle root:", inputs.merkleRoot.toString(16).padStart(64, "0"));
+  console.log("[Prover] First sibling:", inputs.merkleProof.siblings[0]?.toString(16).padStart(64, "0"));
+  console.log("[Prover] Path indices:", pathIndices.join(", "));
+  console.log("[Prover] === END DEBUG ===");
 
   const circuitInputs: InputMap = {
     priv_key: inputs.privKey.toString(),

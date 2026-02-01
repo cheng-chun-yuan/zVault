@@ -15,6 +15,7 @@ import {
   STEALTH_ANNOUNCEMENT_SIZE,
   COMMITMENT_TREE_DISCRIMINATOR,
   ROOT_HISTORY_SIZE,
+  initPoseidon,
 } from "@zvault/sdk";
 import { readFileSync, writeFileSync, existsSync, mkdirSync } from "fs";
 import { PublicKey } from "@solana/web3.js";
@@ -32,6 +33,25 @@ const COMMITMENT_TREE_ADDRESS = DEVNET_CONFIG.commitmentTreePda;
 
 // Server-side singleton
 let serverIndex: CommitmentTreeIndex | null = null;
+
+// Poseidon initialization state
+let poseidonInitialized = false;
+let poseidonInitPromise: Promise<void> | null = null;
+
+/**
+ * Ensure Poseidon is initialized (required for Merkle tree operations)
+ */
+async function ensurePoseidonInit(): Promise<void> {
+  if (poseidonInitialized) return;
+  if (poseidonInitPromise) return poseidonInitPromise;
+
+  poseidonInitPromise = initPoseidon().then(() => {
+    poseidonInitialized = true;
+    console.log("[CommitmentIndex] Poseidon initialized");
+  });
+
+  return poseidonInitPromise;
+}
 
 /**
  * Get or create the server-side commitment index singleton
@@ -81,11 +101,15 @@ export function saveServerCommitmentIndex(): void {
 
 /**
  * Add a commitment to the index and persist
+ * Note: This is async because Poseidon must be initialized first
  */
-export function addCommitmentToIndex(
+export async function addCommitmentToIndex(
   commitment: bigint,
   amount: bigint
-): { leafIndex: bigint; root: bigint } {
+): Promise<{ leafIndex: bigint; root: bigint }> {
+  // Ensure Poseidon is initialized for Merkle tree hashing
+  await ensurePoseidonInit();
+
   const index = getServerCommitmentIndex();
   const leafIndex = index.addCommitment(commitment, amount);
   saveServerCommitmentIndex();
@@ -98,13 +122,17 @@ export function addCommitmentToIndex(
 
 /**
  * Get Merkle proof for a commitment
+ * Note: This is async because Poseidon must be initialized first for proof generation
  */
-export function getMerkleProof(commitment: bigint): {
+export async function getMerkleProof(commitment: bigint): Promise<{
   siblings: bigint[];
   indices: number[];
   leafIndex: bigint;
   root: bigint;
-} | null {
+} | null> {
+  // Ensure Poseidon is initialized for Merkle proof computation
+  await ensurePoseidonInit();
+
   const index = getServerCommitmentIndex();
   return index.getMerkleProof(commitment);
 }
@@ -184,6 +212,9 @@ export async function syncFromOnChain(): Promise<{
   skipped: number;
   root: string;
 }> {
+  // Ensure Poseidon is initialized for Merkle tree hashing
+  await ensurePoseidonInit();
+
   const connection = getHeliusConnection("devnet");
 
   console.log("[CommitmentIndex] Fetching stealth announcements from chain...");
@@ -223,6 +254,10 @@ export async function syncFromOnChain(): Promise<{
   commitments.sort((a, b) => a.leafIndex - b.leafIndex);
 
   console.log(`[CommitmentIndex] Parsed ${commitments.length} valid commitments`);
+  console.log(`[CommitmentIndex] Sorted commitments:`, commitments.map(c => ({
+    leafIndex: c.leafIndex,
+    commitment: c.commitment.toString(16).slice(0, 16) + "..."
+  })));
 
   // Reset and rebuild index
   serverIndex = new CommitmentTreeIndex();
@@ -232,7 +267,9 @@ export async function syncFromOnChain(): Promise<{
   for (const { commitment, leafIndex, amount } of commitments) {
     try {
       const addedIndex = serverIndex.addCommitment(commitment, amount);
-      if (Number(addedIndex) === leafIndex) {
+      const addedIndexNum = Number(addedIndex);
+      console.log(`[CommitmentIndex] Added commitment: leafIndex=${leafIndex}, addedIndex=${addedIndexNum}, match=${addedIndexNum === leafIndex}`);
+      if (addedIndexNum === leafIndex) {
         synced++;
       } else {
         console.warn(`[CommitmentIndex] Leaf index mismatch: expected ${leafIndex}, got ${addedIndex}`);

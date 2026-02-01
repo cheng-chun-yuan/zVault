@@ -146,8 +146,27 @@ export function useProver() {
         // Ensure modules are loaded
         const { prover, sdk } = await loadProverModules();
 
-        // 1. Fetch merkle proof
-        const merkleProof = await fetchMerkleProof(params.commitmentHex);
+        // Debug: Verify commitment matches what circuit will compute
+        const expectedCommitment = await sdk.computeUnifiedCommitment(params.pubKeyX, params.amount);
+        const expectedHex = expectedCommitment.toString(16).padStart(64, "0");
+        console.log("[Prover] Debug commitment verification (split):");
+        console.log("[Prover]   Input commitmentHex:", params.commitmentHex);
+        console.log("[Prover]   pubKeyX:", params.pubKeyX.toString(16));
+        console.log("[Prover]   amount:", params.amount.toString());
+        console.log("[Prover]   Expected (computed):", expectedHex);
+        console.log("[Prover]   Match:", params.commitmentHex.toLowerCase() === expectedHex.toLowerCase());
+
+        // If they don't match, use the computed commitment for merkle lookup
+        const commitmentForLookup = params.commitmentHex.toLowerCase() === expectedHex.toLowerCase()
+          ? params.commitmentHex
+          : expectedHex;
+
+        if (params.commitmentHex.toLowerCase() !== expectedHex.toLowerCase()) {
+          console.warn("[Prover] Commitment mismatch detected! Using computed commitment for merkle lookup.");
+        }
+
+        // 1. Fetch merkle proof using the correct commitment
+        const merkleProof = await fetchMerkleProof(commitmentForLookup);
 
         setState((s) => ({ ...s, progress: "Preparing proof inputs..." }));
 
@@ -241,8 +260,27 @@ export function useProver() {
         // Ensure modules are loaded
         const { prover, sdk } = await loadProverModules();
 
-        // 1. Fetch merkle proof
-        const merkleProof = await fetchMerkleProof(params.commitmentHex);
+        // Debug: Verify commitment matches what circuit will compute
+        const expectedCommitment = await sdk.computeUnifiedCommitment(params.pubKeyX, params.amount);
+        const expectedHex = expectedCommitment.toString(16).padStart(64, "0");
+        console.log("[Prover] Debug commitment verification (partial public):");
+        console.log("[Prover]   Input commitmentHex:", params.commitmentHex);
+        console.log("[Prover]   pubKeyX:", params.pubKeyX.toString(16));
+        console.log("[Prover]   amount:", params.amount.toString());
+        console.log("[Prover]   Expected (computed):", expectedHex);
+        console.log("[Prover]   Match:", params.commitmentHex.toLowerCase() === expectedHex.toLowerCase());
+
+        // If they don't match, use the computed commitment for merkle lookup
+        const commitmentForLookup = params.commitmentHex.toLowerCase() === expectedHex.toLowerCase()
+          ? params.commitmentHex
+          : expectedHex;
+
+        if (params.commitmentHex.toLowerCase() !== expectedHex.toLowerCase()) {
+          console.warn("[Prover] Commitment mismatch detected! Using computed commitment for merkle lookup.");
+        }
+
+        // 1. Fetch merkle proof using the correct commitment
+        const merkleProof = await fetchMerkleProof(commitmentForLookup);
 
         setState((s) => ({ ...s, progress: "Preparing proof inputs..." }));
 

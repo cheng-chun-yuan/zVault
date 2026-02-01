@@ -107,8 +107,8 @@ async function main() {
   const balance = await connection.getBalance(authority.publicKey);
   console.log(`Balance: ${balance / 1e9} SOL`);
 
-  if (balance < 5 * 1e9) {
-    console.log("\n⚠️  Low balance! Need at least 5 SOL for deployment.");
+  if (balance < 3 * 1e9) {
+    console.log("\n⚠️  Low balance! Need at least 3 SOL for deployment.");
     console.log("Request airdrop or transfer SOL to continue.");
     return;
   }
