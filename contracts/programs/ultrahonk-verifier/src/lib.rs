@@ -36,6 +36,7 @@ use pinocchio::{
 };
 
 pub mod bn254;
+pub mod constants;
 pub mod error;
 pub mod transcript;
 pub mod types;
@@ -323,11 +324,11 @@ fn process_verify_from_buffer(
 
     // Create VK that matches the proof's circuit parameters
     // For demo: derive VK from proof's circuit_size_log and actual public inputs count
-    let vk = Box::new(VerificationKey {
-        circuit_size_log: proof.circuit_size_log,
-        num_public_inputs: public_inputs.len() as u32,
-        g2_x: VerificationKey::default_g2_x(),
-    });
+    let mut vk = VerificationKey::default();
+    vk.circuit_size_log = proof.circuit_size_log;
+    vk.num_public_inputs = public_inputs.len() as u32;
+    vk.g2_x = VerificationKey::default_g2_x();
+    let vk = Box::new(vk);
 
     // Verify proof
     let valid = verify_ultrahonk_proof(&vk, &proof, &public_inputs)
