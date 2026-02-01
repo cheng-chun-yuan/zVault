@@ -387,6 +387,25 @@ export interface SpendSplitInputs {
   output2PubKeyX: bigint;
   /** Output 2: Amount in satoshis */
   output2Amount: bigint;
+  /**
+   * Output 1: Ephemeral pubkey x-coordinate for stealth announcement (circuit public input)
+   * This is the x-coordinate of the Grumpkin ephemeral pubkey used for ECDH.
+   */
+  output1EphemeralPubX: bigint;
+  /**
+   * Output 1: Packed encrypted amount with y_sign (circuit public input)
+   * bits 0-63: XOR encrypted amount, bit 64: y-coordinate sign bit
+   */
+  output1EncryptedAmountWithSign: bigint;
+  /**
+   * Output 2: Ephemeral pubkey x-coordinate for stealth announcement (circuit public input)
+   */
+  output2EphemeralPubX: bigint;
+  /**
+   * Output 2: Packed encrypted amount with y_sign (circuit public input)
+   * bits 0-63: XOR encrypted amount, bit 64: y-coordinate sign bit
+   */
+  output2EncryptedAmountWithSign: bigint;
 }
 
 /**
@@ -430,6 +449,11 @@ export async function generateSpendSplitProof(inputs: SpendSplitInputs): Promise
     nullifier_hash: nullifierHash.toString(),
     output_commitment1: outputCommitment1.toString(),
     output_commitment2: outputCommitment2.toString(),
+    // Stealth output data (circuit public inputs for relayer-safety)
+    output1_ephemeral_pub_x: inputs.output1EphemeralPubX.toString(),
+    output1_encrypted_amount_with_sign: inputs.output1EncryptedAmountWithSign.toString(),
+    output2_ephemeral_pub_x: inputs.output2EphemeralPubX.toString(),
+    output2_encrypted_amount_with_sign: inputs.output2EncryptedAmountWithSign.toString(),
   };
 
   return generateProof("spend_split", circuitInputs);
@@ -461,6 +485,16 @@ export interface SpendPartialPublicInputs {
   changeAmount: bigint;
   /** Recipient Solana wallet (as bigint from 32 bytes) */
   recipient: bigint;
+  /**
+   * Change: Ephemeral pubkey x-coordinate for stealth announcement (circuit public input)
+   * This is the x-coordinate of the Grumpkin ephemeral pubkey used for ECDH.
+   */
+  changeEphemeralPubX: bigint;
+  /**
+   * Change: Packed encrypted amount with y_sign (circuit public input)
+   * bits 0-63: XOR encrypted amount, bit 64: y-coordinate sign bit
+   */
+  changeEncryptedAmountWithSign: bigint;
 }
 
 /**
@@ -516,6 +550,9 @@ export async function generateSpendPartialPublicProof(inputs: SpendPartialPublic
     public_amount: inputs.publicAmount.toString(),
     change_commitment: changeCommitment.toString(),
     recipient: inputs.recipient.toString(),
+    // Stealth output data (circuit public inputs for relayer-safety)
+    change_ephemeral_pub_x: inputs.changeEphemeralPubX.toString(),
+    change_encrypted_amount_with_sign: inputs.changeEncryptedAmountWithSign.toString(),
   };
 
   return generateProof("spend_partial_public", circuitInputs);

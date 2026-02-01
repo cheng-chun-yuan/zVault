@@ -135,6 +135,12 @@ async function generateSplitProof(
     output1Amount: output1.amount,
     output2PubKeyX,
     output2Amount: output2.amount,
+    // Stealth output data - must be provided by caller for relayer-safe transactions
+    // Legacy API placeholder - callers should use the new API with stealth data
+    output1EphemeralPubX: 0n,
+    output1EncryptedAmountWithSign: 0n,
+    output2EphemeralPubX: 0n,
+    output2EncryptedAmountWithSign: 0n,
   };
 
   return _generateSpendSplitProof(inputs);
@@ -175,6 +181,10 @@ async function generatePartialWithdrawProof(
     changePubKeyX,
     changeAmount: changeNote.amount,
     recipient: recipientBigint,
+    // Stealth output data - must be provided by caller for relayer-safe transactions
+    // Legacy API placeholder - callers should use the new API with stealth data
+    changeEphemeralPubX: 0n,
+    changeEncryptedAmountWithSign: 0n,
   };
 
   return _generateSpendPartialPublicProof(inputs);

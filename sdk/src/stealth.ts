@@ -871,6 +871,134 @@ export interface StealthOutputData {
 }
 
 /**
+ * Circuit-ready stealth output data
+ *
+ * Used for spend_split and spend_partial_public circuit inputs.
+ * Contains the ephemeral pubkey x-coordinate and packed encrypted amount with y_sign.
+ */
+export interface CircuitStealthOutput {
+  /** Ephemeral pubkey x-coordinate (Field element) */
+  ephemeralPubX: bigint;
+  /** Packed: bits 0-63 = encrypted amount, bit 64 = y_sign */
+  encryptedAmountWithSign: bigint;
+}
+
+/**
+ * Extract y-coordinate sign from compressed Grumpkin pubkey
+ *
+ * Compressed format: prefix byte (0x02 for even y, 0x03 for odd y) + 32-byte x
+ *
+ * @param compressedPub - 33-byte compressed Grumpkin pubkey
+ * @returns true if y is odd (prefix 0x03), false if y is even (prefix 0x02)
+ */
+export function extractYSign(compressedPub: Uint8Array): boolean {
+  if (compressedPub.length !== 33) {
+    throw new Error("Compressed pubkey must be 33 bytes");
+  }
+  const prefix = compressedPub[0];
+  if (prefix === 0x02) return false; // y is even
+  if (prefix === 0x03) return true;  // y is odd
+  throw new Error(`Invalid compressed pubkey prefix: 0x${prefix.toString(16)}`);
+}
+
+/**
+ * Extract x-coordinate from compressed Grumpkin pubkey
+ *
+ * @param compressedPub - 33-byte compressed Grumpkin pubkey
+ * @returns x-coordinate as bigint
+ */
+export function extractX(compressedPub: Uint8Array): bigint {
+  if (compressedPub.length !== 33) {
+    throw new Error("Compressed pubkey must be 33 bytes");
+  }
+  return bytesToBigint(compressedPub.slice(1, 33));
+}
+
+/**
+ * Pack encrypted amount and y_sign into a single Field element
+ *
+ * Layout: bits 0-63 = encrypted amount (little-endian), bit 64 = y_sign
+ *
+ * @param encryptedAmount - 8-byte XOR encrypted amount
+ * @param ySign - true if y is odd, false if y is even
+ * @returns Packed value as bigint
+ */
+export function packEncryptedAmountWithSign(encryptedAmount: Uint8Array, ySign: boolean): bigint {
+  if (encryptedAmount.length !== 8) {
+    throw new Error("Encrypted amount must be 8 bytes");
+  }
+
+  // Convert encrypted amount to bigint (little-endian)
+  let amount = 0n;
+  for (let i = 7; i >= 0; i--) {
+    amount = (amount << 8n) | BigInt(encryptedAmount[i]);
+  }
+
+  // Set bit 64 if y is odd
+  if (ySign) {
+    amount |= (1n << 64n);
+  }
+
+  return amount;
+}
+
+/**
+ * Convert StealthOutputData to circuit-ready format
+ *
+ * Extracts ephemeral pubkey x-coordinate and packs encrypted amount with y_sign.
+ * This format is used as circuit public inputs for relayer-safe stealth announcements.
+ *
+ * @param output - Stealth output data from createStealthOutput()
+ * @returns Circuit-ready ephemeralPubX and encryptedAmountWithSign
+ */
+export function packStealthOutputForCircuit(output: StealthOutputData): CircuitStealthOutput {
+  const ephemeralPubX = extractX(output.ephemeralPub);
+  const ySign = extractYSign(output.ephemeralPub);
+  const encryptedAmountWithSign = packEncryptedAmountWithSign(output.encryptedAmount, ySign);
+
+  return {
+    ephemeralPubX,
+    encryptedAmountWithSign,
+  };
+}
+
+/**
+ * Reconstruct compressed pubkey from x-coordinate and y_sign
+ *
+ * @param x - x-coordinate as bigint
+ * @param ySign - true if y is odd (use 0x03), false if y is even (use 0x02)
+ * @returns 33-byte compressed Grumpkin pubkey
+ */
+export function reconstructCompressedPub(x: bigint, ySign: boolean): Uint8Array {
+  const compressed = new Uint8Array(33);
+  compressed[0] = ySign ? 0x03 : 0x02;
+  const xBytes = bigintToBytes(x);
+  compressed.set(xBytes, 1);
+  return compressed;
+}
+
+/**
+ * Unpack encrypted amount and y_sign from packed Field element
+ *
+ * @param packed - Packed value (bits 0-63 = encrypted amount, bit 64 = y_sign)
+ * @returns Object with encryptedAmount (8 bytes) and ySign (boolean)
+ */
+export function unpackEncryptedAmountWithSign(packed: bigint): { encryptedAmount: Uint8Array; ySign: boolean } {
+  const ySign = (packed & (1n << 64n)) !== 0n;
+  const amount = packed & ((1n << 64n) - 1n);
+
+  // Convert to 8-byte little-endian
+  const encryptedAmount = new Uint8Array(8);
+  let temp = amount;
+  for (let i = 0; i < 8; i++) {
+    encryptedAmount[i] = Number(temp & 0xffn);
+    temp = temp >> 8n;
+  }
+
+  return { encryptedAmount, ySign };
+}
+
+/**
  * Create stealth output data for a self-send (change output)
  *
  * Used when spending notes with change - the change goes back to yourself
