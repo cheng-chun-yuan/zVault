@@ -24,10 +24,10 @@ use pinocchio_system::instructions::CreateAccount;
 use crate::error::ZVaultError;
 use crate::state::{
     CommitmentTree, NullifierOperationType, NullifierRecord, PoolState,
-    NULLIFIER_RECORD_DISCRIMINATOR,
+    StealthAnnouncement, NULLIFIER_RECORD_DISCRIMINATOR, STEALTH_ANNOUNCEMENT_DISCRIMINATOR,
 };
 use crate::utils::{
-    transfer_zbtc, verify_ultrahonk_spend_partial_public_proof,
+    create_pda_account, transfer_zbtc, verify_ultrahonk_spend_partial_public_proof,
     validate_account_writable, validate_program_owner, validate_token_2022_owner,
     validate_token_program_key, MAX_ULTRAHONK_PROOF_SIZE,
 };
@@ -78,6 +78,8 @@ impl PartialPublicProofSource {
 /// - change_commitment: [u8; 32]
 /// - recipient: [u8; 32]
 /// - vk_hash: [u8; 32]
+/// - ephemeral_pub_change: [u8; 33] - Grumpkin pubkey for change stealth announcement
+/// - encrypted_amount_change: [u8; 8] - XOR encrypted change amount
 /// (proof is read from ChadBuffer account passed as additional account)
 pub struct SpendPartialPublicData<'a> {
     pub proof_source: PartialPublicProofSource,
@@ -88,14 +90,18 @@ pub struct SpendPartialPublicData<'a> {
     pub change_commitment: &'a [u8; 32],
     pub recipient: &'a [u8; 32],
     pub vk_hash: &'a [u8; 32],
+    /// Grumpkin ephemeral pubkey for change stealth announcement (33 bytes compressed)
+    pub ephemeral_pub_change: [u8; 33],
+    /// XOR encrypted change amount (8 bytes)
+    pub encrypted_amount_change: [u8; 8],
 }
 
 impl<'a> SpendPartialPublicData<'a> {
-    /// Minimum size for inline mode: proof_source(1) + proof_len(4) + root(32) + nullifier(32) + amount(8) + change(32) + recipient(32) + vk_hash(32) = 173 bytes + proof
-    pub const MIN_SIZE_INLINE: usize = 1 + 4 + 32 + 32 + 8 + 32 + 32 + 32;
+    /// Minimum size for inline mode: proof_source(1) + proof_len(4) + root(32) + nullifier(32) + amount(8) + change(32) + recipient(32) + vk_hash(32) + ephemeral_pub_change(33) + encrypted_amount_change(8) = 214 bytes + proof
+    pub const MIN_SIZE_INLINE: usize = 1 + 4 + 32 + 32 + 8 + 32 + 32 + 32 + 33 + 8;
 
-    /// Minimum size for buffer mode: proof_source(1) + root(32) + nullifier(32) + amount(8) + change(32) + recipient(32) + vk_hash(32) = 169 bytes
-    pub const MIN_SIZE_BUFFER: usize = 1 + 32 + 32 + 8 + 32 + 32 + 32;
+    /// Minimum size for buffer mode: proof_source(1) + root(32) + nullifier(32) + amount(8) + change(32) + recipient(32) + vk_hash(32) + ephemeral_pub_change(33) + encrypted_amount_change(8) = 210 bytes
+    pub const MIN_SIZE_BUFFER: usize = 1 + 32 + 32 + 8 + 32 + 32 + 32 + 33 + 8;
 
     pub fn from_bytes(data: &'a [u8]) -> Result<Self, ProgramError> {
         if data.is_empty() {
@@ -125,7 +131,7 @@ impl<'a> SpendPartialPublicData<'a> {
             return Err(ProgramError::InvalidInstructionData);
         }
 
-        let expected_size = 1 + 4 + proof_len + 32 + 32 + 8 + 32 + 32 + 32;
+        let expected_size = 1 + 4 + proof_len + 32 + 32 + 8 + 32 + 32 + 32 + 33 + 8;
         if data.len() < expected_size {
             return Err(ProgramError::InvalidInstructionData);
         }
@@ -149,6 +155,14 @@ impl<'a> SpendPartialPublicData<'a> {
         offset += 32;
 
         let vk_hash: &[u8; 32] = data[offset..offset + 32].try_into().unwrap();
+        offset += 32;
+
+        let mut ephemeral_pub_change = [0u8; 33];
+        ephemeral_pub_change.copy_from_slice(&data[offset..offset + 33]);
+        offset += 33;
+
+        let mut encrypted_amount_change = [0u8; 8];
+        encrypted_amount_change.copy_from_slice(&data[offset..offset + 8]);
 
         Ok(Self {
             proof_source: PartialPublicProofSource::Inline,
@@ -159,6 +173,8 @@ impl<'a> SpendPartialPublicData<'a> {
             change_commitment,
             recipient,
             vk_hash,
+            ephemeral_pub_change,
+            encrypted_amount_change,
         })
     }
 
@@ -185,6 +201,14 @@ impl<'a> SpendPartialPublicData<'a> {
         offset += 32;
 
         let vk_hash: &[u8; 32] = data[offset..offset + 32].try_into().unwrap();
+        offset += 32;
+
+        let mut ephemeral_pub_change = [0u8; 33];
+        ephemeral_pub_change.copy_from_slice(&data[offset..offset + 33]);
+        offset += 33;
+
+        let mut encrypted_amount_change = [0u8; 8];
+        encrypted_amount_change.copy_from_slice(&data[offset..offset + 8]);
 
         Ok(Self {
             proof_source: PartialPublicProofSource::Buffer,
@@ -195,13 +219,15 @@ impl<'a> SpendPartialPublicData<'a> {
             change_commitment,
             recipient,
             vk_hash,
+            ephemeral_pub_change,
+            encrypted_amount_change,
         })
     }
 }
 
 /// Spend partial public accounts
 ///
-/// ## Inline Mode (10 accounts)
+/// ## Inline Mode (11 accounts)
 /// 0. pool_state (writable)
 /// 1. commitment_tree (writable)
 /// 2. nullifier_record (writable)
@@ -212,9 +238,10 @@ impl<'a> SpendPartialPublicData<'a> {
 /// 7. token_program
 /// 8. system_program
 /// 9. ultrahonk_verifier - UltraHonk verifier program
+/// 10. stealth_announcement_change (writable) - StealthAnnouncement PDA for change output
 ///
-/// ## Buffer Mode (11 accounts - adds proof_buffer)
-/// 10. proof_buffer (readonly) - ChadBuffer account containing proof data
+/// ## Buffer Mode (12 accounts - adds proof_buffer)
+/// 11. proof_buffer (readonly) - ChadBuffer account containing proof data
 pub struct SpendPartialPublicAccounts<'a> {
     pub pool_state: &'a AccountInfo,
     pub commitment_tree: &'a AccountInfo,
@@ -226,6 +253,7 @@ pub struct SpendPartialPublicAccounts<'a> {
     pub token_program: &'a AccountInfo,
     pub system_program: &'a AccountInfo,
     pub ultrahonk_verifier: &'a AccountInfo,
+    pub stealth_announcement_change: &'a AccountInfo,
     pub proof_buffer: Option<&'a AccountInfo>,
 }
 
@@ -234,7 +262,7 @@ impl<'a> SpendPartialPublicAccounts<'a> {
         accounts: &'a [AccountInfo],
         use_buffer: bool,
     ) -> Result<Self, ProgramError> {
-        let min_accounts = if use_buffer { 11 } else { 10 };
+        let min_accounts = if use_buffer { 12 } else { 11 };
         if accounts.len() < min_accounts {
             return Err(ProgramError::NotEnoughAccountKeys);
         }
@@ -249,8 +277,9 @@ impl<'a> SpendPartialPublicAccounts<'a> {
         let token_program = &accounts[7];
         let system_program = &accounts[8];
         let ultrahonk_verifier = &accounts[9];
+        let stealth_announcement_change = &accounts[10];
         let proof_buffer = if use_buffer {
-            Some(&accounts[10])
+            Some(&accounts[11])
         } else {
             None
         };
@@ -271,6 +300,7 @@ impl<'a> SpendPartialPublicAccounts<'a> {
             token_program,
             system_program,
             ultrahonk_verifier,
+            stealth_announcement_change,
             proof_buffer,
         })
     }
@@ -310,6 +340,16 @@ pub fn process_spend_partial_public(
     validate_account_writable(accounts.nullifier_record)?;
     validate_account_writable(accounts.pool_vault)?;
     validate_account_writable(accounts.recipient_ata)?;
+    validate_account_writable(accounts.stealth_announcement_change)?;
+
+    // Verify stealth announcement PDA for change output
+    // Use bytes 1-32 of ephemeral_pub (skip prefix byte) - max seed length is 32 bytes
+    let stealth_seeds: &[&[u8]] = &[StealthAnnouncement::SEED, &ix_data.ephemeral_pub_change[1..33]];
+    let (expected_stealth_pda, stealth_bump) = find_program_address(stealth_seeds, program_id);
+    if accounts.stealth_announcement_change.key() != &expected_stealth_pda {
+        pinocchio::msg!("Invalid stealth announcement PDA for change output");
+        return Err(ProgramError::InvalidSeeds);
+    }
 
     // Validate public amount
     if ix_data.public_amount == 0 {
@@ -453,8 +493,8 @@ pub fn process_spend_partial_public(
         nullifier.set_operation_type(NullifierOperationType::Transfer);
     }
 
-    // Add change commitment to tree
-    {
+    // Add change commitment to tree and capture leaf index
+    let change_leaf_index = {
         let mut tree_data = accounts.commitment_tree.try_borrow_mut_data()?;
         let tree = CommitmentTree::from_bytes_mut(&mut tree_data)?;
 
@@ -462,7 +502,48 @@ pub fn process_spend_partial_public(
             return Err(ZVaultError::TreeFull.into());
         }
 
-        tree.insert_leaf(ix_data.change_commitment)?;
+        tree.insert_leaf(ix_data.change_commitment)?
+    };
+
+    // Create stealth announcement PDA for change output (if it doesn't exist)
+    let stealth_account_data_len = accounts.stealth_announcement_change.data_len();
+    if stealth_account_data_len > 0 {
+        let ann_data = accounts.stealth_announcement_change.try_borrow_data()?;
+        if ann_data[0] == STEALTH_ANNOUNCEMENT_DISCRIMINATOR {
+            return Err(ProgramError::AccountAlreadyInitialized);
+        }
+    } else {
+        let rent = Rent::get()?;
+        let lamports = rent.minimum_balance(StealthAnnouncement::SIZE);
+
+        let stealth_bump_bytes = [stealth_bump];
+        let signer_seeds: &[&[u8]] = &[
+            StealthAnnouncement::SEED,
+            &ix_data.ephemeral_pub_change[1..33],
+            &stealth_bump_bytes,
+        ];
+
+        create_pda_account(
+            accounts.user,
+            accounts.stealth_announcement_change,
+            program_id,
+            lamports,
+            StealthAnnouncement::SIZE as u64,
+            signer_seeds,
+        )?;
+    }
+
+    // Initialize stealth announcement for change output
+    {
+        let mut ann_data = accounts.stealth_announcement_change.try_borrow_mut_data()?;
+        let announcement = StealthAnnouncement::init(&mut ann_data)?;
+
+        announcement.bump = stealth_bump;
+        announcement.ephemeral_pub = ix_data.ephemeral_pub_change;
+        announcement.set_encrypted_amount(ix_data.encrypted_amount_change);
+        announcement.commitment.copy_from_slice(ix_data.change_commitment);
+        announcement.set_leaf_index(change_leaf_index);
+        announcement.set_created_at(clock.unix_timestamp);
     }
 
     // Transfer public amount from pool vault to recipient's ATA

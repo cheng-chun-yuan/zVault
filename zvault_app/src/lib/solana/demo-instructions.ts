@@ -41,13 +41,18 @@ export { DEMO_INSTRUCTION };
 
 /**
  * Derive Stealth Announcement PDA
+ *
+ * Note: Uses bytes 1-32 of ephemeral_pub (skips prefix byte) to stay within
+ * Solana's 32-byte max seed length. Must match on-chain derivation.
  */
 export function deriveStealthAnnouncementPDA(
   ephemeralPub: Uint8Array,
   programId: PublicKey = ZVAULT_PROGRAM_ID
 ): [PublicKey, number] {
+  // On-chain uses ephemeral_pub[1..33] (skip prefix byte, use x-coordinate only)
+  const ephemeralPubTruncated = ephemeralPub.slice(1, 33);
   return PublicKey.findProgramAddressSync(
-    [Buffer.from(PDA_SEEDS.STEALTH), ephemeralPub],
+    [Buffer.from(PDA_SEEDS.STEALTH), ephemeralPubTruncated],
     programId
   );
 }

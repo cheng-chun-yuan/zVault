@@ -15,7 +15,7 @@ import {
   derivePoolVaultATA,
 } from "@/lib/solana/instructions";
 import { getHeliusConnection, isHeliusConfigured } from "@/lib/helius-server";
-import { addCommitmentToIndex } from "@/lib/commitment-index";
+import { addCommitmentToIndex, syncFromOnChain } from "@/lib/commitment-index";
 
 export const runtime = "nodejs";
 
@@ -59,6 +59,15 @@ export async function POST(request: NextRequest) {
     if (!isValidHex(commitment, 64)) {
       return NextResponse.json(
         { success: false, error: "Invalid commitment. Must be 64 valid hex characters (32 bytes)" },
+        { status: 400 }
+      );
+    }
+    // Validate commitment is within BN254 field (required for ZK circuits)
+    const BN254_FIELD_PRIME = 21888242871839275222246405745257275088548364400416034343698204186575808495617n;
+    const commitmentBigInt = BigInt("0x" + commitment);
+    if (commitmentBigInt >= BN254_FIELD_PRIME) {
+      return NextResponse.json(
+        { success: false, error: "Invalid commitment. Value exceeds BN254 field modulus (not a valid ZK field element)" },
         { status: 400 }
       );
     }
@@ -217,15 +226,29 @@ export async function POST(request: NextRequest) {
 
       console.log("[Demo API] Transaction confirmed:", signature);
 
-      // Add commitment to local merkle tree index for proof generation
+      // Sync local index from on-chain AFTER transaction confirms
+      // This ensures local index includes the new commitment with correct leaf index
+      let leafIndex: string | undefined;
       try {
-        const commitmentBigInt = BigInt("0x" + commitment);
-        const amountBigInt = BigInt(amount);
-        const indexResult = addCommitmentToIndex(commitmentBigInt, amountBigInt);
-        console.log("[Demo API] Added to local index, leafIndex:", indexResult.leafIndex.toString());
-      } catch (indexError) {
-        console.warn("[Demo API] Failed to add to local index (may already exist):", indexError);
-        // Don't fail the request - on-chain deposit succeeded
+        console.log("[Demo API] Syncing local index from on-chain...");
+        const syncResult = await syncFromOnChain();
+        console.log("[Demo API] Synced", syncResult.synced, "commitments, root:", syncResult.root.slice(0, 16) + "...");
+
+        // The new commitment should now be in the synced index
+        // Find its leaf index from the sync
+        leafIndex = (syncResult.synced - 1).toString();
+      } catch (syncError) {
+        console.warn("[Demo API] Sync failed:", syncError);
+        // Fallback: try to add manually
+        try {
+          const commitmentBigInt = BigInt("0x" + commitment);
+          const amountBigInt = BigInt(amount);
+          const indexResult = await addCommitmentToIndex(commitmentBigInt, amountBigInt);
+          leafIndex = indexResult.leafIndex.toString();
+          console.log("[Demo API] Added to local index manually, leafIndex:", leafIndex);
+        } catch (indexError) {
+          console.warn("[Demo API] Failed to add to local index:", indexError);
+        }
       }
 
       return NextResponse.json({
@@ -247,12 +270,14 @@ export async function POST(request: NextRequest) {
   } catch (error) {
     // Log full error server-side for debugging
     console.error("[Demo API] Error:", error);
+    console.error("[Demo API] Error stack:", error instanceof Error ? error.stack : "no stack");
 
-    // Return generic error message to avoid leaking implementation details
+    // Return error message for debugging (in dev mode)
+    const errorMessage = error instanceof Error ? error.message : "Internal server error";
     return NextResponse.json(
       {
         success: false,
-        error: "Internal server error",
+        error: process.env.NODE_ENV === "development" ? errorMessage : "Internal server error",
       },
       { status: 500 }
     );

@@ -21,7 +21,7 @@ use pinocchio::{
 use crate::error::ZVaultError;
 use crate::state::{
     CommitmentTree, NullifierOperationType, NullifierRecord, PoolState,
-    NULLIFIER_RECORD_DISCRIMINATOR,
+    StealthAnnouncement, NULLIFIER_RECORD_DISCRIMINATOR, STEALTH_ANNOUNCEMENT_DISCRIMINATOR,
 };
 use crate::utils::{
     create_pda_account, validate_account_writable, validate_program_owner,
@@ -72,6 +72,10 @@ impl SplitProofSource {
 /// - output_commitment_1: [u8; 32]
 /// - output_commitment_2: [u8; 32]
 /// - vk_hash: [u8; 32]
+/// - ephemeral_pub_1: [u8; 33] - Grumpkin pubkey for first output stealth announcement
+/// - encrypted_amount_1: [u8; 8] - XOR encrypted first output amount
+/// - ephemeral_pub_2: [u8; 33] - Grumpkin pubkey for second output stealth announcement
+/// - encrypted_amount_2: [u8; 8] - XOR encrypted second output amount
 /// (proof is read from ChadBuffer account passed as additional account)
 pub struct SpendSplitData<'a> {
     pub proof_source: SplitProofSource,
@@ -81,14 +85,22 @@ pub struct SpendSplitData<'a> {
     pub output_commitment_1: [u8; 32],
     pub output_commitment_2: [u8; 32],
     pub vk_hash: [u8; 32],
+    /// Grumpkin ephemeral pubkey for first output stealth announcement (33 bytes compressed)
+    pub ephemeral_pub_1: [u8; 33],
+    /// XOR encrypted first output amount (8 bytes)
+    pub encrypted_amount_1: [u8; 8],
+    /// Grumpkin ephemeral pubkey for second output stealth announcement (33 bytes compressed)
+    pub ephemeral_pub_2: [u8; 33],
+    /// XOR encrypted second output amount (8 bytes)
+    pub encrypted_amount_2: [u8; 8],
 }
 
 impl<'a> SpendSplitData<'a> {
-    /// Minimum size for inline mode: proof_source(1) + proof_len(4) + root(32) + nullifier(32) + out1(32) + out2(32) + vk_hash(32) = 165 bytes + proof
-    pub const MIN_SIZE_INLINE: usize = 1 + 4 + 32 + 32 + 32 + 32 + 32;
+    /// Minimum size for inline mode: proof_source(1) + proof_len(4) + root(32) + nullifier(32) + out1(32) + out2(32) + vk_hash(32) + ephemeral_pub_1(33) + encrypted_amount_1(8) + ephemeral_pub_2(33) + encrypted_amount_2(8) = 247 bytes + proof
+    pub const MIN_SIZE_INLINE: usize = 1 + 4 + 32 + 32 + 32 + 32 + 32 + 33 + 8 + 33 + 8;
 
-    /// Minimum size for buffer mode: proof_source(1) + root(32) + nullifier(32) + out1(32) + out2(32) + vk_hash(32) = 161 bytes
-    pub const MIN_SIZE_BUFFER: usize = 1 + 32 + 32 + 32 + 32 + 32;
+    /// Minimum size for buffer mode: proof_source(1) + root(32) + nullifier(32) + out1(32) + out2(32) + vk_hash(32) + ephemeral_pub_1(33) + encrypted_amount_1(8) + ephemeral_pub_2(33) + encrypted_amount_2(8) = 243 bytes
+    pub const MIN_SIZE_BUFFER: usize = 1 + 32 + 32 + 32 + 32 + 32 + 33 + 8 + 33 + 8;
 
     pub fn from_bytes(data: &'a [u8]) -> Result<Self, ProgramError> {
         if data.is_empty() {
@@ -118,7 +130,7 @@ impl<'a> SpendSplitData<'a> {
             return Err(ProgramError::InvalidInstructionData);
         }
 
-        let expected_size = 1 + 4 + proof_len + 32 + 32 + 32 + 32 + 32;
+        let expected_size = 1 + 4 + proof_len + 32 + 32 + 32 + 32 + 32 + 33 + 8 + 33 + 8;
         if data.len() < expected_size {
             return Err(ProgramError::InvalidInstructionData);
         }
@@ -144,6 +156,22 @@ impl<'a> SpendSplitData<'a> {
 
         let mut vk_hash = [0u8; 32];
         vk_hash.copy_from_slice(&data[offset..offset + 32]);
+        offset += 32;
+
+        let mut ephemeral_pub_1 = [0u8; 33];
+        ephemeral_pub_1.copy_from_slice(&data[offset..offset + 33]);
+        offset += 33;
+
+        let mut encrypted_amount_1 = [0u8; 8];
+        encrypted_amount_1.copy_from_slice(&data[offset..offset + 8]);
+        offset += 8;
+
+        let mut ephemeral_pub_2 = [0u8; 33];
+        ephemeral_pub_2.copy_from_slice(&data[offset..offset + 33]);
+        offset += 33;
+
+        let mut encrypted_amount_2 = [0u8; 8];
+        encrypted_amount_2.copy_from_slice(&data[offset..offset + 8]);
 
         Ok(Self {
             proof_source: SplitProofSource::Inline,
@@ -153,6 +181,10 @@ impl<'a> SpendSplitData<'a> {
             output_commitment_1,
             output_commitment_2,
             vk_hash,
+            ephemeral_pub_1,
+            encrypted_amount_1,
+            ephemeral_pub_2,
+            encrypted_amount_2,
         })
     }
 
@@ -181,6 +213,22 @@ impl<'a> SpendSplitData<'a> {
 
         let mut vk_hash = [0u8; 32];
         vk_hash.copy_from_slice(&data[offset..offset + 32]);
+        offset += 32;
+
+        let mut ephemeral_pub_1 = [0u8; 33];
+        ephemeral_pub_1.copy_from_slice(&data[offset..offset + 33]);
+        offset += 33;
+
+        let mut encrypted_amount_1 = [0u8; 8];
+        encrypted_amount_1.copy_from_slice(&data[offset..offset + 8]);
+        offset += 8;
+
+        let mut ephemeral_pub_2 = [0u8; 33];
+        ephemeral_pub_2.copy_from_slice(&data[offset..offset + 33]);
+        offset += 33;
+
+        let mut encrypted_amount_2 = [0u8; 8];
+        encrypted_amount_2.copy_from_slice(&data[offset..offset + 8]);
 
         Ok(Self {
             proof_source: SplitProofSource::Buffer,
@@ -190,22 +238,28 @@ impl<'a> SpendSplitData<'a> {
             output_commitment_1,
             output_commitment_2,
             vk_hash,
+            ephemeral_pub_1,
+            encrypted_amount_1,
+            ephemeral_pub_2,
+            encrypted_amount_2,
         })
     }
 }
 
 /// Split commitment accounts
 ///
-/// ## Inline Mode (6 accounts)
+/// ## Inline Mode (8 accounts)
 /// 0. pool_state (writable)
 /// 1. commitment_tree (writable)
 /// 2. nullifier_record (writable)
 /// 3. user (signer)
 /// 4. system_program
 /// 5. ultrahonk_verifier - UltraHonk verifier program
+/// 6. stealth_announcement_1 (writable) - StealthAnnouncement PDA for first output
+/// 7. stealth_announcement_2 (writable) - StealthAnnouncement PDA for second output
 ///
-/// ## Buffer Mode (7 accounts - adds proof_buffer)
-/// 6. proof_buffer (readonly) - ChadBuffer account containing proof data
+/// ## Buffer Mode (9 accounts - adds proof_buffer)
+/// 8. proof_buffer (readonly) - ChadBuffer account containing proof data
 pub struct SpendSplitAccounts<'a> {
     pub pool_state: &'a AccountInfo,
     pub commitment_tree: &'a AccountInfo,
@@ -213,6 +267,8 @@ pub struct SpendSplitAccounts<'a> {
     pub user: &'a AccountInfo,
     pub system_program: &'a AccountInfo,
     pub ultrahonk_verifier: &'a AccountInfo,
+    pub stealth_announcement_1: &'a AccountInfo,
+    pub stealth_announcement_2: &'a AccountInfo,
     pub proof_buffer: Option<&'a AccountInfo>,
 }
 
@@ -221,7 +277,7 @@ impl<'a> SpendSplitAccounts<'a> {
         accounts: &'a [AccountInfo],
         use_buffer: bool,
     ) -> Result<Self, ProgramError> {
-        let min_accounts = if use_buffer { 7 } else { 6 };
+        let min_accounts = if use_buffer { 9 } else { 8 };
         if accounts.len() < min_accounts {
             return Err(ProgramError::NotEnoughAccountKeys);
         }
@@ -232,8 +288,10 @@ impl<'a> SpendSplitAccounts<'a> {
         let user = &accounts[3];
         let system_program = &accounts[4];
         let ultrahonk_verifier = &accounts[5];
+        let stealth_announcement_1 = &accounts[6];
+        let stealth_announcement_2 = &accounts[7];
         let proof_buffer = if use_buffer {
-            Some(&accounts[6])
+            Some(&accounts[8])
         } else {
             None
         };
@@ -250,6 +308,8 @@ impl<'a> SpendSplitAccounts<'a> {
             user,
             system_program,
             ultrahonk_verifier,
+            stealth_announcement_1,
+            stealth_announcement_2,
             proof_buffer,
         })
     }
@@ -280,6 +340,25 @@ pub fn process_spend_split(
     validate_account_writable(accounts.pool_state)?;
     validate_account_writable(accounts.commitment_tree)?;
     validate_account_writable(accounts.nullifier_record)?;
+    validate_account_writable(accounts.stealth_announcement_1)?;
+    validate_account_writable(accounts.stealth_announcement_2)?;
+
+    // Verify stealth announcement PDA for first output
+    // Use bytes 1-32 of ephemeral_pub (skip prefix byte) - max seed length is 32 bytes
+    let stealth_seeds_1: &[&[u8]] = &[StealthAnnouncement::SEED, &ix_data.ephemeral_pub_1[1..33]];
+    let (expected_stealth_pda_1, stealth_bump_1) = find_program_address(stealth_seeds_1, program_id);
+    if accounts.stealth_announcement_1.key() != &expected_stealth_pda_1 {
+        pinocchio::msg!("Invalid stealth announcement PDA for first output");
+        return Err(ProgramError::InvalidSeeds);
+    }
+
+    // Verify stealth announcement PDA for second output
+    let stealth_seeds_2: &[&[u8]] = &[StealthAnnouncement::SEED, &ix_data.ephemeral_pub_2[1..33]];
+    let (expected_stealth_pda_2, stealth_bump_2) = find_program_address(stealth_seeds_2, program_id);
+    if accounts.stealth_announcement_2.key() != &expected_stealth_pda_2 {
+        pinocchio::msg!("Invalid stealth announcement PDA for second output");
+        return Err(ProgramError::InvalidSeeds);
+    }
 
     // Load and validate pool state
     {
@@ -415,8 +494,8 @@ pub fn process_spend_split(
         nullifier.set_operation_type(NullifierOperationType::Split);
     }
 
-    // Update commitment tree with both new commitments
-    {
+    // Update commitment tree with both new commitments and capture leaf indices
+    let (leaf_index_1, leaf_index_2) = {
         let mut tree_data = accounts.commitment_tree.try_borrow_mut_data()?;
         let tree = CommitmentTree::from_bytes_mut(&mut tree_data)?;
 
@@ -424,8 +503,89 @@ pub fn process_spend_split(
             return Err(ZVaultError::TreeFull.into());
         }
 
-        tree.insert_leaf(&ix_data.output_commitment_1)?;
-        tree.insert_leaf(&ix_data.output_commitment_2)?;
+        let idx1 = tree.insert_leaf(&ix_data.output_commitment_1)?;
+        let idx2 = tree.insert_leaf(&ix_data.output_commitment_2)?;
+        (idx1, idx2)
+    };
+
+    // Create stealth announcement PDA for first output (if it doesn't exist)
+    let stealth_account_1_data_len = accounts.stealth_announcement_1.data_len();
+    if stealth_account_1_data_len > 0 {
+        let ann_data = accounts.stealth_announcement_1.try_borrow_data()?;
+        if ann_data[0] == STEALTH_ANNOUNCEMENT_DISCRIMINATOR {
+            return Err(ProgramError::AccountAlreadyInitialized);
+        }
+    } else {
+        let lamports = rent.minimum_balance(StealthAnnouncement::SIZE);
+
+        let stealth_bump_1_bytes = [stealth_bump_1];
+        let signer_seeds: &[&[u8]] = &[
+            StealthAnnouncement::SEED,
+            &ix_data.ephemeral_pub_1[1..33],
+            &stealth_bump_1_bytes,
+        ];
+
+        create_pda_account(
+            accounts.user,
+            accounts.stealth_announcement_1,
+            program_id,
+            lamports,
+            StealthAnnouncement::SIZE as u64,
+            signer_seeds,
+        )?;
+    }
+
+    // Initialize stealth announcement for first output
+    {
+        let mut ann_data = accounts.stealth_announcement_1.try_borrow_mut_data()?;
+        let announcement = StealthAnnouncement::init(&mut ann_data)?;
+
+        announcement.bump = stealth_bump_1;
+        announcement.ephemeral_pub = ix_data.ephemeral_pub_1;
+        announcement.set_encrypted_amount(ix_data.encrypted_amount_1);
+        announcement.commitment.copy_from_slice(&ix_data.output_commitment_1);
+        announcement.set_leaf_index(leaf_index_1);
+        announcement.set_created_at(clock.unix_timestamp);
+    }
+
+    // Create stealth announcement PDA for second output (if it doesn't exist)
+    let stealth_account_2_data_len = accounts.stealth_announcement_2.data_len();
+    if stealth_account_2_data_len > 0 {
+        let ann_data = accounts.stealth_announcement_2.try_borrow_data()?;
+        if ann_data[0] == STEALTH_ANNOUNCEMENT_DISCRIMINATOR {
+            return Err(ProgramError::AccountAlreadyInitialized);
+        }
+    } else {
+        let lamports = rent.minimum_balance(StealthAnnouncement::SIZE);
+
+        let stealth_bump_2_bytes = [stealth_bump_2];
+        let signer_seeds: &[&[u8]] = &[
+            StealthAnnouncement::SEED,
+            &ix_data.ephemeral_pub_2[1..33],
+            &stealth_bump_2_bytes,
+        ];
+
+        create_pda_account(
+            accounts.user,
+            accounts.stealth_announcement_2,
+            program_id,
+            lamports,
+            StealthAnnouncement::SIZE as u64,
+            signer_seeds,
+        )?;
+    }
+
+    // Initialize stealth announcement for second output
+    {
+        let mut ann_data = accounts.stealth_announcement_2.try_borrow_mut_data()?;
+        let announcement = StealthAnnouncement::init(&mut ann_data)?;
+
+        announcement.bump = stealth_bump_2;
+        announcement.ephemeral_pub = ix_data.ephemeral_pub_2;
+        announcement.set_encrypted_amount(ix_data.encrypted_amount_2);
+        announcement.commitment.copy_from_slice(&ix_data.output_commitment_2);
+        announcement.set_leaf_index(leaf_index_2);
+        announcement.set_created_at(clock.unix_timestamp);
     }
 
     // Update pool statistics

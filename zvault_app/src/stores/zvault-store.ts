@@ -8,14 +8,14 @@ import {
   createStealthMetaAddress,
   encodeStealthMetaAddress,
   scanAnnouncements,
-  parseStealthAnnouncement,
-  announcementToScanFormat,
-  STEALTH_ANNOUNCEMENT_SIZE,
+  hexToBytes,
   type ZVaultKeys,
   type StealthMetaAddress,
   type ScannedNote,
 } from "@zvault/sdk";
-import { ZVAULT_PROGRAM_ID } from "@/lib/constants";
+
+// Module-level deduplication for inbox fetch
+let inboxFetchPromise: Promise<void> | null = null;
 
 // ============================================================================
 // Types
@@ -53,7 +53,7 @@ interface ZVaultState {
     signMessage: (message: Uint8Array) => Promise<Uint8Array>;
   }) => Promise<void>;
   clearKeys: () => void;
-  refreshInbox: (connection: Connection) => Promise<void>;
+  refreshInbox: (connection?: Connection) => Promise<void>;
 }
 
 // ============================================================================
@@ -140,71 +140,95 @@ export const useZVaultStore = create<ZVaultState>((set, get) => ({
     });
   },
 
-  refreshInbox: async (connection) => {
+  refreshInbox: async (_connection) => {
     const { keys } = get();
     if (!keys) {
       set({ inboxNotes: [], inboxTotalSats: 0n, inboxDepositCount: 0 });
       return;
     }
 
+    // Deduplicate: if already fetching, wait for that to complete
+    if (inboxFetchPromise) {
+      return inboxFetchPromise;
+    }
+
     set({ inboxLoading: true, inboxError: null });
 
-    try {
-      const programId = new PublicKey(ZVAULT_PROGRAM_ID);
-      const accounts = await connection.getProgramAccounts(programId, {
-        filters: [{ dataSize: STEALTH_ANNOUNCEMENT_SIZE }],
-      });
+    const doFetch = async () => {
+      try {
+        // Fetch from cached API instead of direct RPC
+        const response = await fetch("/api/stealth/announcements");
+        const data = await response.json();
 
-      const announcements = accounts
-        .map((account) => {
-          const parsed = parseStealthAnnouncement(
-            new Uint8Array(account.account.data)
+        if (!data.success) {
+          throw new Error(data.error || "Failed to fetch announcements");
+        }
+
+        // Convert API response to scan format
+        const announcements = data.announcements.map((ann: {
+          ephemeralPub: string;
+          encryptedAmount: string;
+          commitment: string;
+          leafIndex: number;
+          createdAt: string;
+        }) => ({
+          ephemeralPub: hexToBytes(ann.ephemeralPub),
+          encryptedAmount: hexToBytes(ann.encryptedAmount),
+          commitment: hexToBytes(ann.commitment),
+          leafIndex: ann.leafIndex,
+          createdAt: BigInt(ann.createdAt),
+        }));
+
+        // Scan locally for privacy (server doesn't know which are ours)
+        const scanned = await scanAnnouncements(keys, announcements);
+
+        const notes: InboxNote[] = scanned.map((note, index) => {
+          const originalAnn = announcements.find((a: { commitment: Uint8Array }) =>
+            Buffer.from(a.commitment).equals(Buffer.from(note.commitment))
           );
-          if (!parsed) return null;
+
+          // Convert commitment bytes to hex (big-endian bytes to hex string)
+          // This should match bigint.toString(16).padStart(64, "0")
+          const rawHex = Buffer.from(note.commitment).toString("hex");
+          // Ensure proper padding and lowercase
+          const commitmentHex = rawHex.toLowerCase().padStart(64, "0");
+
           return {
-            ...announcementToScanFormat(parsed),
-            createdAt: parsed.createdAt,
-            pubkey: account.pubkey.toBase58(),
+            ...note,
+            id: `${commitmentHex.slice(0, 16)}-${index}`,
+            createdAt: originalAnn?.createdAt
+              ? Number(originalAnn.createdAt) * 1000
+              : Date.now(),
+            commitmentHex,
           };
-        })
-        .filter((a): a is NonNullable<typeof a> => a !== null);
+        });
 
-      const scanned = await scanAnnouncements(keys, announcements);
+        notes.sort((a, b) => b.createdAt - a.createdAt);
 
-      const notes: InboxNote[] = scanned.map((note, index) => {
-        const originalAnn = announcements.find((a) =>
-          Buffer.from(a.commitment).equals(Buffer.from(note.commitment))
+        const totalSats = notes.reduce(
+          (sum, note) => sum + BigInt(note.amount ?? 0),
+          0n
         );
-        return {
-          ...note,
-          id: `${Buffer.from(note.commitment).toString("hex").slice(0, 16)}-${index}`,
-          createdAt: originalAnn?.createdAt
-            ? originalAnn.createdAt * 1000
-            : Date.now(),
-          commitmentHex: Buffer.from(note.commitment).toString("hex"),
-        };
-      });
 
-      notes.sort((a, b) => b.createdAt - a.createdAt);
+        set({
+          inboxNotes: notes,
+          inboxTotalSats: totalSats,
+          inboxDepositCount: notes.length,
+          inboxLoading: false,
+        });
+      } catch (err) {
+        console.error("[ZVault] Inbox error:", err);
+        set({
+          inboxError: err instanceof Error ? err.message : "Failed to fetch inbox",
+          inboxLoading: false,
+        });
+      } finally {
+        inboxFetchPromise = null;
+      }
+    };
 
-      const totalSats = notes.reduce(
-        (sum, note) => sum + BigInt(note.amount ?? 0),
-        0n
-      );
-
-      set({
-        inboxNotes: notes,
-        inboxTotalSats: totalSats,
-        inboxDepositCount: notes.length,
-        inboxLoading: false,
-      });
-    } catch (err) {
-      console.error("[ZVault] Inbox error:", err);
-      set({
-        inboxError: err instanceof Error ? err.message : "Failed to fetch inbox",
-        inboxLoading: false,
-      });
-    }
+    inboxFetchPromise = doFetch();
+    return inboxFetchPromise;
   },
 }));
 
