@@ -43,18 +43,12 @@ import { execSync } from "child_process";
 // SDK imports for demo stealth instruction
 import {
   buildAddDemoStealthData,
-} from "@zvault/sdk";
-import {
-  generateKeyPair as generateGrumpkinKeyPair,
+  generateGrumpkinKeyPair,
   pointToCompressedBytes,
-  ecdh,
-} from "@zvault/sdk/grumpkin";
-import {
+  grumpkinEcdh as ecdh,
   computeUnifiedCommitment,
-} from "@zvault/sdk/poseidon2";
-import {
   encryptAmount,
-} from "@zvault/sdk/stealth";
+} from "@zvault/sdk";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
