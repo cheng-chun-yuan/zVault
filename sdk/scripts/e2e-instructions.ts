@@ -97,14 +97,14 @@ import {
 } from "../src/pda";
 
 import {
-  generateKeyPair as generateGrumpkinKeyPair,
+  generateGrumpkinKeyPair,
   pointToCompressedBytes,
-} from "../src/grumpkin";
+} from "../src/crypto";
 
 import {
   computeUnifiedCommitment,
   computeNullifier,
-} from "../src/poseidon2";
+} from "../src/poseidon";
 
 // =============================================================================
 // Configuration
@@ -505,6 +505,16 @@ async function testSplitNote(
   const nullifierHash = bigintToBytes32(computeNullifier(note.nullifier, BigInt(note.leafIndex)));
   const [nullifierRecord] = await deriveNullifierRecordPDA(nullifierHash, config.zvaultProgramId);
 
+  // Generate mock stealth output data (32-byte fields for circuit public inputs)
+  const output1EphemeralPubX = randomBytes(32);
+  const output1EncryptedAmountWithSign = randomBytes(32);
+  const output2EphemeralPubX = randomBytes(32);
+  const output2EncryptedAmountWithSign = randomBytes(32);
+
+  // Derive stealth announcement PDAs from ephemeral pubkey x-coordinates
+  const [stealthAnnouncement1] = await deriveStealthAnnouncementPDA(output1EphemeralPubX, config.zvaultProgramId);
+  const [stealthAnnouncement2] = await deriveStealthAnnouncementPDA(output2EphemeralPubX, config.zvaultProgramId);
+
   // Build split instruction using SDK (buffer mode)
   const splitIx = buildSplitInstruction({
     proofSource: "buffer",
@@ -514,11 +524,17 @@ async function testSplitNote(
     outputCommitment1: bigintToBytes32(output1Commitment),
     outputCommitment2: bigintToBytes32(output2Commitment),
     vkHash: hexToBytes(config.vkHashes.split),
+    output1EphemeralPubX,
+    output1EncryptedAmountWithSign,
+    output2EphemeralPubX,
+    output2EncryptedAmountWithSign,
     accounts: {
       poolState,
       commitmentTree,
       nullifierRecord,
       user: payer.address,
+      stealthAnnouncement1,
+      stealthAnnouncement2,
     },
   });
 
