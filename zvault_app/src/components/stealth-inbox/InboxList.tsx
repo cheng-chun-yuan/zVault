@@ -16,7 +16,7 @@ export function InboxList({ notes, isLoading, onRefresh }: InboxListProps) {
       {/* Header with refresh */}
       <div className="flex items-center justify-between mb-4">
         <p className="text-body2-semibold text-gray-light">
-          {notes.length} {notes.length === 1 ? "Deposit" : "Deposits"} Found
+          {notes.length} {notes.length === 1 ? "Note" : "Notes"} Found
         </p>
         <button
           onClick={onRefresh}

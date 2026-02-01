@@ -9,7 +9,6 @@ import {
   ArrowDownToLine,
   Shield,
   Inbox,
-  CheckCircle2,
   Link2,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
@@ -18,12 +17,11 @@ import { BalanceView } from "@/components/btc-widget/balance-view";
 import { useZVaultKeys, useStealthInbox } from "@/hooks/use-zvault";
 import { InboxList, EmptyInbox } from "@/components/stealth-inbox";
 
-type TabType = "deposits" | "claimable" | "claimed";
+type TabType = "deposits" | "notes";
 
 const tabs: { id: TabType; label: string; icon: React.ReactNode }[] = [
   { id: "deposits", label: "Deposits", icon: <ArrowDownToLine className="w-4 h-4" /> },
-  { id: "claimable", label: "Claimable", icon: <Inbox className="w-4 h-4" /> },
-  { id: "claimed", label: "Claimed", icon: <CheckCircle2 className="w-4 h-4" /> },
+  { id: "notes", label: "Notes", icon: <Inbox className="w-4 h-4" /> },
 ];
 
 function TabBar({
@@ -50,7 +48,7 @@ function TabBar({
         >
           {tab.icon}
           <span>{tab.label}</span>
-          {tab.id === "claimable" && claimableCount > 0 && (
+          {tab.id === "notes" && claimableCount > 0 && (
             <span className="min-w-[22px] h-[22px] px-2 flex items-center justify-center text-sm rounded-full bg-privacy text-background font-bold">
               {claimableCount}
             </span>
@@ -61,24 +59,7 @@ function TabBar({
   );
 }
 
-function ClaimedTab() {
-  return (
-    <div className="flex flex-col items-center justify-center py-8 text-center">
-      <div className="rounded-full bg-gray/10 p-4 mb-4">
-        <CheckCircle2 className="h-10 w-10 text-gray" />
-      </div>
-      <p className="text-heading6 text-foreground mb-2">No Claimed Notes Yet</p>
-      <p className="text-body2 text-gray mb-4">
-        When you claim notes from deposits or stealth transfers, they will appear here
-      </p>
-      <p className="text-caption text-gray/40">
-        Claimed notes can be used for payments or withdrawals
-      </p>
-    </div>
-  );
-}
-
-function ClaimableTab() {
+function NotesTab() {
   const { hasKeys, deriveKeys, isLoading: keysLoading } = useZVaultKeys();
   const { notes, isLoading, error, refresh } = useStealthInbox();
 
@@ -115,7 +96,7 @@ function ClaimableTab() {
         <EmptyInbox hasKeys={hasKeys} onDeriveKeys={deriveKeys} onRefresh={refresh} isLoading={keysLoading} />
       )}
 
-      {/* Inbox list */}
+      {/* Inbox list - show ALL notes (spent and spendable) */}
       {!isLoading && hasKeys && notes.length > 0 && (
         <InboxList notes={notes} isLoading={isLoading} onRefresh={refresh} />
       )}
@@ -138,8 +119,11 @@ function ClaimableTab() {
 function ActivityContent() {
   const searchParams = useSearchParams();
   const tabParam = searchParams.get("tab") as TabType | null;
-  const [activeTab, setActiveTab] = useState<TabType>(tabParam || "claimable");
+  const [activeTab, setActiveTab] = useState<TabType>(tabParam || "notes");
   const { notes } = useStealthInbox();
+
+  // Badge shows total notes count
+  const notesCount = notes.length;
 
   // Update URL when tab changes
   const handleTabChange = (tab: TabType) => {
@@ -163,15 +147,14 @@ function ActivityContent() {
         <TabBar
           activeTab={activeTab}
           onTabChange={handleTabChange}
-          claimableCount={notes.length}
+          claimableCount={notesCount}
         />
       </div>
 
       {/* Tab Content */}
       <ErrorBoundary>
         {activeTab === "deposits" && <BalanceView />}
-        {activeTab === "claimable" && <ClaimableTab />}
-        {activeTab === "claimed" && <ClaimedTab />}
+        {activeTab === "notes" && <NotesTab />}
       </ErrorBoundary>
     </>
   );
@@ -212,7 +195,7 @@ export default function ActivityPage() {
           <div>
             <h1 className="text-heading6 text-foreground">Your Notes</h1>
             <p className="text-caption text-gray">
-              Manage deposits, claim incoming zBTC, and view owned notes
+              View and spend your private zBTC notes
             </p>
           </div>
         </div>

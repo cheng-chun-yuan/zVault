@@ -9,6 +9,9 @@ import {
   encodeStealthMetaAddress,
   scanAnnouncements,
   hexToBytes,
+  computeNullifierHashForNote,
+  deriveNullifierRecordPDA,
+  DEVNET_CONFIG,
   type ZVaultKeys,
   type StealthMetaAddress,
   type ScannedNote,
@@ -25,6 +28,8 @@ export interface InboxNote extends ScannedNote {
   id: string;
   createdAt: number;
   commitmentHex: string;
+  /** True if nullifier exists on-chain (note has been spent) */
+  isSpent?: boolean;
 }
 
 interface ZVaultState {
@@ -182,7 +187,46 @@ export const useZVaultStore = create<ZVaultState>((set, get) => ({
         // Scan locally for privacy (server doesn't know which are ours)
         const scanned = await scanAnnouncements(keys, announcements);
 
-        const notes: InboxNote[] = scanned.map((note, index) => {
+        // Check which notes are spent by looking up nullifier records on-chain
+        const rpcUrl = process.env.NEXT_PUBLIC_HELIUS_RPC_URL || "https://api.devnet.solana.com";
+        const notesWithSpentStatus = await Promise.all(
+          scanned.map(async (note) => {
+            try {
+              // Compute nullifier hash (requires spending key)
+              const nullifierHashBytes = computeNullifierHashForNote(keys, note);
+              const nullifierHex = Buffer.from(nullifierHashBytes).toString("hex");
+
+              // Derive nullifier PDA
+              const [nullifierPda] = await deriveNullifierRecordPDA(
+                nullifierHashBytes,
+                DEVNET_CONFIG.zvaultProgramId
+              );
+
+              // Check if PDA exists (note was spent)
+              const response = await fetch(rpcUrl, {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                  jsonrpc: "2.0",
+                  id: 1,
+                  method: "getAccountInfo",
+                  params: [nullifierPda, { encoding: "base64" }],
+                }),
+              });
+              const result = await response.json();
+              const isSpent = result?.result?.value !== null;
+
+              console.log(`[ZVault] Nullifier check for leafIndex=${note.leafIndex}: PDA=${nullifierPda}, isSpent=${isSpent}, nullifierHash=${nullifierHex.slice(0, 16)}...`);
+
+              return { ...note, isSpent };
+            } catch (err) {
+              console.error("[ZVault] Failed to check nullifier for note:", err, "leafIndex:", note.leafIndex);
+              return { ...note, isSpent: false };
+            }
+          })
+        );
+
+        const notes: InboxNote[] = notesWithSpentStatus.map((note, index) => {
           const originalAnn = announcements.find((a: { commitment: Uint8Array }) =>
             Buffer.from(a.commitment).equals(Buffer.from(note.commitment))
           );
@@ -205,15 +249,17 @@ export const useZVaultStore = create<ZVaultState>((set, get) => ({
 
         notes.sort((a, b) => b.createdAt - a.createdAt);
 
-        const totalSats = notes.reduce(
+        // Calculate balance only from unspent notes
+        const unspentNotes = notes.filter(n => !n.isSpent);
+        const totalSats = unspentNotes.reduce(
           (sum, note) => sum + BigInt(note.amount ?? 0),
           0n
         );
 
         set({
-          inboxNotes: notes,
+          inboxNotes: notes, // Keep all notes for display (show spent as disabled)
           inboxTotalSats: totalSats,
-          inboxDepositCount: notes.length,
+          inboxDepositCount: unspentNotes.length, // Only count unspent
           inboxLoading: false,
         });
       } catch (err) {

@@ -77,16 +77,25 @@ export function InboxItem({ note }: InboxItemProps) {
       {/* Amount */}
       <div className="flex items-center justify-between mb-4">
         <div>
-          <p className="text-heading5 text-privacy">
+          <p className={cn(
+            "text-heading5",
+            note.isSpent ? "text-gray" : "text-privacy"
+          )}>
             {formatBtc(Number(note.amount))} zBTC
           </p>
           <p className="text-caption text-gray">
             {Number(note.amount).toLocaleString()} sats
           </p>
         </div>
-        <div className="px-2 py-1 rounded-full bg-privacy/10 border border-privacy/20">
-          <span className="text-caption text-privacy">Ready to Claim</span>
-        </div>
+        {note.isSpent ? (
+          <div className="px-2 py-1 rounded-full bg-gray/10 border border-gray/20">
+            <span className="text-caption text-gray">Spent</span>
+          </div>
+        ) : (
+          <div className="px-2 py-1 rounded-full bg-privacy/10 border border-privacy/20">
+            <span className="text-caption text-privacy">Spendable</span>
+          </div>
+        )}
       </div>
 
       {/* Commitment (truncated) */}
@@ -98,22 +107,24 @@ export function InboxItem({ note }: InboxItemProps) {
       </div>
 
       {/* Action buttons */}
-      <div className="flex gap-2">
-        <button
-          onClick={handleSendPublic}
-          className="flex-1 flex items-center justify-center gap-2 px-4 py-3 rounded-[10px] bg-privacy/10 hover:bg-privacy/20 text-privacy transition-colors"
-        >
-          <Wallet className="w-4 h-4" />
-          To Wallet
-        </button>
-        <button
-          onClick={handleSendPrivate}
-          className="flex-1 flex items-center justify-center gap-2 px-4 py-3 rounded-[10px] bg-purple/10 hover:bg-purple/20 text-purple transition-colors"
-        >
-          <Send className="w-4 h-4" />
-          Send Private
-        </button>
-      </div>
+      {!note.isSpent && (
+        <div className="flex gap-2">
+          <button
+            onClick={handleSendPublic}
+            className="flex-1 flex items-center justify-center gap-2 px-4 py-3 rounded-[10px] bg-privacy/10 hover:bg-privacy/20 text-privacy transition-colors"
+          >
+            <Wallet className="w-4 h-4" />
+            To Wallet
+          </button>
+          <button
+            onClick={handleSendPrivate}
+            className="flex-1 flex items-center justify-center gap-2 px-4 py-3 rounded-[10px] bg-purple/10 hover:bg-purple/20 text-purple transition-colors"
+          >
+            <Send className="w-4 h-4" />
+            Send Private
+          </button>
+        </div>
+      )}
     </div>
   );
 }

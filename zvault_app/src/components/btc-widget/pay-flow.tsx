@@ -3,7 +3,7 @@
 import { useState, useEffect, useMemo, useCallback, useRef } from "react";
 import { useWallet } from "@solana/wallet-adapter-react";
 import { useConnection } from "@solana/wallet-adapter-react";
-import { PublicKey, sendAndConfirmTransaction } from "@solana/web3.js";
+import { PublicKey } from "@solana/web3.js";
 import { CheckCircle2, Send, Wallet, Shield, Clock, AlertCircle, Key, Copy, Check, Pencil, X, Loader2, Zap } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { parseSats, validateWithdrawalAmount } from "@/lib/utils/validation";
@@ -22,12 +22,30 @@ import {
   type ScannedNote,
 } from "@zvault/sdk";
 import {
-  buildSplitTransaction,
-  buildSpendPartialPublicTransaction,
   bigintTo32Bytes,
+  bytesToHex,
 } from "@/lib/solana/instructions";
-import { getAssociatedTokenAddressSync, createAssociatedTokenAccountInstruction, TOKEN_2022_PROGRAM_ID } from "@solana/spl-token";
-import { ZBTC_MINT_ADDRESS } from "@/lib/solana/instructions";
+
+/**
+ * Convert packed encryptedAmountWithSign bigint to little-endian hex for on-chain
+ *
+ * On-chain expects: bytes 0-7 = encrypted amount, byte 8 bit 0 = y_sign
+ * SDK bigint has: bits 0-63 = encrypted amount, bit 64 = y_sign
+ *
+ * Standard bigint.toString(16) produces big-endian where value is at the END
+ * We need little-endian where value is at the START (bytes 0-8)
+ */
+function packEncryptedAmountToHex(value: bigint): string {
+  const bytes = new Uint8Array(32);
+  let temp = value;
+  // Extract low 9 bytes (8 for amount + 1 for y_sign bit) as little-endian
+  for (let i = 0; i < 9 && temp > 0n; i++) {
+    bytes[i] = Number(temp & 0xffn);
+    temp = temp >> 8n;
+  }
+  // Convert to hex string
+  return Array.from(bytes).map(b => b.toString(16).padStart(2, "0")).join("");
+}
 
 // Validate Solana address
 function isValidSolanaAddress(address: string): boolean {
@@ -161,9 +179,9 @@ export function PayFlow({ initialMode, preselectedNote }: PayFlowProps) {
     setTimeout(() => setChangeClaimCopied(false), 2000);
   }, [changeClaimLink]);
 
-  // Get notes from stealth inbox (claimed stealth deposits)
+  // Get notes from stealth inbox - only unspent notes with positive balance
   const availableNotes = useMemo(() => {
-    return inboxNotes.filter((n) => n.amount > 0n);
+    return inboxNotes.filter((n) => n.amount > 0n && !n.isSpent);
   }, [inboxNotes]);
 
   const amountSats = useMemo(() => parseSats(amount), [amount]);
@@ -386,6 +404,7 @@ export function PayFlow({ initialMode, preselectedNote }: PayFlowProps) {
         // =================================================================
         // PUBLIC MODE: SPEND_PARTIAL_PUBLIC
         // Transfers part to public wallet, rest as change commitment
+        // Uses backend relay for ChadBuffer handling (proven E2E approach)
         // =================================================================
         setProofStatus("Generating ZK proof for public transfer...");
 
@@ -416,56 +435,45 @@ export function PayFlow({ initialMode, preselectedNote }: PayFlowProps) {
           keys: keys!,                        // Pass keys for generating change stealth output
         });
 
-        setProofStatus("Proof generated! Building transaction...");
+        setProofStatus("Proof generated! Submitting via relay...");
 
-        // Get or create recipient token account
-        const recipientTokenAccount = getAssociatedTokenAddressSync(
-          ZBTC_MINT_ADDRESS,
-          recipientPubkey,
-          false,
-          TOKEN_2022_PROGRAM_ID
-        );
-
-        // Get VK hash from config (convert hex to bytes)
+        // Get VK hash from config
         const vkHashHex = DEVNET_CONFIG.vkHashes.spendPartialPublic;
-        const vkHash = new Uint8Array(32);
-        for (let i = 0; i < 32; i++) {
-          vkHash[i] = parseInt(vkHashHex.slice(i * 2, i * 2 + 2), 16);
+
+        // Use backend relay API (proven E2E approach with ChadBuffer)
+        console.log("[Pay] Sending to relay API...");
+        console.log("[Pay] Proof size:", proofResult.proof.proof.length, "bytes");
+
+        const relayResponse = await fetch("/api/relay", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            type: "spend_partial_public",
+            proof: bytesToHex(proofResult.proof.proof),
+            root: proofResult.merkleRoot.toString(16).padStart(64, "0"),
+            nullifierHash: proofResult.nullifierHash.toString(16).padStart(64, "0"),
+            vkHash: vkHashHex,
+            publicAmount: amountSats.toString(),
+            changeCommitment: proofResult.changeCommitment.toString(16).padStart(64, "0"),
+            recipient: recipientPubkey.toBase58(),
+            changeEphemeralPubX: proofResult.changeEphemeralPubX.toString(16).padStart(64, "0"),
+            changeEncryptedAmountWithSign: packEncryptedAmountToHex(proofResult.changeEncryptedAmountWithSign),
+          }),
+        });
+
+        const relayResult = await relayResponse.json();
+
+        if (!relayResult.success) {
+          throw new Error(relayResult.error || "Relay failed");
         }
 
-        // Build transaction
-        const tx = await buildSpendPartialPublicTransaction(connection, {
-          userPubkey: publicKey,
-          zkProof: proofResult.proof.proof,
-          merkleRoot: bigintTo32Bytes(proofResult.merkleRoot),
-          nullifierHash: bigintTo32Bytes(proofResult.nullifierHash),
-          publicAmount: BigInt(amountSats),
-          changeCommitment: bigintTo32Bytes(proofResult.changeCommitment),
-          recipient: recipientPubkey,
-          recipientTokenAccount,
-          vkHash,
-          changeEphemeralPubX: bigintTo32Bytes(proofResult.changeEphemeralPubX),
-          changeEncryptedAmountWithSign: bigintTo32Bytes(proofResult.changeEncryptedAmountWithSign),
-        });
-
-        setProofStatus("Sending transaction...");
-
-        // Sign and send transaction
-        const signedTx = await signTransaction(tx);
-        const signature = await connection.sendRawTransaction(signedTx.serialize(), {
-          skipPreflight: false,
-          preflightCommitment: "confirmed",
-        });
-
-        setProofStatus("Confirming transaction...");
-        await connection.confirmTransaction(signature, "confirmed");
-
-        console.log("[Pay] Transaction confirmed:", signature);
-        setRequestId(signature);
+        console.log("[Pay] Relay successful:", relayResult.signature);
+        setRequestId(relayResult.signature);
       } else {
         // =================================================================
         // STEALTH MODE: SPEND_SPLIT
         // Creates two private commitments: one for recipient, one for change
+        // Uses backend relay for ChadBuffer handling (proven E2E approach)
         // =================================================================
         setProofStatus("Generating ZK proof for private transfer...");
 
@@ -486,48 +494,45 @@ export function PayFlow({ initialMode, preselectedNote }: PayFlowProps) {
           sendAmount: BigInt(amountSats),
           recipientPubKeyX,
           changePubKeyX: verifiedPubKeyX,     // Change goes back to same key (derived value)
+          recipientMeta: resolvedMeta,        // Recipient's stealth meta address for output1
+          keys: keys!,                        // Sender's keys for change output2
         });
 
-        setProofStatus("Proof generated! Building transaction...");
+        setProofStatus("Proof generated! Submitting via relay...");
 
-        // Get VK hash from config (convert hex to bytes)
+        // Get VK hash from config
         const splitVkHashHex = DEVNET_CONFIG.vkHashes.split;
-        const splitVkHash = new Uint8Array(32);
-        for (let i = 0; i < 32; i++) {
-          splitVkHash[i] = parseInt(splitVkHashHex.slice(i * 2, i * 2 + 2), 16);
+
+        // Use backend relay API (proven E2E approach with ChadBuffer)
+        console.log("[Pay] Sending split to relay API...");
+        console.log("[Pay] Proof size:", proofResult.proof.proof.length, "bytes");
+
+        const relayResponse = await fetch("/api/relay", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            type: "spend_split",
+            proof: bytesToHex(proofResult.proof.proof),
+            root: proofResult.merkleRoot.toString(16).padStart(64, "0"),
+            nullifierHash: proofResult.nullifierHash.toString(16).padStart(64, "0"),
+            vkHash: splitVkHashHex,
+            outputCommitment1: proofResult.outputCommitment1.toString(16).padStart(64, "0"),
+            outputCommitment2: proofResult.outputCommitment2.toString(16).padStart(64, "0"),
+            output1EphemeralPubX: proofResult.output1EphemeralPubX.toString(16).padStart(64, "0"),
+            output1EncryptedAmountWithSign: packEncryptedAmountToHex(proofResult.output1EncryptedAmountWithSign),
+            output2EphemeralPubX: proofResult.output2EphemeralPubX.toString(16).padStart(64, "0"),
+            output2EncryptedAmountWithSign: packEncryptedAmountToHex(proofResult.output2EncryptedAmountWithSign),
+          }),
+        });
+
+        const relayResult = await relayResponse.json();
+
+        if (!relayResult.success) {
+          throw new Error(relayResult.error || "Relay failed");
         }
 
-        // Build transaction
-        // TODO: Add proper stealth output data when Split flow is fully implemented
-        const placeholderBytes = new Uint8Array(32);
-        const tx = await buildSplitTransaction(connection, {
-          userPubkey: publicKey,
-          zkProof: proofResult.proof.proof,
-          inputNullifierHash: bigintTo32Bytes(proofResult.nullifierHash),
-          outputCommitment1: bigintTo32Bytes(proofResult.outputCommitment1),
-          outputCommitment2: bigintTo32Bytes(proofResult.outputCommitment2),
-          merkleRoot: bigintTo32Bytes(proofResult.merkleRoot),
-          vkHash: splitVkHash,
-          output1EphemeralPubX: placeholderBytes,
-          output1EncryptedAmountWithSign: placeholderBytes,
-          output2EphemeralPubX: placeholderBytes,
-          output2EncryptedAmountWithSign: placeholderBytes,
-        });
-
-        setProofStatus("Sending transaction...");
-
-        // Sign and send transaction
-        const signedTx = await signTransaction(tx);
-        const signature = await connection.sendRawTransaction(signedTx.serialize(), {
-          skipPreflight: false,
-          preflightCommitment: "confirmed",
-        });
-
-        setProofStatus("Confirming transaction...");
-        await connection.confirmTransaction(signature, "confirmed");
-
-        console.log("[Pay] Transaction confirmed:", signature);
-        setRequestId(signature);
+        console.log("[Pay] Relay successful:", relayResult.signature);
+        setRequestId(relayResult.signature);
       }
 
       // Calculate change
@@ -1055,7 +1060,7 @@ export function PayFlow({ initialMode, preselectedNote }: PayFlowProps) {
           <div className="flex justify-between items-center text-body2">
             <span className="text-gray-light">Transaction</span>
             <a
-              href={`https://explorer.solana.com/tx/${requestId}?cluster=devnet`}
+              href={`https://orbmarkets.io/tx/${requestId}?cluster=devnet`}
               target="_blank"
               rel="noopener noreferrer"
               className="font-mono text-privacy text-xs hover:underline flex items-center gap-1"
