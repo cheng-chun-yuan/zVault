@@ -3,10 +3,10 @@
 //! Extended data structures for full UltraHonk verification.
 //! Optimized for Solana's 4KB stack limit by using heap allocation.
 
-use crate::bn254::{G1Point, G2Point, G1_POINT_SIZE, G2_POINT_SIZE, FR_SIZE};
+use crate::bn254::{G1Point, G2Point, FR_SIZE};
 use crate::constants::{
     BATCHED_RELATION_PARTIAL_LENGTH, G1_AFFINE_SIZE, G1_PROOF_POINT_SIZE,
-    MAX_LOG_CIRCUIT_SIZE, NUMBER_OF_ENTITIES, SCALAR_SIZE, VK_NUM_COMMITMENTS,
+    MAX_LOG_CIRCUIT_SIZE, NUMBER_OF_ENTITIES, VK_NUM_COMMITMENTS,
 };
 use crate::error::UltraHonkError;
 
@@ -84,7 +84,7 @@ impl G1ProofPoint {
 /// Full UltraHonk proof structure
 ///
 /// Contains all elements needed for verification.
-/// Allocated on heap to avoid stack overflow.
+/// Uses Vec for large arrays to avoid stack overflow on Solana (4KB limit).
 #[derive(Clone, Debug)]
 pub struct UltraHonkProof {
     /// Log of circuit size
@@ -104,17 +104,17 @@ pub struct UltraHonkProof {
     // Permutation
     pub z_perm: G1ProofPoint,
 
-    // Sumcheck univariates: log_n rounds × 8 scalars per round
-    pub sumcheck_univariates: [[Fr; BATCHED_RELATION_PARTIAL_LENGTH]; MAX_LOG_CIRCUIT_SIZE],
+    // Sumcheck univariates: log_n rounds × 8 scalars per round (heap allocated)
+    pub sumcheck_univariates: Vec<[Fr; BATCHED_RELATION_PARTIAL_LENGTH]>,
 
-    // Sumcheck evaluations: 40 polynomial evaluations at challenge point
-    pub sumcheck_evaluations: [Fr; NUMBER_OF_ENTITIES],
+    // Sumcheck evaluations: 40 polynomial evaluations at challenge point (heap allocated)
+    pub sumcheck_evaluations: Vec<Fr>,
 
-    // Gemini fold commitments: log_n - 1 commitments
-    pub gemini_fold_comms: [G1ProofPoint; MAX_LOG_CIRCUIT_SIZE - 1],
+    // Gemini fold commitments: log_n - 1 commitments (heap allocated)
+    pub gemini_fold_comms: Vec<G1ProofPoint>,
 
-    // Gemini evaluations: log_n scalars
-    pub gemini_a_evaluations: [Fr; MAX_LOG_CIRCUIT_SIZE],
+    // Gemini evaluations: log_n scalars (heap allocated)
+    pub gemini_a_evaluations: Vec<Fr>,
 
     // Shplonk Q commitment
     pub shplonk_q: G1ProofPoint,
@@ -138,10 +138,10 @@ impl Default for UltraHonkProof {
             lookup_read_tags: G1ProofPoint::default(),
             lookup_inverses: G1ProofPoint::default(),
             z_perm: G1ProofPoint::default(),
-            sumcheck_univariates: [[Fr::zero(); BATCHED_RELATION_PARTIAL_LENGTH]; MAX_LOG_CIRCUIT_SIZE],
-            sumcheck_evaluations: [Fr::zero(); NUMBER_OF_ENTITIES],
-            gemini_fold_comms: [G1ProofPoint::default(); MAX_LOG_CIRCUIT_SIZE - 1],
-            gemini_a_evaluations: [Fr::zero(); MAX_LOG_CIRCUIT_SIZE],
+            sumcheck_univariates: Vec::new(),
+            sumcheck_evaluations: Vec::new(),
+            gemini_fold_comms: Vec::new(),
+            gemini_a_evaluations: Vec::new(),
             shplonk_q: G1ProofPoint::default(),
             kzg_quotient: G1ProofPoint::default(),
             wire_commitment: G1Point::default(),
@@ -190,30 +190,32 @@ impl UltraHonkProof {
         // Parse z_perm
         let z_perm = parse_g1_proof_point(bytes, &mut offset)?;
 
-        // Parse sumcheck univariates: log_n rounds × 8 scalars
-        let mut sumcheck_univariates = [[Fr::zero(); BATCHED_RELATION_PARTIAL_LENGTH]; MAX_LOG_CIRCUIT_SIZE];
-        for round in 0..log_n {
+        // Parse sumcheck univariates: log_n rounds × 8 scalars (heap allocated)
+        let mut sumcheck_univariates = Vec::with_capacity(log_n);
+        for _round in 0..log_n {
+            let mut round_univariates = [Fr::zero(); BATCHED_RELATION_PARTIAL_LENGTH];
             for i in 0..BATCHED_RELATION_PARTIAL_LENGTH {
-                sumcheck_univariates[round][i] = parse_fr(bytes, &mut offset)?;
+                round_univariates[i] = parse_fr(bytes, &mut offset)?;
             }
+            sumcheck_univariates.push(round_univariates);
         }
 
-        // Parse sumcheck evaluations: 40 scalars
-        let mut sumcheck_evaluations = [Fr::zero(); NUMBER_OF_ENTITIES];
-        for i in 0..NUMBER_OF_ENTITIES {
-            sumcheck_evaluations[i] = parse_fr(bytes, &mut offset)?;
+        // Parse sumcheck evaluations: 40 scalars (heap allocated)
+        let mut sumcheck_evaluations = Vec::with_capacity(NUMBER_OF_ENTITIES);
+        for _i in 0..NUMBER_OF_ENTITIES {
+            sumcheck_evaluations.push(parse_fr(bytes, &mut offset)?);
         }
 
-        // Parse gemini fold commitments: log_n - 1 points
-        let mut gemini_fold_comms = [G1ProofPoint::default(); MAX_LOG_CIRCUIT_SIZE - 1];
-        for i in 0..(log_n - 1) {
-            gemini_fold_comms[i] = parse_g1_proof_point(bytes, &mut offset)?;
+        // Parse gemini fold commitments: log_n - 1 points (heap allocated)
+        let mut gemini_fold_comms = Vec::with_capacity(log_n.saturating_sub(1));
+        for _i in 0..(log_n.saturating_sub(1)) {
+            gemini_fold_comms.push(parse_g1_proof_point(bytes, &mut offset)?);
         }
 
-        // Parse gemini evaluations: log_n scalars
-        let mut gemini_a_evaluations = [Fr::zero(); MAX_LOG_CIRCUIT_SIZE];
-        for i in 0..log_n {
-            gemini_a_evaluations[i] = parse_fr(bytes, &mut offset)?;
+        // Parse gemini evaluations: log_n scalars (heap allocated)
+        let mut gemini_a_evaluations = Vec::with_capacity(log_n);
+        for _i in 0..log_n {
+            gemini_a_evaluations.push(parse_fr(bytes, &mut offset)?);
         }
 
         // Parse shplonk_q
@@ -466,6 +468,22 @@ impl VerificationKey {
 
     /// Minimum VK size in bytes
     pub const MIN_SIZE: usize = 32 + VK_NUM_COMMITMENTS * G1_AFFINE_SIZE;
+
+    /// Create a boxed verification key with specified parameters
+    /// Allocates directly on heap to avoid stack overflow
+    pub fn boxed_with_params(circuit_size_log: u8, num_public_inputs: u32) -> Box<Self> {
+        let mut vk = Box::new(Self::default());
+        vk.circuit_size_log = circuit_size_log;
+        vk.circuit_size = 1u64 << circuit_size_log;
+        vk.num_public_inputs = num_public_inputs;
+        vk.g2_x = Self::default_g2_x();
+        vk
+    }
+
+    /// Parse verification key from bytes, returning boxed to avoid stack overflow
+    pub fn from_bytes_boxed(bytes: &[u8]) -> Result<Box<Self>, UltraHonkError> {
+        Ok(Box::new(Self::from_bytes(bytes)?))
+    }
 }
 
 // ============================================================================

@@ -7,11 +7,10 @@
 //!
 //! In devnet mode, cryptographic verification is skipped for faster iteration.
 
-use crate::bn254::{pairing_check, msm, G1Point, G2Point};
+use crate::bn254::{pairing_check, G2Point};
 use crate::constants::{
-    BATCHED_RELATION_PARTIAL_LENGTH, MAX_LOG_CIRCUIT_SIZE, NUMBER_OF_ALPHAS,
-    NUMBER_OF_ENTITIES, NUMBER_UNSHIFTED, SRS_G2_GENERATOR, SRS_G2_X,
-    VK_NUM_COMMITMENTS,
+    BATCHED_RELATION_PARTIAL_LENGTH, NUMBER_OF_ALPHAS,
+    NUMBER_OF_ENTITIES, SRS_G2_GENERATOR, SRS_G2_X,
 };
 use crate::error::UltraHonkError;
 use crate::transcript::{Transcript, split_challenge};
@@ -93,6 +92,8 @@ fn verify_full(
 }
 
 /// Transcript challenges for UltraHonk verification
+///
+/// Uses Vec instead of fixed arrays to avoid stack overflow on Solana (4KB limit).
 #[cfg(not(feature = "devnet"))]
 #[derive(Debug)]
 pub struct TranscriptChallenges {
@@ -103,14 +104,14 @@ pub struct TranscriptChallenges {
     pub beta: Fr,
     pub gamma: Fr,
 
-    // Alpha challenges (relation separators)
-    pub alphas: [Fr; NUMBER_OF_ALPHAS],
+    // Alpha challenges (relation separators) - heap allocated
+    pub alphas: Vec<Fr>,
 
-    // Gate challenges
-    pub gate_challenges: [Fr; MAX_LOG_CIRCUIT_SIZE],
+    // Gate challenges - heap allocated
+    pub gate_challenges: Vec<Fr>,
 
-    // Sumcheck challenges
-    pub sumcheck_u_challenges: [Fr; MAX_LOG_CIRCUIT_SIZE],
+    // Sumcheck challenges - heap allocated
+    pub sumcheck_u_challenges: Vec<Fr>,
 
     // Shplemini challenges
     pub rho: Fr,
@@ -162,29 +163,29 @@ fn generate_transcript(
     absorb_g1_proof_point(&mut t, &proof.lookup_inverses);
     absorb_g1_proof_point(&mut t, &proof.z_perm);
 
-    let mut alphas = [Fr::zero(); NUMBER_OF_ALPHAS];
+    let mut alphas = Vec::with_capacity(NUMBER_OF_ALPHAS);
     let alpha_0 = t.squeeze_challenge();
     let (a0, a1) = split_challenge(&alpha_0);
-    alphas[0] = a0;
-    alphas[1] = a1;
+    alphas.push(a0);
+    alphas.push(a1);
 
-    for i in 1..(NUMBER_OF_ALPHAS / 2) {
+    for _i in 1..(NUMBER_OF_ALPHAS / 2) {
         let alpha_i = t.squeeze_challenge();
         let (a0, a1) = split_challenge(&alpha_i);
-        alphas[2 * i] = a0;
-        alphas[2 * i + 1] = a1;
+        alphas.push(a0);
+        alphas.push(a1);
     }
 
-    // Gate challenges
-    let mut gate_challenges = [Fr::zero(); MAX_LOG_CIRCUIT_SIZE];
-    for i in 0..log_n {
+    // Gate challenges (heap allocated)
+    let mut gate_challenges = Vec::with_capacity(log_n);
+    for _i in 0..log_n {
         let gc = t.squeeze_challenge();
         let (g, _) = split_challenge(&gc);
-        gate_challenges[i] = g;
+        gate_challenges.push(g);
     }
 
-    // Sumcheck challenges: absorb univariates, generate u_challenges
-    let mut sumcheck_u_challenges = [Fr::zero(); MAX_LOG_CIRCUIT_SIZE];
+    // Sumcheck challenges: absorb univariates, generate u_challenges (heap allocated)
+    let mut sumcheck_u_challenges = Vec::with_capacity(log_n);
     for round in 0..log_n {
         // Absorb sumcheck univariates for this round
         for i in 0..BATCHED_RELATION_PARTIAL_LENGTH {
@@ -193,7 +194,7 @@ fn generate_transcript(
 
         let u = t.squeeze_challenge();
         let (u_challenge, _) = split_challenge(&u);
-        sumcheck_u_challenges[round] = u_challenge;
+        sumcheck_u_challenges.push(u_challenge);
     }
 
     // Rho challenge: absorb sumcheck evaluations
@@ -441,17 +442,18 @@ fn evaluate_univariate_barycentric(
 #[cfg(not(feature = "devnet"))]
 #[inline(never)]
 fn verify_shplemini(
-    vk: &VerificationKey,
+    _vk: &VerificationKey,
     proof: &UltraHonkProof,
     tp: &TranscriptChallenges,
 ) -> Result<(), UltraHonkError> {
     let log_n = proof.circuit_size_log as usize;
 
-    // Compute powers of gemini_r: [r, r^2, r^4, ..., r^{2^{n-1}}]
-    let mut powers_of_r = [Fr::zero(); MAX_LOG_CIRCUIT_SIZE];
-    powers_of_r[0] = tp.gemini_r;
+    // Compute powers of gemini_r: [r, r^2, r^4, ..., r^{2^{n-1}}] (heap allocated)
+    let mut powers_of_r = Vec::with_capacity(log_n);
+    powers_of_r.push(tp.gemini_r);
     for i in 1..log_n {
-        powers_of_r[i] = powers_of_r[i - 1].square();
+        let prev = powers_of_r[i - 1].square();
+        powers_of_r.push(prev);
     }
 
     // Compute the denominator inverses for shplonk

@@ -158,7 +158,11 @@ fn process_verify(
 
     // TODO: Load VK from registry using vk_hash
     // For now, use embedded VK (circuit-specific)
-    let vk = Box::new(VerificationKey::default());
+    // Uses boxed factory to avoid stack overflow
+    let vk = VerificationKey::boxed_with_params(
+        proof.circuit_size_log,
+        public_inputs.len() as u32,
+    );
 
     // Verify proof
     let valid = verify_ultrahonk_proof(&vk, &proof, &public_inputs)
@@ -193,12 +197,10 @@ fn process_verify_with_vk(
         return Err(ProgramError::InvalidAccountOwner);
     }
 
-    // Load VK from account (use Box to avoid stack overflow)
+    // Load VK from account (uses boxed factory to avoid stack overflow)
     let vk_data = vk_account.try_borrow_data()?;
-    let vk = Box::new(
-        VerificationKey::from_bytes(&vk_data)
-            .map_err(|_| ProgramError::InvalidAccountData)?
-    );
+    let vk = VerificationKey::from_bytes_boxed(&vk_data)
+        .map_err(|_| ProgramError::InvalidAccountData)?;
 
     // Parse proof and public inputs (same format as VERIFY but without vk_hash)
     if data.len() < 4 {
@@ -324,11 +326,11 @@ fn process_verify_from_buffer(
 
     // Create VK that matches the proof's circuit parameters
     // For demo: derive VK from proof's circuit_size_log and actual public inputs count
-    let mut vk = VerificationKey::default();
-    vk.circuit_size_log = proof.circuit_size_log;
-    vk.num_public_inputs = public_inputs.len() as u32;
-    vk.g2_x = VerificationKey::default_g2_x();
-    let vk = Box::new(vk);
+    // Uses boxed factory to avoid stack overflow
+    let vk = VerificationKey::boxed_with_params(
+        proof.circuit_size_log,
+        public_inputs.len() as u32,
+    );
 
     // Verify proof
     let valid = verify_ultrahonk_proof(&vk, &proof, &public_inputs)
