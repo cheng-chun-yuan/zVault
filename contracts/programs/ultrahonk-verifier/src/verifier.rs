@@ -38,7 +38,7 @@ pub fn verify_ultrahonk_proof(
         return Ok(true);
     }
 
-    // Verify KZG pairing check (production)
+    // Full cryptographic verification via KZG pairing check
     #[cfg(not(feature = "devnet"))]
     verify_kzg_opening(vk, proof)
 }

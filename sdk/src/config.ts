@@ -138,27 +138,28 @@ export const LOCALNET_CHADBUFFER_PROGRAM_ID: Address = address(
 // =============================================================================
 
 /**
- * Devnet Configuration (v2.0.1)
+ * Devnet Configuration (v2.1.0)
  *
- * Updated deployment 2026-02-01:
- * - Stealth output data now circuit public inputs (relayer-safe)
- * - Program ID: zKeyrLmpT8W9o8iRvhizuSihLAFLhfAGBvfM638Pbw8
+ * Fresh deployment 2026-02-02:
+ * - Simplified instruction format (no proof_source byte for split/partial-public)
+ * - Instruction introspection pattern for verifier
+ * - Program ID: GqdjVMBDmFEd6wSV4TzRsvnVWnE4pMMdhVo8U4iXvYUX
  */
 export const DEVNET_CONFIG: NetworkConfig = {
   network: "devnet",
 
-  // Program IDs (updated deployment 2026-02-01)
-  zvaultProgramId: address("zKeyrLmpT8W9o8iRvhizuSihLAFLhfAGBvfM638Pbw8"),
+  // Program IDs (fresh deployment 2026-02-02)
+  zvaultProgramId: address("GqdjVMBDmFEd6wSV4TzRsvnVWnE4pMMdhVo8U4iXvYUX"),
   btcLightClientProgramId: address("S6rgPjCeBhkYBejWyDR1zzU3sYCMob36LAf8tjwj8pn"),
   chadbufferProgramId: CHADBUFFER_PROGRAM_ID,
   token2022ProgramId: TOKEN_2022_PROGRAM_ID,
   ataProgramId: ATA_PROGRAM_ID,
 
-  // Deployed Accounts (updated deployment 2026-02-01)
-  poolStatePda: address("ELGSdquznDBd6uUkWsBAmguMBmtuur7D5kapwoyZq44J"),
-  commitmentTreePda: address("5p7WERgzB6AHcga19QehvaTfbiVoM1Bg6drkwzYHYamq"),
-  zbtcMint: address("56gihX59Zy3coM9B1PYXLPoFEzjNuPEVhskCZcKq3VKx"),
-  poolVault: address("J3dRjxc441qNitZBhPNrrmS5moWY89Fp1g97ayuQSDSj"),
+  // Deployed Accounts (fresh deployment 2026-02-02)
+  poolStatePda: address("Bq8FTMnpyspkygAr3yN6tU8dzDhD5Ag19oVN3xXwy3gg"),
+  commitmentTreePda: address("M4hjajsFJU98xdx6ZtLuzgVPUKP6TTKXjfFpBiNE272"),
+  zbtcMint: address("AUuocP2KQVkUnt8pFtBx5CHpDargEPQNeq29hwtQoxFY"),
+  poolVault: address("5VCCporx5wvF2y8W97o55r1FiEb4pxp6RLRJMm3wQ1Ck"),
 
   // RPC Endpoints
   solanaRpcUrl: "https://api.devnet.solana.com",
@@ -174,15 +175,16 @@ export const DEVNET_CONFIG: NetworkConfig = {
   // UltraHonk Verifier (browser proof generation via bb.js)
   ultrahonkVerifierProgramId: address("5uAoTLSexeKKLU3ZXniWFE2CsCWGPzMiYPpKiywCGqsd"),
 
-  // VK Hashes (to be updated with actual hashes from compiled circuits)
+  // VK Hashes (SHA256 of compiled circuit verification keys)
+  // Generated from noir-circuits/target/*.vk files
   vkHashes: {
-    claim: "0000000000000000000000000000000000000000000000000000000000000000",
-    split: "0000000000000000000000000000000000000000000000000000000000000000",
-    spendPartialPublic: "0000000000000000000000000000000000000000000000000000000000000000",
-    poolDeposit: "0000000000000000000000000000000000000000000000000000000000000000",
-    poolWithdraw: "0000000000000000000000000000000000000000000000000000000000000000",
-    poolClaimYield: "0000000000000000000000000000000000000000000000000000000000000000",
-    poolCompound: "0000000000000000000000000000000000000000000000000000000000000000",
+    claim: "ecdb35295508ab629da18883e0ee5215d45245a2501bd899bf597ec614d92cbb",
+    split: "ec636be32affbfbd7d4164ed0f2124c10b044f9977320e3b17e50afd98ab7e80",
+    spendPartialPublic: "68d1fa3779d6e8625fe90884a5a6a799c86f838dd24678b0716befcd91983356",
+    poolDeposit: "d0031935b97882b2e144534f83ee435de5081e35999d3278dedc239df4ca524e",
+    poolWithdraw: "f8da71fa209229f4eb0eec726c9b94b7e6da2b11e37f1c6c0b946a6c4c67d24e",
+    poolClaimYield: "1371dcacf34dca75b805d1a427a8f6fd975a9ca088e850bfe085c1de1db852e7",
+    poolCompound: "0000000000000000000000000000000000000000000000000000000000000000", // Not compiled yet
   },
 };
 
@@ -344,7 +346,7 @@ export function createConfig(
 // Convenience Exports (for backwards compatibility)
 // =============================================================================
 
-/** Default zVault program ID (from current config) - zKeyrLmpT8W9o8iRvhizuSihLAFLhfAGBvfM638Pbw8 */
+/** Default zVault program ID (from current config) - Hurb4hZa5FR3VFMyDnrrVcHfVrDXHEazR7rX91PB42Ly */
 export const ZVAULT_PROGRAM_ID: Address = DEVNET_CONFIG.zvaultProgramId;
 
 /** Default BTC Light Client program ID (from current config) */
@@ -354,7 +356,7 @@ export const BTC_LIGHT_CLIENT_PROGRAM_ID: Address = DEVNET_CONFIG.btcLightClient
 // Version Info
 // =============================================================================
 
-export const SDK_VERSION = "2.0.1";
+export const SDK_VERSION = "2.0.3";
 
 export const DEPLOYMENT_INFO = {
   version: SDK_VERSION,
