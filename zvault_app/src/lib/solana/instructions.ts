@@ -16,6 +16,7 @@ import {
   TransactionInstruction,
   Transaction,
   SystemProgram,
+  Keypair,
 } from "@solana/web3.js";
 import { getAssociatedTokenAddressSync } from "@solana/spl-token";
 import { address } from "@solana/kit";
@@ -265,6 +266,14 @@ export interface SplitParams {
   outputCommitment2: Uint8Array;
   merkleRoot: Uint8Array;
   vkHash: Uint8Array;
+  /** Output 1 stealth: ephemeral pubkey x-coordinate */
+  output1EphemeralPubX: Uint8Array;
+  /** Output 1 stealth: encrypted amount with y_sign */
+  output1EncryptedAmountWithSign: Uint8Array;
+  /** Output 2 stealth: ephemeral pubkey x-coordinate */
+  output2EphemeralPubX: Uint8Array;
+  /** Output 2 stealth: encrypted amount with y_sign */
+  output2EncryptedAmountWithSign: Uint8Array;
 }
 
 /**
@@ -282,6 +291,10 @@ export async function buildSplitTransaction(
     outputCommitment2,
     merkleRoot,
     vkHash,
+    output1EphemeralPubX,
+    output1EncryptedAmountWithSign,
+    output2EphemeralPubX,
+    output2EncryptedAmountWithSign,
   } = params;
 
   const [poolState] = derivePoolStatePDA();
@@ -290,13 +303,15 @@ export async function buildSplitTransaction(
 
   // Use SDK instruction data builder
   const instructionData = sdkBuildSplitInstructionData({
-    proofSource: "inline",
-    proofBytes: zkProof,
     root: merkleRoot,
     nullifierHash: inputNullifierHash,
     outputCommitment1,
     outputCommitment2,
     vkHash,
+    output1EphemeralPubX,
+    output1EncryptedAmountWithSign,
+    output2EphemeralPubX,
+    output2EncryptedAmountWithSign,
   });
 
   const instruction = new TransactionInstruction({
@@ -337,6 +352,10 @@ export interface SpendPartialPublicParams {
   recipient: PublicKey;
   recipientTokenAccount: PublicKey;
   vkHash: Uint8Array;
+  /** Change stealth output: ephemeral pubkey x-coordinate */
+  changeEphemeralPubX: Uint8Array;
+  /** Change stealth output: encrypted amount with y_sign */
+  changeEncryptedAmountWithSign: Uint8Array;
 }
 
 /**
@@ -356,6 +375,8 @@ export async function buildSpendPartialPublicTransaction(
     recipient,
     recipientTokenAccount,
     vkHash,
+    changeEphemeralPubX,
+    changeEncryptedAmountWithSign,
   } = params;
 
   const [poolState] = derivePoolStatePDA();
@@ -365,14 +386,14 @@ export async function buildSpendPartialPublicTransaction(
 
   // Use SDK instruction data builder
   const instructionData = sdkBuildSpendPartialPublicInstructionData({
-    proofSource: "inline",
-    proofBytes: zkProof,
     root: merkleRoot,
     nullifierHash,
     publicAmountSats: publicAmount,
     changeCommitment,
     recipient: address(recipient.toBase58()),
     vkHash,
+    changeEphemeralPubX,
+    changeEncryptedAmountWithSign,
   });
 
   const instruction = new TransactionInstruction({
@@ -501,4 +522,253 @@ export async function getMerkleRoot(): Promise<Uint8Array | null> {
   } catch {
     return null;
   }
+}
+
+// =============================================================================
+// ChadBuffer Support (for large proofs)
+// =============================================================================
+
+/** ChadBuffer Program ID */
+export const CHADBUFFER_PROGRAM_ID = new PublicKey(DEVNET_CONFIG.chadbufferProgramId);
+
+/** ChadBuffer instruction discriminators */
+const CHADBUFFER_IX = {
+  CREATE: 0,
+  ASSIGN: 1,
+  WRITE: 2,
+  CLOSE: 3,
+};
+
+/** Authority size in buffer */
+const AUTHORITY_SIZE = 32;
+
+/** Max data per write tx (conservative to fit in tx size limit) */
+const MAX_DATA_PER_WRITE = 950;
+
+/**
+ * Create ChadBuffer CREATE instruction
+ */
+function createChadBufferCreateIx(
+  bufferKeypair: Keypair,
+  payer: PublicKey,
+  initialData: Uint8Array
+): TransactionInstruction {
+  const data = Buffer.alloc(1 + initialData.length);
+  data[0] = CHADBUFFER_IX.CREATE;
+  data.set(initialData, 1);
+
+  return new TransactionInstruction({
+    programId: CHADBUFFER_PROGRAM_ID,
+    keys: [
+      { pubkey: payer, isSigner: true, isWritable: true },
+      { pubkey: bufferKeypair.publicKey, isSigner: true, isWritable: true },
+    ],
+    data,
+  });
+}
+
+/**
+ * Create ChadBuffer WRITE instruction
+ */
+function createChadBufferWriteIx(
+  buffer: PublicKey,
+  payer: PublicKey,
+  offset: number,
+  chunkData: Uint8Array
+): TransactionInstruction {
+  const ixData = Buffer.alloc(4 + chunkData.length);
+  ixData[0] = CHADBUFFER_IX.WRITE;
+  // u24 offset (little-endian)
+  ixData[1] = offset & 0xff;
+  ixData[2] = (offset >> 8) & 0xff;
+  ixData[3] = (offset >> 16) & 0xff;
+  ixData.set(chunkData, 4);
+
+  return new TransactionInstruction({
+    programId: CHADBUFFER_PROGRAM_ID,
+    keys: [
+      { pubkey: payer, isSigner: true, isWritable: true },
+      { pubkey: buffer, isSigner: false, isWritable: true },
+    ],
+    data: ixData,
+  });
+}
+
+/**
+ * Create ChadBuffer CLOSE instruction
+ */
+export function createChadBufferCloseIx(
+  buffer: PublicKey,
+  payer: PublicKey
+): TransactionInstruction {
+  return new TransactionInstruction({
+    programId: CHADBUFFER_PROGRAM_ID,
+    keys: [
+      { pubkey: payer, isSigner: true, isWritable: true },
+      { pubkey: buffer, isSigner: false, isWritable: true },
+    ],
+    data: Buffer.from([CHADBUFFER_IX.CLOSE]),
+  });
+}
+
+export interface SpendPartialPublicWithBufferResult {
+  /** Transaction to create and initialize buffer with first chunk */
+  createBufferTx: Transaction;
+  /** Additional write transactions (may be empty if proof fits in first chunk) */
+  writeTxs: Transaction[];
+  /** The main spend transaction using buffer reference */
+  spendTx: Transaction;
+  /** Buffer keypair (user needs to sign buffer creation) */
+  bufferKeypair: Keypair;
+  /** Transaction to close buffer and reclaim rent (call after spend confirms) */
+  closeBufferTx: Transaction;
+}
+
+/**
+ * Build SPEND_PARTIAL_PUBLIC transactions using ChadBuffer for large proofs.
+ *
+ * Returns multiple transactions that must be signed and sent in order:
+ * 1. createBufferTx - Creates buffer and writes first chunk
+ * 2. writeTxs[] - Additional writes (if needed)
+ * 3. spendTx - The actual spend instruction using buffer
+ * 4. closeBufferTx - Close buffer to reclaim rent (optional, after spend confirms)
+ */
+export async function buildSpendPartialPublicWithBuffer(
+  connection: Connection,
+  params: SpendPartialPublicParams
+): Promise<SpendPartialPublicWithBufferResult> {
+  const {
+    userPubkey,
+    zkProof,
+    merkleRoot,
+    nullifierHash,
+    publicAmount,
+    changeCommitment,
+    recipient,
+    recipientTokenAccount,
+    vkHash,
+    changeEphemeralPubX,
+    changeEncryptedAmountWithSign,
+  } = params;
+
+  // Generate buffer keypair
+  const bufferKeypair = Keypair.generate();
+  const bufferSize = AUTHORITY_SIZE + zkProof.length;
+
+  // Calculate rent
+  const rentExemption = await connection.getMinimumBalanceForRentExemption(bufferSize);
+
+  // Split proof into chunks
+  const firstChunkSize = Math.min(800, zkProof.length); // Conservative first chunk
+  const firstChunk = zkProof.slice(0, firstChunkSize);
+  const remainingData = zkProof.slice(firstChunkSize);
+
+  // Get priority fees
+  const priorityFeeIxs = await getPriorityFeeInstructions([
+    ZVAULT_PROGRAM_ID.toBase58(),
+  ]);
+
+  // Create buffer transaction
+  const createAccountIx = SystemProgram.createAccount({
+    fromPubkey: userPubkey,
+    newAccountPubkey: bufferKeypair.publicKey,
+    lamports: rentExemption,
+    space: bufferSize,
+    programId: CHADBUFFER_PROGRAM_ID,
+  });
+
+  const initIx = createChadBufferCreateIx(bufferKeypair, userPubkey, firstChunk);
+
+  const createBufferTx = new Transaction();
+  createBufferTx.add(...priorityFeeIxs);
+  createBufferTx.add(createAccountIx);
+  createBufferTx.add(initIx);
+  createBufferTx.feePayer = userPubkey;
+
+  // Write transactions for remaining chunks
+  const writeTxs: Transaction[] = [];
+  let offset = firstChunkSize;
+
+  while (offset < zkProof.length) {
+    const chunkSize = Math.min(MAX_DATA_PER_WRITE, zkProof.length - offset);
+    const chunk = zkProof.slice(offset, offset + chunkSize);
+
+    const writeIx = createChadBufferWriteIx(
+      bufferKeypair.publicKey,
+      userPubkey,
+      offset, // Offset is relative to data portion, not including AUTHORITY_SIZE
+      chunk
+    );
+
+    const writeTx = new Transaction();
+    writeTx.add(...priorityFeeIxs);
+    writeTx.add(writeIx);
+    writeTx.feePayer = userPubkey;
+
+    writeTxs.push(writeTx);
+    offset += chunkSize;
+  }
+
+  // Build spend transaction with buffer reference
+  const [poolState] = derivePoolStatePDA();
+  const [commitmentTree] = deriveCommitmentTreePDA();
+  const [nullifierPDA] = deriveNullifierPDA(nullifierHash);
+  const poolVault = derivePoolVaultATA();
+
+  // Use SDK instruction data builder
+  const instructionData = sdkBuildSpendPartialPublicInstructionData({
+    root: merkleRoot,
+    nullifierHash,
+    publicAmountSats: publicAmount,
+    changeCommitment,
+    recipient: address(recipient.toBase58()),
+    vkHash,
+    changeEphemeralPubX,
+    changeEncryptedAmountWithSign,
+  });
+
+  const spendInstruction = new TransactionInstruction({
+    programId: ZVAULT_PROGRAM_ID,
+    keys: [
+      { pubkey: poolState, isSigner: false, isWritable: true },
+      { pubkey: commitmentTree, isSigner: false, isWritable: true },
+      { pubkey: nullifierPDA, isSigner: false, isWritable: true },
+      { pubkey: ZBTC_MINT_ADDRESS, isSigner: false, isWritable: true },
+      { pubkey: poolVault, isSigner: false, isWritable: true },
+      { pubkey: recipientTokenAccount, isSigner: false, isWritable: true },
+      { pubkey: userPubkey, isSigner: true, isWritable: true },
+      { pubkey: TOKEN_2022_PROGRAM_ID, isSigner: false, isWritable: false },
+      { pubkey: SystemProgram.programId, isSigner: false, isWritable: false },
+      { pubkey: ULTRAHONK_VERIFIER_PROGRAM_ID, isSigner: false, isWritable: false },
+      { pubkey: bufferKeypair.publicKey, isSigner: false, isWritable: false }, // Buffer account
+    ],
+    data: Buffer.from(instructionData),
+  });
+
+  const spendTx = new Transaction();
+  spendTx.add(...priorityFeeIxs);
+  spendTx.add(spendInstruction);
+  spendTx.feePayer = userPubkey;
+
+  // Close buffer transaction
+  const closeIx = createChadBufferCloseIx(bufferKeypair.publicKey, userPubkey);
+  const closeBufferTx = new Transaction();
+  closeBufferTx.add(...priorityFeeIxs);
+  closeBufferTx.add(closeIx);
+  closeBufferTx.feePayer = userPubkey;
+
+  // Set blockhashes
+  const { blockhash } = await connection.getLatestBlockhash();
+  createBufferTx.recentBlockhash = blockhash;
+  writeTxs.forEach(tx => { tx.recentBlockhash = blockhash; });
+  spendTx.recentBlockhash = blockhash;
+  closeBufferTx.recentBlockhash = blockhash;
+
+  return {
+    createBufferTx,
+    writeTxs,
+    spendTx,
+    bufferKeypair,
+    closeBufferTx,
+  };
 }

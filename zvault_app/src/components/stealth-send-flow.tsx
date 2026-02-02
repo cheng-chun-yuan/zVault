@@ -290,7 +290,7 @@ export function StealthSendFlow() {
           <div className="flex items-center justify-between">
             <span className="text-caption text-gray">Transaction</span>
             <a
-              href={`https://explorer.solana.com/tx/${transferResult.signature}?cluster=devnet`}
+              href={`https://orbmarkets.io/tx/${transferResult.signature}?cluster=devnet`}
               target="_blank"
               rel="noopener noreferrer"
               className="text-caption text-privacy hover:text-privacy/80 flex items-center gap-1"

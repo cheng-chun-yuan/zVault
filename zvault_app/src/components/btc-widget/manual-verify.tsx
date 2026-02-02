@@ -399,7 +399,7 @@ export function ManualVerify() {
                   <span className="text-caption text-success">Header on Solana</span>
                   {headerTxSig && (
                     <a
-                      href={`https://explorer.solana.com/tx/${headerTxSig}?cluster=devnet`}
+                      href={`https://orbmarkets.io/tx/${headerTxSig}?cluster=devnet`}
                       target="_blank"
                       rel="noopener noreferrer"
                       className="text-[10px] font-mono text-privacy ml-auto hover:underline"

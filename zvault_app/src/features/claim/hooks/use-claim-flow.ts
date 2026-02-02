@@ -23,6 +23,7 @@ import {
   bytesToBigint,
   hexToBytes,
   DEVNET_CONFIG,
+  BN254_FIELD_PRIME,
   type ClaimInputs,
 } from "@zvault/sdk";
 import {
@@ -265,7 +266,7 @@ export function useClaimFlow(initialNote?: string) {
         throw new Error("Prover not ready. Please wait for initialization.");
       }
 
-      const recipientBigint = BigInt("0x" + Buffer.from(publicKey.toBytes()).toString("hex"));
+      const recipientBigint = BigInt("0x" + Buffer.from(publicKey.toBytes()).toString("hex")) % BN254_FIELD_PRIME;
       const claimInputs: ClaimInputs = {
         privKey,
         pubKeyX,

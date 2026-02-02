@@ -296,7 +296,7 @@ function ActivityCard({
           {/* Transaction Links */}
           <div className="flex flex-wrap gap-2 pt-2 border-t border-gray/10">
             <a
-              href={`https://explorer.solana.com/tx/${record.solanaSignature}?cluster=devnet`}
+              href={`https://orbmarkets.io/tx/${record.solanaSignature}?cluster=devnet`}
               target="_blank"
               rel="noopener noreferrer"
               className="flex items-center gap-1 px-2 py-1 rounded bg-sol/10 text-sol text-[10px] hover:bg-sol/20"

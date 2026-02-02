@@ -19,7 +19,7 @@ export function SuccessCard({
   network = "devnet",
 }: SuccessCardProps) {
   const explorerUrl = txSignature
-    ? `https://explorer.solana.com/tx/${txSignature}?cluster=${network}`
+    ? `https://orbmarkets.io/tx/${txSignature}?cluster=${network}`
     : null;
 
   return (

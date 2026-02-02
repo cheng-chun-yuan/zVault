@@ -162,7 +162,7 @@ function TransactionLink({
   const explorerUrl =
     type === "bitcoin"
       ? `https://mempool.space/testnet/tx/${txid}`
-      : `https://explorer.solana.com/tx/${txid}?cluster=devnet`;
+      : `https://orbmarkets.io/tx/${txid}?cluster=devnet`;
 
   return (
     <div className="flex items-center justify-between text-zinc-400">

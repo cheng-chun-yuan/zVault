@@ -331,7 +331,7 @@ function ClaimFlowContent() {
             <div className="p-3 bg-muted border border-gray/15 rounded-[12px]">
               <p className="text-caption text-gray mb-1">Transaction</p>
               <a
-                href={`https://explorer.solana.com/tx/${txSignature}?cluster=devnet`}
+                href={`https://orbmarkets.io/tx/${txSignature}?cluster=devnet`}
                 target="_blank"
                 rel="noopener noreferrer"
                 className="text-caption font-mono text-privacy hover:underline break-all flex items-center gap-1"
