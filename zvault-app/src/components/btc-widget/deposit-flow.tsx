@@ -25,8 +25,8 @@ import { Tooltip } from "@/components/ui/tooltip";
 const BITCOIN_NETWORK: "mainnet" | "testnet" = "testnet";
 
 export function DepositFlow() {
-  // Demo mode state (default ON for hackathon)
-  const [demoMode, setDemoMode] = useState(true);
+  // Demo mode state (default OFF - real stealth deposits)
+  const [demoMode, setDemoMode] = useState(false);
   const [demoAmount, setDemoAmount] = useState("10000");
   const [demoSubmitting, setDemoSubmitting] = useState(false);
   const [demoResult, setDemoResult] = useState<{
