@@ -3,13 +3,13 @@
   "private": true,
   "workspaces": [
     "sdk",
-    "frontend"
+    "zvault-app"
   ],
   "scripts": {
     "build:sdk": "cd sdk && bun run build",
-    "build:frontend": "cd frontend && bun run build",
+    "build:frontend": "cd zvault-app && bun run build",
     "build": "bun run build:sdk && bun run build:frontend",
-    "dev": "cd frontend && bun run dev",
+    "dev": "cd zvault-app && bun run dev",
     "vercel-build": "bun run build:sdk && bun run build:frontend"
   },
   "dependencies": {
