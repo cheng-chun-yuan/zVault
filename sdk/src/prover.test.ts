@@ -127,6 +127,12 @@ describe("SPEND SPLIT PROOF (Unified Model)", () => {
     const output2PubKeyX = 22222n;
     const output2Amount = 40000000n; // 60M + 40M = 100M
 
+    // Stealth announcement data (circuit public inputs for relayer-safety)
+    const output1EphemeralPubX = 33333n;
+    const output1EncryptedAmountWithSign = 44444n;
+    const output2EphemeralPubX = 55555n;
+    const output2EncryptedAmountWithSign = 66666n;
+
     // Compute input commitment and merkle root (depth 20)
     const inputCommitment = computeUnifiedCommitmentSync(pubKeyX, amount);
     const merkleRoot = computeMerkleRootFromCommitment(inputCommitment, 20);
@@ -148,6 +154,10 @@ describe("SPEND SPLIT PROOF (Unified Model)", () => {
       output1Amount,
       output2PubKeyX,
       output2Amount,
+      output1EphemeralPubX,
+      output1EncryptedAmountWithSign,
+      output2EphemeralPubX,
+      output2EncryptedAmountWithSign,
     });
 
     expect(proof.proof).toBeInstanceOf(Uint8Array);
@@ -176,6 +186,10 @@ describe("SPEND SPLIT PROOF (Unified Model)", () => {
         output1Amount: 60000000n,
         output2PubKeyX: 22222n,
         output2Amount: 50000000n, // 60M + 50M = 110M ≠ 100M
+        output1EphemeralPubX: 33333n,
+        output1EncryptedAmountWithSign: 44444n,
+        output2EphemeralPubX: 55555n,
+        output2EncryptedAmountWithSign: 66666n,
       })
     ).rejects.toThrow("Spend split must conserve amount");
   });
@@ -201,6 +215,10 @@ describe("SPEND PARTIAL PUBLIC PROOF (Unified Model)", () => {
     const changePubKeyX = 11111n;
     const changeAmount = 40000000n;
 
+    // Stealth announcement data for change output
+    const changeEphemeralPubX = 77777n;
+    const changeEncryptedAmountWithSign = 88888n;
+
     // Compute input commitment and merkle root
     const inputCommitment = computeUnifiedCommitmentSync(pubKeyX, amount);
     const merkleRoot = computeMerkleRootFromCommitment(inputCommitment, 20);
@@ -221,6 +239,8 @@ describe("SPEND PARTIAL PUBLIC PROOF (Unified Model)", () => {
       changePubKeyX,
       changeAmount,
       recipient,
+      changeEphemeralPubX,
+      changeEncryptedAmountWithSign,
     });
 
     expect(proof.proof).toBeInstanceOf(Uint8Array);
@@ -249,6 +269,8 @@ describe("SPEND PARTIAL PUBLIC PROOF (Unified Model)", () => {
         changePubKeyX: 11111n,
         changeAmount: 40000000n, // 70M + 40M = 110M ≠ 100M
         recipient: 999999n,
+        changeEphemeralPubX: 77777n,
+        changeEncryptedAmountWithSign: 88888n,
       })
     ).rejects.toThrow("Spend partial public must conserve amount");
   });
