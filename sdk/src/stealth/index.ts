@@ -1,42 +1,111 @@
 /**
- * Stealth Address Subpath
+ * Stealth Address Module
  *
  * EIP-5564/DKSAP stealth address implementation for ZVault.
  * Provides privacy-preserving deposit and receiving functionality.
+ *
+ * Module Structure:
+ * - types.ts: All interfaces and type definitions
+ * - encryption.ts: Amount encryption/decryption helpers
+ * - derivation.ts: Stealth key derivation functions
+ * - parse.ts: On-chain parsing and circuit packing utilities
+ * - pda.ts: PDA derivation helpers
+ * - claim.ts: Claim preparation for ZK proofs
+ * - scan.ts: Announcement scanning functions
+ * - deposit.ts: Stealth deposit creation
+ * - address.ts: Stealth meta-address utilities
+ * - btc-deposit.ts: BTC stealth deposit (combined BTC + announcement)
  */
 
-// Re-export stealth deposit creation
+// ========== Types ==========
 export {
-  createStealthDeposit,
+  // Constants
+  STEALTH_ANNOUNCEMENT_SIZE,
+  STEALTH_ANNOUNCEMENT_DISCRIMINATOR,
+  // Deposit types
   type StealthDeposit,
-} from "./deposit";
+  // Scanned note types
+  type ScannedNote,
+  type ViewOnlyScannedNote,
+  // Claim types
+  type ClaimInputs,
+  type ClaimInputs as StealthClaimInputs,
+  // On-chain types
+  type OnChainStealthAnnouncement,
+  // View-only keys
+  type ViewOnlyKeys,
+  // Stealth output types
+  type StealthOutputData,
+  type StealthOutputWithKeys,
+  type CircuitStealthOutput,
+  // Connection adapter
+  type ConnectionAdapter,
+  // Announcement format
+  type AnnouncementScanFormat,
+} from "./types";
 
-// Re-export announcement scanning
+// ========== Encryption ==========
+export {
+  encryptAmount,
+  decryptAmount,
+  deriveAmountEncryptionKey,
+} from "./encryption";
+
+// ========== Key Derivation ==========
+export {
+  deriveStealthScalar,
+  deriveStealthPubKey,
+  deriveStealthPrivKey,
+} from "./derivation";
+
+// ========== Parsing ==========
+export {
+  parseStealthAnnouncement,
+  announcementToScanFormat,
+  extractYSign,
+  extractX,
+  packEncryptedAmountWithSign,
+  unpackEncryptedAmountWithSign,
+  reconstructCompressedPub,
+  packStealthOutputForCircuit,
+} from "./parse";
+
+// ========== PDA Derivation ==========
+export {
+  deriveStealthAnnouncementPda,
+  deriveNullifierPda,
+  deriveCommitmentPda,
+  computeNullifierHash,
+} from "./pda";
+
+// ========== Claim Preparation ==========
+export {
+  prepareClaimInputs,
+  computeNullifierHashForNote,
+} from "./claim";
+
+// ========== Scanning ==========
 export {
   scanAnnouncements,
   scanAnnouncementsViewOnly,
   exportViewOnlyKeys,
-  prepareClaimInputs,
-  parseStealthAnnouncement,
-  announcementToScanFormat,
   scanByZkeyName,
   resolveZkeyName,
-  // Amount encryption utilities
-  encryptAmount,
-  decryptAmount,
-  // Constants
-  STEALTH_ANNOUNCEMENT_SIZE,
-  STEALTH_ANNOUNCEMENT_DISCRIMINATOR,
-  // Types
-  type ScannedNote,
-  type ClaimInputs as StealthClaimInputs,
-  type OnChainStealthAnnouncement,
-  type ViewOnlyKeys,
-  type ViewOnlyScannedNote,
-  type ConnectionAdapter,
 } from "./scan";
 
-// Re-export stealth meta-address utilities from keys
+// ========== Utilities ==========
+export { isWalletAdapter } from "./utils";
+
+// ========== Deposit Creation ==========
+export {
+  createStealthDeposit,
+  createStealthDepositWithKeys,
+  createStealthOutput,
+  createStealthOutputWithKeys,
+  createStealthOutputForCommitment,
+} from "./deposit";
+
+// ========== Stealth Meta-Address Utilities ==========
 export {
   createStealthMetaAddress,
   serializeStealthMetaAddress,
@@ -48,7 +117,7 @@ export {
   type SerializedStealthMetaAddress,
 } from "./address";
 
-// Re-export direct stealth deposit (BTC + announcement combined)
+// ========== BTC Stealth Deposit ==========
 export {
   prepareStealthDeposit,
   buildStealthOpReturn,
@@ -61,6 +130,3 @@ export {
   type ParsedStealthOpReturn,
   type GrumpkinKeyPair,
 } from "./btc-deposit";
-
-// Re-export wallet type guard
-export { isWalletAdapter } from "./scan";

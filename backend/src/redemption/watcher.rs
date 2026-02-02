@@ -1,14 +1,12 @@
 //! Solana Burn Event Watcher
 //!
 //! Watches Solana for zBTC burn events.
+//! TODO: Integrate with zvault-solana crate when ready.
 
 use crate::redemption::types::BurnEvent;
-use crate::sol_client::{SolClient, SolConfig};
 
 /// Watches Solana for burn events
 pub struct BurnWatcher {
-    /// Solana client
-    sol_client: SolClient,
     /// Program ID to watch
     _program_id: String,
     /// Last processed slot
@@ -17,9 +15,8 @@ pub struct BurnWatcher {
 
 impl BurnWatcher {
     /// Create a new burn watcher
-    pub fn new(sol_config: SolConfig, program_id: String) -> Self {
+    pub fn new(_rpc_url: &str, program_id: String) -> Self {
         Self {
-            sol_client: SolClient::new(sol_config),
             _program_id: program_id,
             last_slot: 0,
         }
@@ -28,29 +25,15 @@ impl BurnWatcher {
     /// Create for devnet with default program
     pub fn new_devnet() -> Self {
         Self::new(
-            SolConfig::default(),
+            "https://api.devnet.solana.com",
             "StBrdg1111111111111111111111111111111111111".to_string(),
         )
     }
 
     /// Check for new burn events
     pub async fn check_burns(&mut self) -> Result<Vec<BurnEvent>, WatcherError> {
-        // For POC: Simulate burn event detection
-        // In production, this would:
-        // 1. Query Solana for recent transactions to the program
-        // 2. Parse transaction logs for burn events
-        // 3. Extract burn details (amount, user, btc_address)
-
-        // Get current slot
-        let current_slot = self
-            .sol_client
-            .get_slot()
-            .map_err(|e| WatcherError::SolanaError(e.to_string()))?;
-
-        // Update last processed slot
-        self.last_slot = current_slot;
-
-        // Return empty for now (simulation)
+        // TODO: Implement with zvault-solana crate
+        // For now, return empty (POC stub)
         Ok(vec![])
     }
 
@@ -91,9 +74,9 @@ impl BurnWatcher {
         }
     }
 
-    /// Check connection to Solana
+    /// Check connection to Solana (stub)
     pub fn is_connected(&self) -> bool {
-        self.sol_client.is_connected()
+        true // TODO: Implement with zvault-solana crate
     }
 }
 

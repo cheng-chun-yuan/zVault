@@ -227,17 +227,10 @@ async fn run_tracker_service(args: &[String]) {
     };
 
     // Configure verifier if keypair available
-    let service = if let Ok(keypair_path) = env::var("VERIFIER_KEYPAIR") {
-        match zbtc::load_keypair_from_file(&keypair_path) {
-            Ok(keypair) => {
-                println!("Verifier configured with Solana keypair");
-                service.with_verifier(keypair)
-            }
-            Err(e) => {
-                eprintln!("Warning: Failed to load verifier keypair: {}", e);
-                service
-            }
-        }
+    // TODO: Re-enable when zvault-solana crate integration is complete
+    let service = if env::var("VERIFIER_KEYPAIR").is_ok() {
+        println!("Warning: VERIFIER_KEYPAIR set but keypair loading not yet implemented");
+        service
     } else {
         service
     };
@@ -266,29 +259,9 @@ async fn run_tracker_service(args: &[String]) {
 }
 
 async fn run_demo() {
-    use zbtc::taproot::{generate_deposit_address, PoolKeys};
-    use bitcoin::Network;
-
     println!("\n=== zBTC Demo ===\n");
     println!("Note: In production, use the SDK for client-side operations.");
     println!();
-
-    // Create pool keys
-    let pool_keys = PoolKeys::new();
-    println!("Pool Public Key: {}", hex::encode(pool_keys.internal_key.serialize()));
-    println!();
-
-    // Generate a sample commitment
-    let sample_commitment = [0x42u8; 32];
-    let amount = 100_000u64; // 0.001 BTC
-
-    // Generate deposit address
-    let deposit_addr =
-        generate_deposit_address(&pool_keys, &sample_commitment, Network::Testnet).unwrap();
-    println!("Sample Deposit Address: {}", deposit_addr.address);
-    println!("Amount: {}", units::format_sats(amount));
-    println!();
-
     println!("=== Flow Overview ===");
     println!();
     println!("1. DEPOSIT (Client-side via SDK):");
@@ -308,6 +281,5 @@ async fn run_demo() {
     println!("   - Processor signs and broadcasts BTC transaction");
     println!("   - Processor calls complete_redemption after confirms");
     println!();
-
     println!("=== Demo Complete ===");
 }

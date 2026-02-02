@@ -379,7 +379,7 @@ export {
   type ConnectionAdapter,
   type ViewOnlyKeys,
   type ViewOnlyScannedNote,
-} from "./stealth";
+} from "./stealth/index";
 
 // ==========================================================================
 // Direct stealth deposit (combined BTC deposit + stealth announcement)
@@ -633,7 +633,7 @@ export {
   type PoolOperationStep,
   type PoolOperationStatus,
   type PoolOperationProgressCallback,
-} from "./yield-pool";
+} from "./pool";
 
 // ==========================================================================
 // UltraHonk Browser Proof Generation
