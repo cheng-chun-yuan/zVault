@@ -377,7 +377,7 @@ export function DepositFlow() {
                   )}
 
                   <a
-                    href={`https://solscan.io/tx/${demoResult.signature}?cluster=devnet`}
+                    href={`https://orbmarkets.io/tx/${demoResult.signature}?cluster=devnet`}
                     target="_blank"
                     rel="noopener noreferrer"
                     className="flex items-center gap-2 text-caption text-sol hover:text-sol-light transition-colors"
