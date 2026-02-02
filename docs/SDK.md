@@ -1,5 +1,7 @@
 # zVault SDK Reference
 
+[![npm version](https://img.shields.io/npm/v/@zvault/sdk.svg)](https://www.npmjs.com/package/@zvault/sdk)
+
 TypeScript SDK for privacy-preserving BTC to Solana bridge.
 
 ---
@@ -199,8 +201,9 @@ interface MerkleProof {
 
 ```typescript
 // Program IDs
-ZVAULT_PROGRAM_ID = '5S5ynMni8Pgd6tKkpYaXiPJiEXgw927s7T2txDtDivRK';
+ZVAULT_PROGRAM_ID = 'zKeyrLmpT8W9o8iRvhizuSihLAFLhfAGBvfM638Pbw8';
 CHADBUFFER_PROGRAM_ID = 'C5RpjtTMFXKVZCtXSzKXD4CDNTaWBg3dVeMfYvjZYHDF';
+ULTRAHONK_VERIFIER_ID = '5uAoTLSexeKKLU3ZXniWFE2CsCWGPzMiYPpKiywCGqsd';
 
 // Merkle tree
 TREE_DEPTH = 20;

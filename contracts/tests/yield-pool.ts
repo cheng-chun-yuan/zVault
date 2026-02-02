@@ -41,7 +41,7 @@ import * as crypto from "crypto";
 /**
  * Program ID for zVault Pinocchio
  */
-const PROGRAM_ID = new PublicKey("5S5ynMni8Pgd6tKkpYaXiPJiEXgw927s7T2txDtDivRK");
+const PROGRAM_ID = new PublicKey("zKeyrLmpT8W9o8iRvhizuSihLAFLhfAGBvfM638Pbw8");
 
 /**
  * Instruction discriminators for yield pool

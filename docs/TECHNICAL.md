@@ -430,8 +430,9 @@ use solana_program::alt_bn128::{
 
 | Program | Network | Address |
 |---------|---------|---------|
-| zVault | Devnet | `5S5ynMni8Pgd6tKkpYaXiPJiEXgw927s7T2txDtDivRK` |
-| BTC Light Client | Devnet | `95vWurTc9BhjBvEbBdUKoTZHMPPyB1iQZEuXEaR7wPpd` |
+| zVault | Devnet | `zKeyrLmpT8W9o8iRvhizuSihLAFLhfAGBvfM638Pbw8` |
+| BTC Light Client | Devnet | `S6rgPjCeBhkYBejWyDR1zzU3sYCMob36LAf8tjwj8pn` |
+| UltraHonk Verifier | Devnet | `5uAoTLSexeKKLU3ZXniWFE2CsCWGPzMiYPpKiywCGqsd` |
 | ChadBuffer | Devnet | `C5RpjtTMFXKVZCtXSzKXD4CDNTaWBg3dVeMfYvjZYHDF` |
 
 ---

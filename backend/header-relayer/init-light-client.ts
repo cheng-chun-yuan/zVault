@@ -13,7 +13,7 @@ import { initializeLightClient, getLightClientState, hexToBytes, bytesToHex } fr
 // Configuration from environment
 const SOLANA_RPC_URL = process.env.SOLANA_RPC_URL || 'https://api.devnet.solana.com';
 const PROGRAM_ID = new PublicKey(
-  process.env.PROGRAM_ID || '95vWurTc9BhjBvEbBdUKoTZHMPPyB1iQZEuXEaR7wPpd'
+  process.env.PROGRAM_ID || 'S6rgPjCeBhkYBejWyDR1zzU3sYCMob36LAf8tjwj8pn'
 );
 const BITCOIN_NETWORK = (process.env.BITCOIN_NETWORK || 'testnet') as BitcoinNetwork;
 const START_BLOCK_HEIGHT = process.env.START_BLOCK_HEIGHT

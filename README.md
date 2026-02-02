@@ -171,6 +171,18 @@ console.log('Share this link:', result.claimLink);
 
 ---
 
+## SDK Package
+
+[![npm version](https://img.shields.io/npm/v/@zvault/sdk.svg)](https://www.npmjs.com/package/@zvault/sdk)
+
+```bash
+bun add @zvault/sdk
+```
+
+**npm**: https://www.npmjs.com/package/@zvault/sdk
+
+---
+
 ## Project Structure
 
 ```
@@ -188,10 +200,11 @@ zVault/
 │   ├── proof_of_innocence/     # Compliance proof
 │   └── utils/                  # Shared crypto (Grumpkin, Poseidon2)
 ├── sdk/                        # @zvault/sdk TypeScript client
-├── frontend/                   # Next.js web interface
+├── zvault-app/                 # Next.js web interface
 ├── mobile-app/                 # Expo React Native app
 ├── backend/                    # Rust API + redemption service
 │   └── header-relayer/         # Bitcoin header sync
+├── frost_server/               # FROST threshold signing (BTC redemption)
 └── docs/                       # Technical documentation
 ```
 
@@ -218,7 +231,7 @@ zVault/
 ### Frontend
 
 ```bash
-cd frontend
+cd zvault-app
 bun install
 bun run dev          # Start dev server (port 3000)
 ```
@@ -254,9 +267,19 @@ bun run test         # Run circuit tests
 
 | Program | Network | Address |
 |---------|---------|---------|
-| zVault | Devnet | `5S5ynMni8Pgd6tKkpYaXiPJiEXgw927s7T2txDtDivRK` |
-| BTC Light Client | Devnet | `95vWurTc9BhjBvEbBdUKoTZHMPPyB1iQZEuXEaR7wPpd` |
+| zVault | Devnet | `zKeyrLmpT8W9o8iRvhizuSihLAFLhfAGBvfM638Pbw8` |
+| BTC Light Client | Devnet | `S6rgPjCeBhkYBejWyDR1zzU3sYCMob36LAf8tjwj8pn` |
+| UltraHonk Verifier | Devnet | `5uAoTLSexeKKLU3ZXniWFE2CsCWGPzMiYPpKiywCGqsd` |
 | ChadBuffer | Devnet | `C5RpjtTMFXKVZCtXSzKXD4CDNTaWBg3dVeMfYvjZYHDF` |
+
+### Deployed Accounts (Devnet)
+
+| Account | Address | Purpose |
+|---------|---------|---------|
+| Pool State | `Bq8FTMnpyspkygAr3yN6tU8dzDhD5Ag19oVN3xXwy3gg` | Shielded pool state |
+| Commitment Tree | `M4hjajsFJU98xdx6ZtLuzgVPUKP6TTKXjfFpBiNE272` | Merkle tree storage |
+| zkBTC Mint | `AUuocP2KQVkUnt8pFtBx5CHpDargEPQNeq29hwtQoxFY` | Token-2022 mint |
+| Pool Vault | `5VCCporx5wvF2y8W97o55r1FiEb4pxp6RLRJMm3wQ1Ck` | Token vault |
 
 ---
 
