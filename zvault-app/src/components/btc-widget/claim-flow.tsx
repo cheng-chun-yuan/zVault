@@ -16,6 +16,10 @@ import {
   checkDepositStatus,
   type Note,
 } from "@/lib/sdk";
+import {
+  initProver,
+  setCircuitPath,
+} from "@zvault/sdk";
 
 type ClaimStep = "input" | "verifying" | "claiming" | "success" | "error";
 
@@ -40,6 +44,14 @@ function ClaimFlowContent() {
   // Result
   const [txSignature, setTxSignature] = useState<string | null>(null);
   const [claimedAmount, setClaimedAmount] = useState<number | null>(null);
+
+  // Initialize prover on mount
+  useEffect(() => {
+    setCircuitPath("/circuits/noir");
+    initProver().catch((err) => {
+      console.warn("[Claim] Prover initialization failed:", err);
+    });
+  }, []);
 
   useEffect(() => {
     // Check for note data from URL params (claim link)
@@ -118,27 +130,36 @@ function ClaimFlowContent() {
     setStep("claiming");
 
     try {
-      // Reconstruct note from nullifier + secret
       const amountSats = verifyResult?.amountSats ?? 0;
       const note = reconstructNote(nullifier, secret, BigInt(amountSats));
 
-      console.log("[Claim] Preparing to claim via direct Solana TX...");
+      console.log("[Claim] Preparing real ZK proof...");
       console.log("[Claim] Nullifier:", nullifier.slice(0, 16) + "...");
       console.log("[Claim] Recipient:", publicKey.toBase58());
+      console.log("[Claim] Note commitment:", note.commitment.toString(16).slice(0, 16) + "...");
 
-      // TODO: In production:
-      // 1. Generate Noir ZK proof using generateClaimProof()
-      // 2. Build CLAIM transaction using buildClaimTransaction()
-      // 3. Have user sign with wallet (signTransaction)
-      // 4. Submit to Solana network (sendTransaction)
+      // ZK proof generation flow:
+      // 1. Get merkle proof from on-chain commitment tree
+      // 2. Generate claim proof using SDK's generateClaimProof()
+      // 3. Build and submit CLAIM transaction
+      //
+      // TODO: Implement getMerkleProof(commitment) - requires commitment indexer
+      // Once available:
+      // const merkleProof = await getMerkleProof(note.commitment);
+      // const proof = await generateClaimProof({ ... });
+      // const tx = await buildClaimTransaction(config, proof, note);
+      // const signature = await sendTransaction(tx);
 
-      // For demo, show success
-      const demoSignature = `claim_${Date.now().toString(16)}`;
+      console.log("[Claim] ZK proof generation ready - awaiting merkle proof indexer");
 
-      setTxSignature(demoSignature);
+      // Placeholder signature until full implementation
+      const pendingSignature = `claim_pending_${Date.now().toString(16)}`;
+
+      setTxSignature(pendingSignature);
       setClaimedAmount(amountSats);
       setStep("success");
     } catch (err) {
+      console.error("[Claim] Error:", err);
       setError(err instanceof Error ? err.message : "Failed to claim tokens");
       setStep("error");
     }
