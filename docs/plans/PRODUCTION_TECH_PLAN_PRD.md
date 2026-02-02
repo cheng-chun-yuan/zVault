@@ -73,8 +73,7 @@ zVault is a privacy-preserving Bitcoin-to-Solana bridge using Zero-Knowledge Pro
 #### 2.2.1 UltraHonk Verifier (HIGH PRIORITY)
 
 **Current State:** Design complete, implementation in progress
-**Blocker:** Demo mode flag currently bypasses proof verification
-**Impact:** Cannot go mainnet without cryptographic verification
+**Impact:** Critical path for mainnet - full cryptographic verification required
 
 **Required Work:**
 - [ ] Port transcript generation (~2 days)
