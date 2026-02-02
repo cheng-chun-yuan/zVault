@@ -6,9 +6,8 @@
 //!
 //! ZK Proof: UltraHonk (generated in browser via bb.js or mobile via mopro)
 //!
-//! ## Proof Sources
-//! - **Inline (proof_source=0)**: Proof data included directly in instruction data
-//! - **Buffer (proof_source=1)**: Proof read from ChadBuffer account (for large proofs)
+//! The UltraHonk verifier must be called in an earlier instruction of the same transaction.
+//! This instruction uses instruction introspection to verify the verifier was called.
 
 use pinocchio::{
     account_info::AccountInfo,
@@ -25,52 +24,12 @@ use crate::state::{
 };
 use crate::utils::{
     create_pda_account, validate_account_writable, validate_program_owner,
-    verify_ultrahonk_split_proof, MAX_ULTRAHONK_PROOF_SIZE,
 };
 
-/// ChadBuffer authority size (first 32 bytes of account data)
-const CHADBUFFER_AUTHORITY_SIZE: usize = 32;
 
-/// Proof source indicator
-#[repr(u8)]
-#[derive(Clone, Copy, PartialEq, Eq)]
-pub enum SplitProofSource {
-    /// Proof data is included inline in instruction data
-    Inline = 0,
-    /// Proof data is read from a ChadBuffer account
-    Buffer = 1,
-}
-
-impl SplitProofSource {
-    pub fn from_u8(value: u8) -> Option<Self> {
-        match value {
-            0 => Some(SplitProofSource::Inline),
-            1 => Some(SplitProofSource::Buffer),
-            _ => None,
-        }
-    }
-}
-
-/// Split commitment instruction data (UltraHonk proof - variable size)
+/// Split commitment instruction data
 ///
-/// ## Inline Mode (proof_source=0)
 /// Layout:
-/// - proof_source: u8 (0)
-/// - proof_len: u32 (4 bytes, LE)
-/// - proof: [u8; proof_len] - UltraHonk proof
-/// - root: [u8; 32]
-/// - nullifier_hash: [u8; 32]
-/// - output_commitment_1: [u8; 32]
-/// - output_commitment_2: [u8; 32]
-/// - vk_hash: [u8; 32]
-/// - output1_ephemeral_pub_x: [u8; 32] - x-coordinate of ephemeral pubkey for output 1 (circuit public input)
-/// - output1_encrypted_amount_with_sign: [u8; 32] - bits 0-63: encrypted amount, bit 64: y_sign (circuit public input)
-/// - output2_ephemeral_pub_x: [u8; 32] - x-coordinate of ephemeral pubkey for output 2 (circuit public input)
-/// - output2_encrypted_amount_with_sign: [u8; 32] - bits 0-63: encrypted amount, bit 64: y_sign (circuit public input)
-///
-/// ## Buffer Mode (proof_source=1)
-/// Layout:
-/// - proof_source: u8 (1)
 /// - root: [u8; 32]
 /// - nullifier_hash: [u8; 32]
 /// - output_commitment_1: [u8; 32]
@@ -80,70 +39,30 @@ impl SplitProofSource {
 /// - output1_encrypted_amount_with_sign: [u8; 32]
 /// - output2_ephemeral_pub_x: [u8; 32]
 /// - output2_encrypted_amount_with_sign: [u8; 32]
-/// (proof is read from ChadBuffer account passed as additional account)
 ///
-/// Note: The ephemeral pubkey and encrypted amount fields are circuit public inputs,
-/// so the proof commits to these values. A malicious relayer cannot tamper with them.
-pub struct SpendSplitData<'a> {
-    pub proof_source: SplitProofSource,
-    pub proof: Option<&'a [u8]>,
+/// Proof is in ChadBuffer account, verified by earlier verifier instruction in same TX.
+pub struct SpendSplitData {
     pub root: [u8; 32],
     pub nullifier_hash: [u8; 32],
     pub output_commitment_1: [u8; 32],
     pub output_commitment_2: [u8; 32],
     pub vk_hash: [u8; 32],
-    /// Ephemeral pubkey x-coordinate for first output (32 bytes) - circuit public input
     pub output1_ephemeral_pub_x: [u8; 32],
-    /// Packed: bits 0-63 = encrypted amount, bit 64 = y_sign for output 1 - circuit public input
     pub output1_encrypted_amount_with_sign: [u8; 32],
-    /// Ephemeral pubkey x-coordinate for second output (32 bytes) - circuit public input
     pub output2_ephemeral_pub_x: [u8; 32],
-    /// Packed: bits 0-63 = encrypted amount, bit 64 = y_sign for output 2 - circuit public input
     pub output2_encrypted_amount_with_sign: [u8; 32],
 }
 
-impl<'a> SpendSplitData<'a> {
-    /// Minimum size for inline mode: proof_source(1) + proof_len(4) + root(32) + nullifier(32) + out1(32) + out2(32) + vk_hash(32) + output1_ephemeral_pub_x(32) + output1_encrypted_amount_with_sign(32) + output2_ephemeral_pub_x(32) + output2_encrypted_amount_with_sign(32) = 293 bytes + proof
-    pub const MIN_SIZE_INLINE: usize = 1 + 4 + 32 + 32 + 32 + 32 + 32 + 32 + 32 + 32 + 32;
+impl SpendSplitData {
+    /// Size: root(32) + nullifier(32) + out1(32) + out2(32) + vk_hash(32) + eph1_x(32) + enc1(32) + eph2_x(32) + enc2(32) = 288 bytes
+    pub const SIZE: usize = 32 + 32 + 32 + 32 + 32 + 32 + 32 + 32 + 32;
 
-    /// Minimum size for buffer mode: proof_source(1) + root(32) + nullifier(32) + out1(32) + out2(32) + vk_hash(32) + output1_ephemeral_pub_x(32) + output1_encrypted_amount_with_sign(32) + output2_ephemeral_pub_x(32) + output2_encrypted_amount_with_sign(32) = 289 bytes
-    pub const MIN_SIZE_BUFFER: usize = 1 + 32 + 32 + 32 + 32 + 32 + 32 + 32 + 32 + 32;
-
-    pub fn from_bytes(data: &'a [u8]) -> Result<Self, ProgramError> {
-        if data.is_empty() {
+    pub fn from_bytes(data: &[u8]) -> Result<Self, ProgramError> {
+        if data.len() < Self::SIZE {
             return Err(ProgramError::InvalidInstructionData);
         }
 
-        let proof_source = SplitProofSource::from_u8(data[0]).ok_or_else(|| {
-            pinocchio::msg!("Invalid proof source");
-            ProgramError::InvalidInstructionData
-        })?;
-
-        match proof_source {
-            SplitProofSource::Inline => Self::parse_inline(data),
-            SplitProofSource::Buffer => Self::parse_buffer(data),
-        }
-    }
-
-    fn parse_inline(data: &'a [u8]) -> Result<Self, ProgramError> {
-        if data.len() < Self::MIN_SIZE_INLINE {
-            return Err(ProgramError::InvalidInstructionData);
-        }
-
-        // Parse proof length (after proof_source byte)
-        let proof_len = u32::from_le_bytes([data[1], data[2], data[3], data[4]]) as usize;
-
-        if proof_len > MAX_ULTRAHONK_PROOF_SIZE {
-            return Err(ProgramError::InvalidInstructionData);
-        }
-
-        let expected_size = 1 + 4 + proof_len + 32 + 32 + 32 + 32 + 32 + 32 + 32 + 32 + 32;
-        if data.len() < expected_size {
-            return Err(ProgramError::InvalidInstructionData);
-        }
-
-        let proof = &data[5..5 + proof_len];
-        let mut offset = 5 + proof_len;
+        let mut offset = 0;
 
         let mut root = [0u8; 32];
         root.copy_from_slice(&data[offset..offset + 32]);
@@ -181,65 +100,6 @@ impl<'a> SpendSplitData<'a> {
         output2_encrypted_amount_with_sign.copy_from_slice(&data[offset..offset + 32]);
 
         Ok(Self {
-            proof_source: SplitProofSource::Inline,
-            proof: Some(proof),
-            root,
-            nullifier_hash,
-            output_commitment_1,
-            output_commitment_2,
-            vk_hash,
-            output1_ephemeral_pub_x,
-            output1_encrypted_amount_with_sign,
-            output2_ephemeral_pub_x,
-            output2_encrypted_amount_with_sign,
-        })
-    }
-
-    fn parse_buffer(data: &'a [u8]) -> Result<Self, ProgramError> {
-        if data.len() < Self::MIN_SIZE_BUFFER {
-            return Err(ProgramError::InvalidInstructionData);
-        }
-
-        let mut offset = 1; // Skip proof_source byte
-
-        let mut root = [0u8; 32];
-        root.copy_from_slice(&data[offset..offset + 32]);
-        offset += 32;
-
-        let mut nullifier_hash = [0u8; 32];
-        nullifier_hash.copy_from_slice(&data[offset..offset + 32]);
-        offset += 32;
-
-        let mut output_commitment_1 = [0u8; 32];
-        output_commitment_1.copy_from_slice(&data[offset..offset + 32]);
-        offset += 32;
-
-        let mut output_commitment_2 = [0u8; 32];
-        output_commitment_2.copy_from_slice(&data[offset..offset + 32]);
-        offset += 32;
-
-        let mut vk_hash = [0u8; 32];
-        vk_hash.copy_from_slice(&data[offset..offset + 32]);
-        offset += 32;
-
-        let mut output1_ephemeral_pub_x = [0u8; 32];
-        output1_ephemeral_pub_x.copy_from_slice(&data[offset..offset + 32]);
-        offset += 32;
-
-        let mut output1_encrypted_amount_with_sign = [0u8; 32];
-        output1_encrypted_amount_with_sign.copy_from_slice(&data[offset..offset + 32]);
-        offset += 32;
-
-        let mut output2_ephemeral_pub_x = [0u8; 32];
-        output2_ephemeral_pub_x.copy_from_slice(&data[offset..offset + 32]);
-        offset += 32;
-
-        let mut output2_encrypted_amount_with_sign = [0u8; 32];
-        output2_encrypted_amount_with_sign.copy_from_slice(&data[offset..offset + 32]);
-
-        Ok(Self {
-            proof_source: SplitProofSource::Buffer,
-            proof: None,
             root,
             nullifier_hash,
             output_commitment_1,
@@ -293,9 +153,8 @@ impl<'a> SpendSplitData<'a> {
     }
 }
 
-/// Split commitment accounts
+/// Split commitment accounts (10 accounts)
 ///
-/// ## Inline Mode (8 accounts)
 /// 0. pool_state (writable)
 /// 1. commitment_tree (writable)
 /// 2. nullifier_record (writable)
@@ -304,9 +163,8 @@ impl<'a> SpendSplitData<'a> {
 /// 5. ultrahonk_verifier - UltraHonk verifier program
 /// 6. stealth_announcement_1 (writable) - StealthAnnouncement PDA for first output
 /// 7. stealth_announcement_2 (writable) - StealthAnnouncement PDA for second output
-///
-/// ## Buffer Mode (9 accounts - adds proof_buffer)
 /// 8. proof_buffer (readonly) - ChadBuffer account containing proof data
+/// 9. instructions_sysvar (readonly) - For verifying prior verification instruction
 pub struct SpendSplitAccounts<'a> {
     pub pool_state: &'a AccountInfo,
     pub commitment_tree: &'a AccountInfo,
@@ -316,16 +174,15 @@ pub struct SpendSplitAccounts<'a> {
     pub ultrahonk_verifier: &'a AccountInfo,
     pub stealth_announcement_1: &'a AccountInfo,
     pub stealth_announcement_2: &'a AccountInfo,
-    pub proof_buffer: Option<&'a AccountInfo>,
+    pub proof_buffer: &'a AccountInfo,
+    pub instructions_sysvar: &'a AccountInfo,
 }
 
 impl<'a> SpendSplitAccounts<'a> {
-    pub fn from_accounts(
-        accounts: &'a [AccountInfo],
-        use_buffer: bool,
-    ) -> Result<Self, ProgramError> {
-        let min_accounts = if use_buffer { 9 } else { 8 };
-        if accounts.len() < min_accounts {
+    pub const ACCOUNT_COUNT: usize = 10;
+
+    pub fn from_accounts(accounts: &'a [AccountInfo]) -> Result<Self, ProgramError> {
+        if accounts.len() < Self::ACCOUNT_COUNT {
             return Err(ProgramError::NotEnoughAccountKeys);
         }
 
@@ -337,11 +194,8 @@ impl<'a> SpendSplitAccounts<'a> {
         let ultrahonk_verifier = &accounts[5];
         let stealth_announcement_1 = &accounts[6];
         let stealth_announcement_2 = &accounts[7];
-        let proof_buffer = if use_buffer {
-            Some(&accounts[8])
-        } else {
-            None
-        };
+        let proof_buffer = &accounts[8];
+        let instructions_sysvar = &accounts[9];
 
         // Validate user is signer
         if !user.is_signer() {
@@ -358,25 +212,20 @@ impl<'a> SpendSplitAccounts<'a> {
             stealth_announcement_1,
             stealth_announcement_2,
             proof_buffer,
+            instructions_sysvar,
         })
     }
 }
 
 /// Process split commitment (1-in-2-out) with UltraHonk proof
 ///
-/// Supports both inline proofs and ChadBuffer references.
+/// The UltraHonk verifier must be called in an earlier instruction of the same transaction.
 pub fn process_spend_split(
     program_id: &Pubkey,
     accounts: &[AccountInfo],
     data: &[u8],
 ) -> ProgramResult {
-    // Parse instruction data first to determine proof source
-    if data.is_empty() {
-        return Err(ProgramError::InvalidInstructionData);
-    }
-    let use_buffer = data[0] == SplitProofSource::Buffer as u8;
-
-    let accounts = SpendSplitAccounts::from_accounts(accounts, use_buffer)?;
+    let accounts = SpendSplitAccounts::from_accounts(accounts)?;
     let ix_data = SpendSplitData::from_bytes(data)?;
 
     // SECURITY: Validate account owners BEFORE deserializing any data
@@ -471,74 +320,21 @@ pub fn process_spend_split(
         }
     }
 
-    // Get proof bytes and verify (either inline or from ChadBuffer)
-    // Note: The ephemeral pubkey and encrypted amount fields are circuit public inputs,
-    // so the proof commits to these values. If a relayer tries to tamper with them, verification fails.
-    match ix_data.proof_source {
-        SplitProofSource::Inline => {
-            let proof = ix_data.proof.ok_or(ProgramError::InvalidInstructionData)?;
+    // Verify that UltraHonk verifier was called in an earlier instruction of this TX.
+    // Uses instruction introspection - the verifier must have been called with the
+    // same buffer account. This avoids Solana's CPI data size limit (10KB < 16KB proof).
+    pinocchio::msg!("Verifying prior verification instruction...");
 
-            pinocchio::msg!("Verifying UltraHonk split proof (inline) via CPI...");
+    crate::utils::verify_prior_buffer_verification(
+        accounts.instructions_sysvar,
+        accounts.ultrahonk_verifier.key(),
+        accounts.proof_buffer.key(),
+    ).map_err(|_| {
+        pinocchio::msg!("No valid prior verification instruction found");
+        ZVaultError::ZkVerificationFailed
+    })?;
 
-            verify_ultrahonk_split_proof(
-                accounts.ultrahonk_verifier,
-                proof,
-                &ix_data.root,
-                &ix_data.nullifier_hash,
-                &ix_data.output_commitment_1,
-                &ix_data.output_commitment_2,
-                &ix_data.output1_ephemeral_pub_x,
-                &ix_data.output1_encrypted_amount_with_sign,
-                &ix_data.output2_ephemeral_pub_x,
-                &ix_data.output2_encrypted_amount_with_sign,
-                &ix_data.vk_hash,
-            )
-            .map_err(|_| {
-                pinocchio::msg!("UltraHonk split proof verification failed");
-                ZVaultError::ZkVerificationFailed
-            })?;
-        }
-        SplitProofSource::Buffer => {
-            let proof_buffer_account = accounts
-                .proof_buffer
-                .ok_or(ProgramError::NotEnoughAccountKeys)?;
-
-            // Read proof from ChadBuffer (data starts after 32-byte authority)
-            let buffer_data = proof_buffer_account.try_borrow_data()?;
-
-            if buffer_data.len() <= CHADBUFFER_AUTHORITY_SIZE {
-                pinocchio::msg!("ChadBuffer too small");
-                return Err(ProgramError::InvalidAccountData);
-            }
-
-            let proof = &buffer_data[CHADBUFFER_AUTHORITY_SIZE..];
-
-            if proof.len() > MAX_ULTRAHONK_PROOF_SIZE {
-                pinocchio::msg!("Proof in buffer too large");
-                return Err(ZVaultError::InvalidProofLength.into());
-            }
-
-            pinocchio::msg!("Verifying UltraHonk split proof (buffer) via CPI...");
-
-            verify_ultrahonk_split_proof(
-                accounts.ultrahonk_verifier,
-                proof,
-                &ix_data.root,
-                &ix_data.nullifier_hash,
-                &ix_data.output_commitment_1,
-                &ix_data.output_commitment_2,
-                &ix_data.output1_ephemeral_pub_x,
-                &ix_data.output1_encrypted_amount_with_sign,
-                &ix_data.output2_ephemeral_pub_x,
-                &ix_data.output2_encrypted_amount_with_sign,
-                &ix_data.vk_hash,
-            )
-            .map_err(|_| {
-                pinocchio::msg!("UltraHonk split proof verification failed");
-                ZVaultError::ZkVerificationFailed
-            })?;
-        }
-    }
+    pinocchio::msg!("Prior verification confirmed");
 
     // Initialize nullifier record
     {

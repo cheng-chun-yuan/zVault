@@ -247,7 +247,6 @@ function buildInitializeInstruction(
       { pubkey: zkbtcMint, isSigner: false, isWritable: false },
       { pubkey: Keypair.generate().publicKey, isSigner: false, isWritable: false }, // poolVault
       { pubkey: Keypair.generate().publicKey, isSigner: false, isWritable: false }, // frostVault
-      { pubkey: Keypair.generate().publicKey, isSigner: false, isWritable: false }, // privacyCashPool
       { pubkey: authority, isSigner: true, isWritable: true },
       { pubkey: SystemProgram.programId, isSigner: false, isWritable: false },
     ],

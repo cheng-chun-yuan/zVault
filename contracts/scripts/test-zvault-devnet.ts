@@ -138,7 +138,6 @@ async function initializeProgram(
   const zkbtcMint = Keypair.generate().publicKey;
   const poolVault = Keypair.generate().publicKey;
   const frostVault = Keypair.generate().publicKey;
-  const privacyCashPool = Keypair.generate().publicKey;
 
   // Build initialize instruction
   const data = Buffer.alloc(3);
@@ -154,7 +153,6 @@ async function initializeProgram(
       { pubkey: zkbtcMint, isSigner: false, isWritable: false },
       { pubkey: poolVault, isSigner: false, isWritable: false },
       { pubkey: frostVault, isSigner: false, isWritable: false },
-      { pubkey: privacyCashPool, isSigner: false, isWritable: false },
       { pubkey: payer.publicKey, isSigner: true, isWritable: true },
       { pubkey: SystemProgram.programId, isSigner: false, isWritable: false },
     ],

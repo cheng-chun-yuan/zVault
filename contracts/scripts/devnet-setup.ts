@@ -162,7 +162,6 @@ function buildInitializeInstruction(
   zkbtcMint: PublicKey,
   poolVault: PublicKey,
   frostVault: PublicKey,
-  privacyCashPool: PublicKey,
   authority: PublicKey,
   poolBump: number,
   treeBump: number,
@@ -179,7 +178,6 @@ function buildInitializeInstruction(
       { pubkey: zkbtcMint, isSigner: false, isWritable: false },
       { pubkey: poolVault, isSigner: false, isWritable: false },
       { pubkey: frostVault, isSigner: false, isWritable: false },
-      { pubkey: privacyCashPool, isSigner: false, isWritable: false },
       { pubkey: authority, isSigner: true, isWritable: true },
       { pubkey: SystemProgram.programId, isSigner: false, isWritable: false },
     ],
@@ -282,7 +280,6 @@ async function main() {
     // Create mock vault addresses (for testing)
     const poolVault = Keypair.generate().publicKey;
     const frostVault = Keypair.generate().publicKey;
-    const privacyCashPool = Keypair.generate().publicKey;
 
     // Account sizes (must match Rust structs)
     const POOL_STATE_SIZE = 296;
@@ -351,7 +348,6 @@ async function main() {
         mintKeypair.publicKey,
         poolVault,
         frostVault,
-        privacyCashPool,
         authority.publicKey,
         poolBump,
         treeBump,

@@ -362,6 +362,75 @@ pub fn verify_ultrahonk_split_proof(
     verify_ultrahonk_proof_cpi(verifier_program, proof_bytes, &public_inputs, vk_hash)
 }
 
+/// Verify split proof from buffer (for large proofs > 10KB)
+///
+/// Uses VERIFY_FROM_BUFFER instruction which reads proof from a buffer account.
+/// This avoids CPI data size limits for large UltraHonk proofs.
+///
+/// Public inputs: [root, nullifier_hash, output_commitment_1, output_commitment_2,
+///                 output1_ephemeral_pub_x, output1_encrypted_amount_with_sign,
+///                 output2_ephemeral_pub_x, output2_encrypted_amount_with_sign]
+#[allow(clippy::too_many_arguments)]
+pub fn verify_ultrahonk_split_proof_from_buffer(
+    verifier_program: &AccountInfo,
+    proof_buffer: &AccountInfo,
+    root: &[u8; 32],
+    nullifier_hash: &[u8; 32],
+    output_commitment_1: &[u8; 32],
+    output_commitment_2: &[u8; 32],
+    output1_ephemeral_pub_x: &[u8; 32],
+    output1_encrypted_amount_with_sign: &[u8; 32],
+    output2_ephemeral_pub_x: &[u8; 32],
+    output2_encrypted_amount_with_sign: &[u8; 32],
+    vk_hash: &[u8; 32],
+) -> Result<(), ProgramError> {
+    let public_inputs = [
+        *root,
+        *nullifier_hash,
+        *output_commitment_1,
+        *output_commitment_2,
+        *output1_ephemeral_pub_x,
+        *output1_encrypted_amount_with_sign,
+        *output2_ephemeral_pub_x,
+        *output2_encrypted_amount_with_sign,
+    ];
+
+    // Build instruction data for VERIFY_FROM_BUFFER
+    // Format: [discriminator(1)] [pi_count(4)] [public_inputs(N*32)] [vk_hash(32)]
+    let pi_count = public_inputs.len();
+    let total_size = 1 + 4 + (pi_count * 32) + 32;
+    let mut ix_data = Vec::with_capacity(total_size);
+
+    // Discriminator
+    ix_data.push(ultrahonk_instruction::VERIFY_FROM_BUFFER);
+
+    // Public inputs count (little-endian)
+    ix_data.extend_from_slice(&(pi_count as u32).to_le_bytes());
+
+    // Public inputs
+    for pi in &public_inputs {
+        ix_data.extend_from_slice(pi);
+    }
+
+    // VK hash
+    ix_data.extend_from_slice(vk_hash);
+
+    // Account meta for proof buffer
+    let account_metas = [AccountMeta::readonly(proof_buffer.key())];
+
+    // Create CPI instruction
+    let instruction = Instruction {
+        program_id: verifier_program.key(),
+        accounts: &account_metas,
+        data: &ix_data,
+    };
+
+    // Invoke with proof buffer account
+    invoke(&instruction, &[proof_buffer])?;
+
+    Ok(())
+}
+
 /// Verify spend partial public proof for UltraHonk
 ///
 /// Public inputs: [root, nullifier_hash, public_amount, change_commitment, recipient,
@@ -398,6 +467,76 @@ pub fn verify_ultrahonk_spend_partial_public_proof(
     ];
 
     verify_ultrahonk_proof_cpi(verifier_program, proof_bytes, &public_inputs, vk_hash)
+}
+
+/// Verify spend partial public proof from buffer (for large proofs > 10KB)
+///
+/// Uses VERIFY_FROM_BUFFER instruction which reads proof from a buffer account.
+/// This avoids CPI data size limits for large UltraHonk proofs.
+///
+/// Public inputs: [root, nullifier_hash, public_amount, change_commitment, recipient,
+///                 change_ephemeral_pub_x, change_encrypted_amount_with_sign]
+#[allow(clippy::too_many_arguments)]
+pub fn verify_ultrahonk_spend_partial_public_proof_from_buffer(
+    verifier_program: &AccountInfo,
+    proof_buffer: &AccountInfo,
+    root: &[u8; 32],
+    nullifier_hash: &[u8; 32],
+    public_amount: u64,
+    change_commitment: &[u8; 32],
+    recipient: &[u8; 32],
+    change_ephemeral_pub_x: &[u8; 32],
+    change_encrypted_amount_with_sign: &[u8; 32],
+    vk_hash: &[u8; 32],
+) -> Result<(), ProgramError> {
+    // Encode amount as 32-byte field element (big-endian)
+    let mut amount_bytes = [0u8; 32];
+    amount_bytes[24..32].copy_from_slice(&public_amount.to_be_bytes());
+
+    let public_inputs = [
+        *root,
+        *nullifier_hash,
+        amount_bytes,
+        *change_commitment,
+        *recipient,
+        *change_ephemeral_pub_x,
+        *change_encrypted_amount_with_sign,
+    ];
+
+    // Build instruction data for VERIFY_FROM_BUFFER
+    // Format: [discriminator(1)] [pi_count(4)] [public_inputs(N*32)] [vk_hash(32)]
+    let pi_count = public_inputs.len();
+    let total_size = 1 + 4 + (pi_count * 32) + 32;
+    let mut ix_data = Vec::with_capacity(total_size);
+
+    // Discriminator
+    ix_data.push(ultrahonk_instruction::VERIFY_FROM_BUFFER);
+
+    // Public inputs count (little-endian)
+    ix_data.extend_from_slice(&(pi_count as u32).to_le_bytes());
+
+    // Public inputs
+    for pi in &public_inputs {
+        ix_data.extend_from_slice(pi);
+    }
+
+    // VK hash
+    ix_data.extend_from_slice(vk_hash);
+
+    // Account meta for proof buffer
+    let account_metas = [AccountMeta::readonly(proof_buffer.key())];
+
+    // Create CPI instruction
+    let instruction = Instruction {
+        program_id: verifier_program.key(),
+        accounts: &account_metas,
+        data: &ix_data,
+    };
+
+    // Invoke with proof buffer account
+    invoke(&instruction, &[proof_buffer])?;
+
+    Ok(())
 }
 
 // =============================================================================

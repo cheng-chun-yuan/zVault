@@ -6,6 +6,7 @@
 pub mod bitcoin;
 pub mod chadbuffer;
 pub mod crypto;
+pub mod introspection;
 pub mod token;
 pub mod ultrahonk;
 pub mod validation;
@@ -13,6 +14,7 @@ pub mod validation;
 pub use bitcoin::*;
 pub use chadbuffer::*;
 pub use crypto::*;
+pub use introspection::*;
 pub use token::*;
 pub use ultrahonk::*;
 pub use validation::*;

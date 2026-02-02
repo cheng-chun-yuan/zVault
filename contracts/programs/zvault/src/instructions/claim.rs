@@ -38,9 +38,6 @@ use crate::utils::{
     MAX_ULTRAHONK_PROOF_SIZE,
 };
 
-/// ChadBuffer authority size (first 32 bytes of account data)
-const CHADBUFFER_AUTHORITY_SIZE: usize = 32;
-
 /// Proof source indicator
 #[repr(u8)]
 #[derive(Clone, Copy, PartialEq, Eq)]

@@ -204,7 +204,6 @@ function buildInitializeIx(
   zkbtcMint: PublicKey,
   poolVault: PublicKey,
   frostVault: PublicKey,
-  privacyCashPool: PublicKey,
   authority: PublicKey,
   poolBump: number,
   treeBump: number
@@ -221,7 +220,6 @@ function buildInitializeIx(
       { pubkey: zkbtcMint, isSigner: false, isWritable: false },
       { pubkey: poolVault, isSigner: false, isWritable: false },
       { pubkey: frostVault, isSigner: false, isWritable: false },
-      { pubkey: privacyCashPool, isSigner: false, isWritable: false },
       { pubkey: authority, isSigner: true, isWritable: true },
       { pubkey: SystemProgram.programId, isSigner: false, isWritable: false },
     ],
@@ -432,16 +430,12 @@ async function testInitialize(
       TOKEN_2022_PROGRAM_ID
     );
 
-    // Privacy cash pool (just a dummy keypair for testing)
-    const privacyCashPool = Keypair.generate().publicKey;
-
     const ix = buildInitializeIx(
       poolState,
       commitmentTree,
       zkbtcMint,
       poolVault.address,
       frostVault.address,
-      privacyCashPool,
       authority.publicKey,
       poolBump,
       treeBump

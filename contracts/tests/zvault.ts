@@ -101,7 +101,7 @@ export const Constants = {
 // ============================================================================
 
 /**
- * PoolState account layout (296 bytes)
+ * PoolState account layout (264 bytes)
  */
 export interface PoolStateLayout {
   discriminator: number;     // 1 byte
@@ -110,8 +110,7 @@ export interface PoolStateLayout {
   _padding: number;          // 1 byte
   authority: Uint8Array;     // 32 bytes
   zkbtcMint: Uint8Array;     // 32 bytes
-  privacyCashPool: Uint8Array; // 32 bytes
-  poolVault: Uint8Array;     // 32 bytes
+  poolVault: Uint8Array;     // 32 bytes (offset 68)
   frostVault: Uint8Array;    // 32 bytes
   depositCount: bigint;      // 8 bytes
   totalMinted: bigint;       // 8 bytes
@@ -125,7 +124,7 @@ export interface PoolStateLayout {
   _reserved: Uint8Array;     // 64 bytes
 }
 
-export const POOL_STATE_SIZE = 296;
+export const POOL_STATE_SIZE = 264;
 
 /**
  * Parse PoolState from account data
@@ -145,19 +144,18 @@ export function parsePoolState(data: Buffer): PoolStateLayout {
     _padding: data[3],
     authority: data.subarray(4, 36),
     zkbtcMint: data.subarray(36, 68),
-    privacyCashPool: data.subarray(68, 100),
-    poolVault: data.subarray(100, 132),
-    frostVault: data.subarray(132, 164),
-    depositCount: data.readBigUInt64LE(164),
-    totalMinted: data.readBigUInt64LE(172),
-    totalBurned: data.readBigUInt64LE(180),
-    pendingRedemptions: data.readBigUInt64LE(188),
-    directClaims: data.readBigUInt64LE(196),
-    splitCount: data.readBigUInt64LE(204),
-    lastUpdate: data.readBigInt64LE(212),
-    minDeposit: data.readBigUInt64LE(220),
-    maxDeposit: data.readBigUInt64LE(228),
-    _reserved: data.subarray(232, 296),
+    poolVault: data.subarray(68, 100),
+    frostVault: data.subarray(100, 132),
+    depositCount: data.readBigUInt64LE(132),
+    totalMinted: data.readBigUInt64LE(140),
+    totalBurned: data.readBigUInt64LE(148),
+    pendingRedemptions: data.readBigUInt64LE(156),
+    directClaims: data.readBigUInt64LE(164),
+    splitCount: data.readBigUInt64LE(172),
+    lastUpdate: data.readBigInt64LE(180),
+    minDeposit: data.readBigUInt64LE(188),
+    maxDeposit: data.readBigUInt64LE(196),
+    _reserved: data.subarray(200, 264),
   };
 }
 
@@ -186,7 +184,6 @@ export function buildInitializeInstruction(
   zkbtcMint: PublicKey,
   poolVault: PublicKey,
   frostVault: PublicKey,
-  privacyCashPool: PublicKey,
   authority: PublicKey,
   poolBump: number,
   treeBump: number,
@@ -203,7 +200,6 @@ export function buildInitializeInstruction(
       { pubkey: zkbtcMint, isSigner: false, isWritable: false },
       { pubkey: poolVault, isSigner: false, isWritable: false },
       { pubkey: frostVault, isSigner: false, isWritable: false },
-      { pubkey: privacyCashPool, isSigner: false, isWritable: false },
       { pubkey: authority, isSigner: true, isWritable: true },
       { pubkey: SystemProgram.programId, isSigner: false, isWritable: false },
     ],
@@ -945,7 +941,6 @@ describe("zVault Pinocchio Program", function() {
         Keypair.generate().publicKey, // mock mint
         Keypair.generate().publicKey, // mock vault
         Keypair.generate().publicKey, // mock frost vault
-        Keypair.generate().publicKey, // mock privacy cash
         authority.publicKey,
         poolStateBump,
         commitmentTreeBump,
@@ -954,7 +949,7 @@ describe("zVault Pinocchio Program", function() {
       expect(ix.data[0]).to.equal(Instruction.Initialize);
       expect(ix.data[1]).to.equal(poolStateBump);
       expect(ix.data[2]).to.equal(commitmentTreeBump);
-      expect(ix.keys.length).to.equal(8);
+      expect(ix.keys.length).to.equal(7);
       console.log("Initialize instruction encoded correctly");
     });
 

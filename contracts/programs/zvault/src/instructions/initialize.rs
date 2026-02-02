@@ -39,14 +39,13 @@ pub struct InitializeAccounts<'a> {
     pub zbtc_mint: &'a AccountInfo,
     pub pool_vault: &'a AccountInfo,
     pub frost_vault: &'a AccountInfo,
-    pub privacy_cash_pool: &'a AccountInfo,
     pub authority: &'a AccountInfo,
     pub system_program: &'a AccountInfo,
 }
 
 impl<'a> InitializeAccounts<'a> {
     pub fn from_accounts(accounts: &'a [AccountInfo]) -> Result<Self, ProgramError> {
-        if accounts.len() < 8 {
+        if accounts.len() < 7 {
             return Err(ProgramError::NotEnoughAccountKeys);
         }
 
@@ -55,9 +54,8 @@ impl<'a> InitializeAccounts<'a> {
         let zbtc_mint = &accounts[2];
         let pool_vault = &accounts[3];
         let frost_vault = &accounts[4];
-        let privacy_cash_pool = &accounts[5];
-        let authority = &accounts[6];
-        let system_program = &accounts[7];
+        let authority = &accounts[5];
+        let system_program = &accounts[6];
 
         // Validate authority is signer
         if !authority.is_signer() {
@@ -70,7 +68,6 @@ impl<'a> InitializeAccounts<'a> {
             zbtc_mint,
             pool_vault,
             frost_vault,
-            privacy_cash_pool,
             authority,
             system_program,
         })
@@ -165,7 +162,6 @@ pub fn process_initialize(
         pool.bump = pool_bump;
         pool.authority.copy_from_slice(accounts.authority.key().as_ref());
         pool.zbtc_mint.copy_from_slice(accounts.zbtc_mint.key().as_ref());
-        pool.privacy_cash_pool.copy_from_slice(accounts.privacy_cash_pool.key().as_ref());
         pool.pool_vault.copy_from_slice(accounts.pool_vault.key().as_ref());
         pool.frost_vault.copy_from_slice(accounts.frost_vault.key().as_ref());
         pool.set_min_deposit(MIN_DEPOSIT_SATS);

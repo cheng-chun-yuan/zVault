@@ -58,7 +58,6 @@ function buildInitializeIx(
   zkbtcMint: PublicKey,
   poolVault: PublicKey,
   frostVault: PublicKey,
-  privacyCashPool: PublicKey,
   authority: PublicKey,
   programId: PublicKey,
   poolBump: number,
@@ -76,7 +75,6 @@ function buildInitializeIx(
       { pubkey: zkbtcMint, isSigner: false, isWritable: false },
       { pubkey: poolVault, isSigner: false, isWritable: false },
       { pubkey: frostVault, isSigner: false, isWritable: false },
-      { pubkey: privacyCashPool, isSigner: false, isWritable: false },
       { pubkey: authority, isSigner: true, isWritable: true },
       { pubkey: SystemProgram.programId, isSigner: false, isWritable: false },
     ],
@@ -206,9 +204,6 @@ async function main() {
   );
   console.log(`✓ Frost Vault: ${frostVaultAccount.address.toBase58()}`);
 
-  // Dummy privacy cash pool
-  const privacyCashPool = Keypair.generate().publicKey;
-
   // Initialize zVault
   console.log("\nInitializing zVault pool...");
   const ix = buildInitializeIx(
@@ -217,7 +212,6 @@ async function main() {
     zkbtcMint,
     poolVaultAccount.address,
     frostVaultAccount.address,
-    privacyCashPool,
     authority.publicKey,
     programId,
     poolBump,

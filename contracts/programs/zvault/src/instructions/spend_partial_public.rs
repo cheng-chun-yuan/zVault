@@ -7,9 +7,8 @@
 //!
 //! ZK Proof: UltraHonk (generated in browser via bb.js or mobile via mopro)
 //!
-//! ## Proof Sources
-//! - **Inline (proof_source=0)**: Proof data included directly in instruction data
-//! - **Buffer (proof_source=1)**: Proof read from ChadBuffer account (for large proofs)
+//! The UltraHonk verifier must be called in an earlier instruction of the same transaction.
+//! This instruction uses instruction introspection to verify the verifier was called.
 
 use pinocchio::{
     account_info::AccountInfo,
@@ -27,123 +26,46 @@ use crate::state::{
     StealthAnnouncement, NULLIFIER_RECORD_DISCRIMINATOR, STEALTH_ANNOUNCEMENT_DISCRIMINATOR,
 };
 use crate::utils::{
-    create_pda_account, transfer_zbtc, verify_ultrahonk_spend_partial_public_proof,
+    create_pda_account, transfer_zbtc,
     validate_account_writable, validate_program_owner, validate_token_2022_owner,
-    validate_token_program_key, MAX_ULTRAHONK_PROOF_SIZE,
+    validate_token_program_key,
 };
 
-/// ChadBuffer authority size (first 32 bytes of account data)
-const CHADBUFFER_AUTHORITY_SIZE: usize = 32;
 
-/// Proof source indicator
-#[repr(u8)]
-#[derive(Clone, Copy, PartialEq, Eq)]
-pub enum PartialPublicProofSource {
-    /// Proof data is included inline in instruction data
-    Inline = 0,
-    /// Proof data is read from a ChadBuffer account
-    Buffer = 1,
-}
-
-impl PartialPublicProofSource {
-    pub fn from_u8(value: u8) -> Option<Self> {
-        match value {
-            0 => Some(PartialPublicProofSource::Inline),
-            1 => Some(PartialPublicProofSource::Buffer),
-            _ => None,
-        }
-    }
-}
-
-/// Spend partial public instruction data (UltraHonk proof - variable size)
+/// Spend partial public instruction data
 ///
-/// ## Inline Mode (proof_source=0)
 /// Layout:
-/// - proof_source: u8 (0)
-/// - proof_len: u32 (4 bytes, LE)
-/// - proof: [u8; proof_len] - UltraHonk proof
 /// - root: [u8; 32]
 /// - nullifier_hash: [u8; 32]
 /// - public_amount: u64
 /// - change_commitment: [u8; 32]
 /// - recipient: [u8; 32]
 /// - vk_hash: [u8; 32]
-/// - change_ephemeral_pub_x: [u8; 32] - x-coordinate of ephemeral pubkey (circuit public input)
-/// - change_encrypted_amount_with_sign: [u8; 32] - bits 0-63: encrypted amount, bit 64: y_sign (circuit public input)
+/// - change_ephemeral_pub_x: [u8; 32] - x-coordinate of ephemeral pubkey
+/// - change_encrypted_amount_with_sign: [u8; 32] - bits 0-63: encrypted amount, bit 64: y_sign
 ///
-/// ## Buffer Mode (proof_source=1)
-/// Layout:
-/// - proof_source: u8 (1)
-/// - root: [u8; 32]
-/// - nullifier_hash: [u8; 32]
-/// - public_amount: u64
-/// - change_commitment: [u8; 32]
-/// - recipient: [u8; 32]
-/// - vk_hash: [u8; 32]
-/// - change_ephemeral_pub_x: [u8; 32] - x-coordinate of ephemeral pubkey (circuit public input)
-/// - change_encrypted_amount_with_sign: [u8; 32] - bits 0-63: encrypted amount, bit 64: y_sign (circuit public input)
-/// (proof is read from ChadBuffer account passed as additional account)
-///
-/// Note: change_ephemeral_pub_x and change_encrypted_amount_with_sign are circuit public inputs,
-/// so the proof commits to these values. A malicious relayer cannot tamper with them - if they
-/// try to change the values, proof verification will fail.
+/// Proof is in ChadBuffer account, verified by earlier verifier instruction in same TX.
 pub struct SpendPartialPublicData<'a> {
-    pub proof_source: PartialPublicProofSource,
-    pub proof: Option<&'a [u8]>,
     pub root: &'a [u8; 32],
     pub nullifier_hash: &'a [u8; 32],
     pub public_amount: u64,
     pub change_commitment: &'a [u8; 32],
     pub recipient: &'a [u8; 32],
     pub vk_hash: &'a [u8; 32],
-    /// Ephemeral pubkey x-coordinate (32 bytes) - circuit public input
     pub change_ephemeral_pub_x: [u8; 32],
-    /// Packed: bits 0-63 = encrypted amount, bit 64 = y_sign - circuit public input
     pub change_encrypted_amount_with_sign: [u8; 32],
 }
 
 impl<'a> SpendPartialPublicData<'a> {
-    /// Minimum size for inline mode: proof_source(1) + proof_len(4) + root(32) + nullifier(32) + amount(8) + change(32) + recipient(32) + vk_hash(32) + change_ephemeral_pub_x(32) + change_encrypted_amount_with_sign(32) = 237 bytes + proof
-    pub const MIN_SIZE_INLINE: usize = 1 + 4 + 32 + 32 + 8 + 32 + 32 + 32 + 32 + 32;
-
-    /// Minimum size for buffer mode: proof_source(1) + root(32) + nullifier(32) + amount(8) + change(32) + recipient(32) + vk_hash(32) + change_ephemeral_pub_x(32) + change_encrypted_amount_with_sign(32) = 233 bytes
-    pub const MIN_SIZE_BUFFER: usize = 1 + 32 + 32 + 8 + 32 + 32 + 32 + 32 + 32;
+    /// Size: root(32) + nullifier(32) + amount(8) + change(32) + recipient(32) + vk_hash(32) + eph_x(32) + enc_amount(32) = 232 bytes
+    pub const SIZE: usize = 32 + 32 + 8 + 32 + 32 + 32 + 32 + 32;
 
     pub fn from_bytes(data: &'a [u8]) -> Result<Self, ProgramError> {
-        if data.is_empty() {
+        if data.len() < Self::SIZE {
             return Err(ProgramError::InvalidInstructionData);
         }
 
-        let proof_source = PartialPublicProofSource::from_u8(data[0]).ok_or_else(|| {
-            pinocchio::msg!("Invalid proof source");
-            ProgramError::InvalidInstructionData
-        })?;
-
-        match proof_source {
-            PartialPublicProofSource::Inline => Self::parse_inline(data),
-            PartialPublicProofSource::Buffer => Self::parse_buffer(data),
-        }
-    }
-
-    fn parse_inline(data: &'a [u8]) -> Result<Self, ProgramError> {
-        if data.len() < Self::MIN_SIZE_INLINE {
-            return Err(ProgramError::InvalidInstructionData);
-        }
-
-        // Parse proof length (after proof_source byte)
-        let proof_len = u32::from_le_bytes([data[1], data[2], data[3], data[4]]) as usize;
-
-        if proof_len > MAX_ULTRAHONK_PROOF_SIZE {
-            return Err(ProgramError::InvalidInstructionData);
-        }
-
-        let expected_size = 1 + 4 + proof_len + 32 + 32 + 8 + 32 + 32 + 32 + 32 + 32;
-        if data.len() < expected_size {
-            return Err(ProgramError::InvalidInstructionData);
-        }
-
-        let proof = &data[5..5 + proof_len];
-        let mut offset = 5 + proof_len;
+        let mut offset = 0;
 
         let root: &[u8; 32] = data[offset..offset + 32].try_into().unwrap();
         offset += 32;
@@ -171,54 +93,6 @@ impl<'a> SpendPartialPublicData<'a> {
         change_encrypted_amount_with_sign.copy_from_slice(&data[offset..offset + 32]);
 
         Ok(Self {
-            proof_source: PartialPublicProofSource::Inline,
-            proof: Some(proof),
-            root,
-            nullifier_hash,
-            public_amount,
-            change_commitment,
-            recipient,
-            vk_hash,
-            change_ephemeral_pub_x,
-            change_encrypted_amount_with_sign,
-        })
-    }
-
-    fn parse_buffer(data: &'a [u8]) -> Result<Self, ProgramError> {
-        if data.len() < Self::MIN_SIZE_BUFFER {
-            return Err(ProgramError::InvalidInstructionData);
-        }
-
-        let mut offset = 1; // Skip proof_source byte
-
-        let root: &[u8; 32] = data[offset..offset + 32].try_into().unwrap();
-        offset += 32;
-
-        let nullifier_hash: &[u8; 32] = data[offset..offset + 32].try_into().unwrap();
-        offset += 32;
-
-        let public_amount = u64::from_le_bytes(data[offset..offset + 8].try_into().unwrap());
-        offset += 8;
-
-        let change_commitment: &[u8; 32] = data[offset..offset + 32].try_into().unwrap();
-        offset += 32;
-
-        let recipient: &[u8; 32] = data[offset..offset + 32].try_into().unwrap();
-        offset += 32;
-
-        let vk_hash: &[u8; 32] = data[offset..offset + 32].try_into().unwrap();
-        offset += 32;
-
-        let mut change_ephemeral_pub_x = [0u8; 32];
-        change_ephemeral_pub_x.copy_from_slice(&data[offset..offset + 32]);
-        offset += 32;
-
-        let mut change_encrypted_amount_with_sign = [0u8; 32];
-        change_encrypted_amount_with_sign.copy_from_slice(&data[offset..offset + 32]);
-
-        Ok(Self {
-            proof_source: PartialPublicProofSource::Buffer,
-            proof: None,
             root,
             nullifier_hash,
             public_amount,
@@ -253,9 +127,8 @@ impl<'a> SpendPartialPublicData<'a> {
     }
 }
 
-/// Spend partial public accounts
+/// Spend partial public accounts (SkipVerification mode - 13 accounts)
 ///
-/// ## Inline Mode (11 accounts)
 /// 0. pool_state (writable)
 /// 1. commitment_tree (writable)
 /// 2. nullifier_record (writable)
@@ -267,9 +140,8 @@ impl<'a> SpendPartialPublicData<'a> {
 /// 8. system_program
 /// 9. ultrahonk_verifier - UltraHonk verifier program
 /// 10. stealth_announcement_change (writable) - StealthAnnouncement PDA for change output
-///
-/// ## Buffer Mode (12 accounts - adds proof_buffer)
 /// 11. proof_buffer (readonly) - ChadBuffer account containing proof data
+/// 12. instructions_sysvar (readonly) - For verifying prior verification instruction
 pub struct SpendPartialPublicAccounts<'a> {
     pub pool_state: &'a AccountInfo,
     pub commitment_tree: &'a AccountInfo,
@@ -282,16 +154,15 @@ pub struct SpendPartialPublicAccounts<'a> {
     pub system_program: &'a AccountInfo,
     pub ultrahonk_verifier: &'a AccountInfo,
     pub stealth_announcement_change: &'a AccountInfo,
-    pub proof_buffer: Option<&'a AccountInfo>,
+    pub proof_buffer: &'a AccountInfo,
+    pub instructions_sysvar: &'a AccountInfo,
 }
 
 impl<'a> SpendPartialPublicAccounts<'a> {
-    pub fn from_accounts(
-        accounts: &'a [AccountInfo],
-        use_buffer: bool,
-    ) -> Result<Self, ProgramError> {
-        let min_accounts = if use_buffer { 12 } else { 11 };
-        if accounts.len() < min_accounts {
+    pub const ACCOUNT_COUNT: usize = 13;
+
+    pub fn from_accounts(accounts: &'a [AccountInfo]) -> Result<Self, ProgramError> {
+        if accounts.len() < Self::ACCOUNT_COUNT {
             return Err(ProgramError::NotEnoughAccountKeys);
         }
 
@@ -306,11 +177,8 @@ impl<'a> SpendPartialPublicAccounts<'a> {
         let system_program = &accounts[8];
         let ultrahonk_verifier = &accounts[9];
         let stealth_announcement_change = &accounts[10];
-        let proof_buffer = if use_buffer {
-            Some(&accounts[11])
-        } else {
-            None
-        };
+        let proof_buffer = &accounts[11];
+        let instructions_sysvar = &accounts[12];
 
         // Validate user is signer (fee payer)
         if !user.is_signer() {
@@ -330,28 +198,23 @@ impl<'a> SpendPartialPublicAccounts<'a> {
             ultrahonk_verifier,
             stealth_announcement_change,
             proof_buffer,
+            instructions_sysvar,
         })
     }
 }
 
-/// Process spend partial public instruction (UltraHonk proof)
+/// Process spend partial public instruction (UltraHonk proof with SkipVerification)
 ///
 /// Claims part of a commitment to a public wallet, with change returned as a new commitment.
 /// Amount conservation: input_amount == public_amount + change_amount (enforced by ZK proof)
 ///
-/// Supports both inline proofs and ChadBuffer references.
+/// Uses SkipVerification pattern: verifier must be called in earlier instruction of same TX.
 pub fn process_spend_partial_public(
     program_id: &Pubkey,
     accounts: &[AccountInfo],
     data: &[u8],
 ) -> ProgramResult {
-    // Parse instruction data first to determine proof source
-    if data.is_empty() {
-        return Err(ProgramError::InvalidInstructionData);
-    }
-    let use_buffer = data[0] == PartialPublicProofSource::Buffer as u8;
-
-    let accounts = SpendPartialPublicAccounts::from_accounts(accounts, use_buffer)?;
+    let accounts = SpendPartialPublicAccounts::from_accounts(accounts)?;
     let ix_data = SpendPartialPublicData::from_bytes(data)?;
 
     // SECURITY: Validate account owners BEFORE deserializing any data
@@ -388,7 +251,7 @@ pub fn process_spend_partial_public(
     }
 
     // Load and validate pool state
-    let (pool_bump, min_deposit, total_shielded) = {
+    let (pool_bump, _min_deposit, total_shielded) = {
         let pool_data = accounts.pool_state.try_borrow_data()?;
         let pool = PoolState::from_bytes(&pool_data)?;
 
@@ -399,8 +262,8 @@ pub fn process_spend_partial_public(
         (pool.bump, pool.min_deposit(), pool.total_shielded())
     };
 
-    // Validate public amount bounds
-    if ix_data.public_amount < min_deposit {
+    // Validate public amount bounds (minimum 1000 sats)
+    if ix_data.public_amount < 1000 {
         return Err(ZVaultError::AmountTooSmall.into());
     }
     if ix_data.public_amount > total_shielded {
@@ -453,71 +316,21 @@ pub fn process_spend_partial_public(
     }
     .invoke_signed(&nullifier_signer)?;
 
-    // Verify UltraHonk proof via CPI (after nullifier is claimed)
-    // Get proof bytes and verify (either inline or from ChadBuffer)
-    // Note: change_ephemeral_pub_x and change_encrypted_amount_with_sign are circuit public inputs,
-    // so the proof commits to these values. If a relayer tries to tamper with them, verification fails.
-    match ix_data.proof_source {
-        PartialPublicProofSource::Inline => {
-            let proof = ix_data.proof.ok_or(ProgramError::InvalidInstructionData)?;
+    // Verify that UltraHonk verifier was called in an earlier instruction of this TX.
+    // Uses instruction introspection - the verifier must have been called with the
+    // same buffer account. This avoids Solana's CPI data size limit (10KB < 16KB proof).
+    pinocchio::msg!("Verifying prior verification instruction...");
 
-            pinocchio::msg!("Verifying UltraHonk partial public proof (inline) via CPI...");
+    crate::utils::verify_prior_buffer_verification(
+        accounts.instructions_sysvar,
+        accounts.ultrahonk_verifier.key(),
+        accounts.proof_buffer.key(),
+    ).map_err(|_| {
+        pinocchio::msg!("No valid prior verification instruction found");
+        ZVaultError::ZkVerificationFailed
+    })?;
 
-            verify_ultrahonk_spend_partial_public_proof(
-                accounts.ultrahonk_verifier,
-                proof,
-                ix_data.root,
-                ix_data.nullifier_hash,
-                ix_data.public_amount,
-                ix_data.change_commitment,
-                ix_data.recipient,
-                &ix_data.change_ephemeral_pub_x,
-                &ix_data.change_encrypted_amount_with_sign,
-                ix_data.vk_hash,
-            ).map_err(|_| {
-                pinocchio::msg!("UltraHonk proof verification failed");
-                ZVaultError::ZkVerificationFailed
-            })?;
-        }
-        PartialPublicProofSource::Buffer => {
-            let proof_buffer_account = accounts
-                .proof_buffer
-                .ok_or(ProgramError::NotEnoughAccountKeys)?;
-
-            // Read proof from ChadBuffer (data starts after 32-byte authority)
-            let buffer_data = proof_buffer_account.try_borrow_data()?;
-
-            if buffer_data.len() <= CHADBUFFER_AUTHORITY_SIZE {
-                pinocchio::msg!("ChadBuffer too small");
-                return Err(ProgramError::InvalidAccountData);
-            }
-
-            let proof = &buffer_data[CHADBUFFER_AUTHORITY_SIZE..];
-
-            if proof.len() > MAX_ULTRAHONK_PROOF_SIZE {
-                pinocchio::msg!("Proof in buffer too large");
-                return Err(ZVaultError::InvalidProofLength.into());
-            }
-
-            pinocchio::msg!("Verifying UltraHonk partial public proof (buffer) via CPI...");
-
-            verify_ultrahonk_spend_partial_public_proof(
-                accounts.ultrahonk_verifier,
-                proof,
-                ix_data.root,
-                ix_data.nullifier_hash,
-                ix_data.public_amount,
-                ix_data.change_commitment,
-                ix_data.recipient,
-                &ix_data.change_ephemeral_pub_x,
-                &ix_data.change_encrypted_amount_with_sign,
-                ix_data.vk_hash,
-            ).map_err(|_| {
-                pinocchio::msg!("UltraHonk proof verification failed");
-                ZVaultError::ZkVerificationFailed
-            })?;
-        }
-    }
+    pinocchio::msg!("Prior verification confirmed");
 
     // Initialize nullifier record
     {

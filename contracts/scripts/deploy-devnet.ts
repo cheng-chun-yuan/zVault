@@ -282,7 +282,6 @@ function buildZVaultInitializeIx(
   zkbtcMint: PublicKey,
   poolVault: PublicKey,
   frostVault: PublicKey,
-  privacyCashPool: PublicKey,
   authority: PublicKey,
   programId: PublicKey,
   poolBump: number,
@@ -300,7 +299,6 @@ function buildZVaultInitializeIx(
       { pubkey: zkbtcMint, isSigner: false, isWritable: false },
       { pubkey: poolVault, isSigner: false, isWritable: false },
       { pubkey: frostVault, isSigner: false, isWritable: false },
-      { pubkey: privacyCashPool, isSigner: false, isWritable: false },
       { pubkey: authority, isSigner: true, isWritable: true },
       { pubkey: SystemProgram.programId, isSigner: false, isWritable: false },
     ],
@@ -480,9 +478,6 @@ async function initializeZVault(
   );
   log(`Frost Vault: ${frostVault.address.toBase58()}`);
 
-  // Privacy cash pool (dummy for testing)
-  const privacyCashPool = Keypair.generate().publicKey;
-
   // Initialize zVault
   log("Initializing zVault pool...");
   const ix = buildZVaultInitializeIx(
@@ -491,7 +486,6 @@ async function initializeZVault(
     zkbtcMint,
     poolVault.address,
     frostVault.address,
-    privacyCashPool,
     authority.publicKey,
     programId,
     poolBump,

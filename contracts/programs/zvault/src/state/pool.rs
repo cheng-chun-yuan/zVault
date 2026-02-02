@@ -27,9 +27,6 @@ pub struct PoolState {
     /// zBTC Token-2022 mint address
     pub zbtc_mint: [u8; 32],
 
-    /// Privacy Cash pool address (for reference)
-    pub privacy_cash_pool: [u8; 32],
-
     /// Pool vault that holds zBTC (PDA-controlled)
     pub pool_vault: [u8; 32],
 

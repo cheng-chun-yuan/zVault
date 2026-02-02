@@ -364,7 +364,6 @@ function buildZVaultInitializeIx(
   zkbtcMint: PublicKey,
   poolVault: PublicKey,
   frostVault: PublicKey,
-  privacyCashPool: PublicKey,
   authority: PublicKey,
   programId: PublicKey,
   poolBump: number,
@@ -382,7 +381,6 @@ function buildZVaultInitializeIx(
       { pubkey: zkbtcMint, isSigner: false, isWritable: false },
       { pubkey: poolVault, isSigner: false, isWritable: false },
       { pubkey: frostVault, isSigner: false, isWritable: false },
-      { pubkey: privacyCashPool, isSigner: false, isWritable: false },
       { pubkey: authority, isSigner: true, isWritable: true },
       { pubkey: SystemProgram.programId, isSigner: false, isWritable: false },
     ],
@@ -497,10 +495,10 @@ async function initializeZVault(
     log("zVault already initialized, skipping...");
 
     // Parse existing pool state to get mint and vault info
-    // Pool state layout: discriminator(1) + bump(1) + flags(1) + padding(1) + authority(32) + zbtc_mint(32) + ...
+    // Pool state layout: discriminator(1) + bump(1) + flags(1) + padding(1) + authority(32) + zbtc_mint(32) + pool_vault(32) + ...
     const mintPubkey = new PublicKey(poolAccount.data.subarray(36, 68));
-    // pool_vault is at offset 100 (after zbtc_mint(32) + privacy_cash_pool(32))
-    const poolVaultPubkey = new PublicKey(poolAccount.data.subarray(100, 132));
+    // pool_vault is at offset 68 (after zbtc_mint)
+    const poolVaultPubkey = new PublicKey(poolAccount.data.subarray(68, 100));
 
     log(`Existing mint: ${mintPubkey.toBase58()}`);
     log(`Existing pool vault: ${poolVaultPubkey.toBase58()}`);
@@ -572,9 +570,6 @@ async function initializeZVault(
   );
   log(`Frost Vault: ${frostVault.address.toBase58()}`);
 
-  // Privacy cash pool (dummy for testing)
-  const privacyCashPool = Keypair.generate().publicKey;
-
   // Initialize zVault
   log("Initializing zVault pool...");
   const ix = buildZVaultInitializeIx(
@@ -583,7 +578,6 @@ async function initializeZVault(
     zkbtcMint,
     poolVault.address,
     frostVault.address,
-    privacyCashPool,
     authority.publicKey,
     programId,
     poolBump,
