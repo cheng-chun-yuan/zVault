@@ -47,13 +47,20 @@ import {
 } from "./stealth-helpers";
 
 import { initPoseidon, computeUnifiedCommitmentSync } from "../../src/poseidon";
-import { bigintToBytes } from "../../src/crypto";
+import { bigintToBytes, bytesToBigint } from "../../src/crypto";
+import { createStealthDeposit, extractYSign, packEncryptedAmountWithSign } from "../../src/stealth";
+import { createStealthMetaAddress } from "../../src/keys";
 import {
   derivePoolStatePDA,
   deriveCommitmentTreePDA,
   deriveNullifierRecordPDA,
 } from "../../src/pda";
-import { buildSpendPartialPublicInstruction } from "../../src/instructions";
+import {
+  buildSpendPartialPublicInstruction,
+  buildVerifyFromBufferInstruction,
+  buildPartialPublicVerifierInputs,
+} from "../../src/instructions";
+import { deriveStealthAnnouncementPDA } from "../../src/pda";
 import { generateSpendPartialPublicProof, verifyProof } from "../../src/prover/web";
 import { createChadBuffer, uploadProofToBuffer, closeChadBuffer } from "../../src/relay";
 
@@ -74,6 +81,10 @@ interface PartialPublicOutputs {
   recipient: PublicKey;
   /** Private change note */
   changeNote: TestNote;
+  /** Stealth output: ephemeral pub X (32 bytes) */
+  changeEphemeralPubX: Uint8Array;
+  /** Stealth output: encrypted amount with sign bit (32 bytes) */
+  changeEncryptedAmountWithSign: Uint8Array;
 }
 
 /**
@@ -95,10 +106,24 @@ function createPartialPublicOutputs(
   // Create change note
   const changeNote = createTestNote(changeAmount, inputNote.leafIndex + 1n);
 
+  // Create mock stealth output data (32 bytes each)
+  // In real usage, these come from createStealthDeposit
+  const changeEphemeralPubX = new Uint8Array(32);
+  crypto.getRandomValues(changeEphemeralPubX);
+
+  const changeEncryptedAmountWithSign = new Uint8Array(32);
+  // Pack amount in first 8 bytes (little-endian)
+  const view = new DataView(changeEncryptedAmountWithSign.buffer);
+  view.setBigUint64(0, changeAmount, true);
+  // Random padding for the rest (simulating encryption)
+  crypto.getRandomValues(changeEncryptedAmountWithSign.subarray(8));
+
   return {
     publicAmount,
     recipient: recipient || Keypair.generate().publicKey,
     changeNote,
+    changeEphemeralPubX,
+    changeEncryptedAmountWithSign,
   };
 }
 
@@ -190,10 +215,12 @@ describe("SPEND_PARTIAL_PUBLIC E2E", () => {
         input.nullifierHashBytes,
         ctx.config.zvaultProgramId
       );
+      const [stealthAnnouncementChange] = await deriveStealthAnnouncementPDA(
+        outputs.changeEphemeralPubX
+      );
 
       // Build instruction
       const spendIx = buildSpendPartialPublicInstruction({
-        proofSource: "buffer",
         bufferAddress,
         root: bigintToBytes32(merkleProof.root),
         nullifierHash: input.nullifierHashBytes,
@@ -201,6 +228,8 @@ describe("SPEND_PARTIAL_PUBLIC E2E", () => {
         changeCommitment: outputs.changeNote.commitmentBytes,
         recipient: address(outputs.recipient.toBase58()),
         vkHash: generateMockVkHash(),
+        changeEphemeralPubX: outputs.changeEphemeralPubX,
+        changeEncryptedAmountWithSign: outputs.changeEncryptedAmountWithSign,
         accounts: {
           poolState,
           commitmentTree,
@@ -209,25 +238,25 @@ describe("SPEND_PARTIAL_PUBLIC E2E", () => {
           poolVault: ctx.config.poolVault,
           recipientAta: ctx.config.poolVault, // Mock ATA
           user: address(ctx.payer.publicKey.toBase58()),
+          stealthAnnouncementChange,
         },
       });
 
       // Verify instruction structure
       expect(spendIx.data).toBeDefined();
-      expect(spendIx.accounts.length).toBeGreaterThan(0);
+      // 13 accounts: pool, tree, nullifier, mint, vault, recipient, user, token, system, verifier, stealth, buffer, instructions_sysvar
+      expect(spendIx.accounts.length).toBe(13);
 
       // Verify discriminator (SPEND_PARTIAL_PUBLIC = 10)
       expect(spendIx.data[0]).toBe(10);
-
-      // Verify proof source (buffer = 1)
-      expect(spendIx.data[1]).toBe(1);
     });
 
-    it("should build valid spend partial public instruction with inline proof", async () => {
+    it("should have correct data format", async () => {
       const input = createTestNote(TEST_AMOUNTS.medium);
       const merkleProof = createMockMerkleProof(input.commitment);
       const outputs = createPartialPublicOutputs(input, 600_000n);
-      const proofBytes = generateMockProof();
+
+      const bufferAddress = address(PublicKey.default.toBase58());
 
       // Derive PDAs
       const [poolState] = await derivePoolStatePDA(ctx.config.zvaultProgramId);
@@ -236,16 +265,20 @@ describe("SPEND_PARTIAL_PUBLIC E2E", () => {
         input.nullifierHashBytes,
         ctx.config.zvaultProgramId
       );
+      const [stealthAnnouncementChange] = await deriveStealthAnnouncementPDA(
+        outputs.changeEphemeralPubX
+      );
 
       const spendIx = buildSpendPartialPublicInstruction({
-        proofSource: "inline",
-        proofBytes,
+        bufferAddress,
         root: bigintToBytes32(merkleProof.root),
         nullifierHash: input.nullifierHashBytes,
         publicAmountSats: outputs.publicAmount,
         changeCommitment: outputs.changeNote.commitmentBytes,
         recipient: address(outputs.recipient.toBase58()),
         vkHash: generateMockVkHash(),
+        changeEphemeralPubX: outputs.changeEphemeralPubX,
+        changeEncryptedAmountWithSign: outputs.changeEncryptedAmountWithSign,
         accounts: {
           poolState,
           commitmentTree,
@@ -254,14 +287,13 @@ describe("SPEND_PARTIAL_PUBLIC E2E", () => {
           poolVault: ctx.config.poolVault,
           recipientAta: ctx.config.poolVault,
           user: address(ctx.payer.publicKey.toBase58()),
+          stealthAnnouncementChange,
         },
       });
 
-      // Verify discriminator (SPEND_PARTIAL_PUBLIC = 10)
-      expect(spendIx.data[0]).toBe(10);
-
-      // Verify proof source (inline = 0)
-      expect(spendIx.data[1]).toBe(0);
+      // Verify data format: disc(1) + root(32) + ...
+      expect(spendIx.data[0]).toBe(10); // discriminator
+      expect(spendIx.data.length).toBeGreaterThan(200);
     });
 
     it("should include public amount in instruction data", async () => {
@@ -277,9 +309,11 @@ describe("SPEND_PARTIAL_PUBLIC E2E", () => {
         input.nullifierHashBytes,
         ctx.config.zvaultProgramId
       );
+      const [stealthAnnouncementChange] = await deriveStealthAnnouncementPDA(
+        outputs.changeEphemeralPubX
+      );
 
       const spendIx = buildSpendPartialPublicInstruction({
-        proofSource: "buffer",
         bufferAddress,
         root: bigintToBytes32(merkleProof.root),
         nullifierHash: input.nullifierHashBytes,
@@ -287,6 +321,8 @@ describe("SPEND_PARTIAL_PUBLIC E2E", () => {
         changeCommitment: outputs.changeNote.commitmentBytes,
         recipient: address(outputs.recipient.toBase58()),
         vkHash: generateMockVkHash(),
+        changeEphemeralPubX: outputs.changeEphemeralPubX,
+        changeEncryptedAmountWithSign: outputs.changeEncryptedAmountWithSign,
         accounts: {
           poolState,
           commitmentTree,
@@ -295,12 +331,12 @@ describe("SPEND_PARTIAL_PUBLIC E2E", () => {
           poolVault: ctx.config.poolVault,
           recipientAta: ctx.config.poolVault,
           user: address(ctx.payer.publicKey.toBase58()),
+          stealthAnnouncementChange,
         },
       });
 
-      // Instruction should include public amount (8 bytes)
-      // Buffer mode layout: discriminator(1) + proof_source(1) + buffer(32) + root(32) + nullifier(32) + public_amount(8) + change(32) + recipient(32) + vk_hash(32) = 170 bytes
-      expect(spendIx.data.length).toBe(170);
+      // Instruction data layout: discriminator(1) + root(32) + nullifier(32) + public_amount(8) + change(32) + recipient(32) + vk_hash(32) + change_ephemeral_pub_x(32) + change_encrypted_amount_with_sign(32) = 233 bytes
+      expect(spendIx.data.length).toBe(233);
     });
   });
 
@@ -379,19 +415,27 @@ describe("SPEND_PARTIAL_PUBLIC E2E", () => {
         input.nullifierHashBytes,
         ctx.config.zvaultProgramId
       );
+      const [stealthAnnouncementChange] = await deriveStealthAnnouncementPDA(
+        outputs.changeEphemeralPubX
+      );
       console.log(`   Nullifier Record: ${nullifierRecord.toString()}`);
 
-      // Step 7: Build instruction
-      console.log("\n7. Build spend partial public instruction");
+      // Mock buffer address for demonstration
+      const bufferAddress = address(PublicKey.default.toBase58());
+
+      // Step 7: Build instruction (buffer mode with instruction introspection)
+      console.log("\n7. Build spend partial public instruction (buffer mode)");
+      const vkHash = generateMockVkHash();
       const spendIx = buildSpendPartialPublicInstruction({
-        proofSource: "inline",
-        proofBytes,
+        bufferAddress,
         root: bigintToBytes32(merkleProof.root),
         nullifierHash: input.nullifierHashBytes,
         publicAmountSats: outputs.publicAmount,
         changeCommitment: outputs.changeNote.commitmentBytes,
         recipient: address(outputs.recipient.toBase58()),
-        vkHash: generateMockVkHash(),
+        vkHash,
+        changeEphemeralPubX: outputs.changeEphemeralPubX,
+        changeEncryptedAmountWithSign: outputs.changeEncryptedAmountWithSign,
         accounts: {
           poolState,
           commitmentTree,
@@ -400,19 +444,39 @@ describe("SPEND_PARTIAL_PUBLIC E2E", () => {
           poolVault: ctx.config.poolVault,
           recipientAta: ctx.config.poolVault,
           user: address(ctx.payer.publicKey.toBase58()),
+          stealthAnnouncementChange,
         },
       });
       console.log(`   Instruction data size: ${spendIx.data.length} bytes`);
 
+      // Build verifier instruction (called before zVault instruction)
+      const publicInputs = buildPartialPublicVerifierInputs({
+        root: bigintToBytes32(merkleProof.root),
+        nullifierHash: input.nullifierHashBytes,
+        publicAmountSats: outputs.publicAmount,
+        changeCommitment: outputs.changeNote.commitmentBytes,
+        recipient: address(outputs.recipient.toBase58()),
+        changeEphemeralPubX: outputs.changeEphemeralPubX,
+        changeEncryptedAmountWithSign: outputs.changeEncryptedAmountWithSign,
+      });
+      const verifyIx = buildVerifyFromBufferInstruction({
+        bufferAddress,
+        publicInputs,
+        vkHash,
+      });
+      console.log(`   Verifier instruction built (VERIFY_FROM_BUFFER)`);
+
       // Step 8: What happens on-chain
-      console.log("\n8. On-chain execution (simulation):");
-      console.log("   a. Verify merkle root in root history");
-      console.log("   b. Check nullifier not spent");
-      console.log("   c. Create nullifier record PDA");
-      console.log("   d. Verify ZK proof (conservation: in = public + change)");
-      console.log(`   e. Transfer ${publicAmount} sats to recipient ATA`);
-      console.log("   f. Insert change commitment to tree");
-      console.log("   g. Update tree root");
+      console.log("\n8. On-chain execution (2-instruction TX):");
+      console.log("   TX instruction 1: UltraHonk verifier VERIFY_FROM_BUFFER");
+      console.log("   TX instruction 2: zVault spend_partial_public");
+      console.log("     a. Verify prior verifier instruction via introspection");
+      console.log("     b. Verify merkle root in root history");
+      console.log("     c. Check nullifier not spent");
+      console.log("     d. Create nullifier record PDA");
+      console.log(`     e. Transfer ${publicAmount} sats to recipient ATA`);
+      console.log("     f. Insert change commitment to tree");
+      console.log("     g. Update tree root");
 
       console.log("\n=== Partial Public Spend Complete ===\n");
 
@@ -504,13 +568,16 @@ describe("SPEND_PARTIAL_PUBLIC E2E", () => {
         console.log(`   Change amount: ${changeAmount} sats (40%)`);
         expect(publicAmount + changeAmount).toBe(inputAmount);
 
-        // Step 5: Compute change commitment
-        console.log("\n5. Computing change commitment...");
-        const changeCommitment = computeUnifiedCommitmentSync(
-          changeRecipientKeys.spendingPubKey.x,
-          changeAmount
-        );
+        // Step 5: Create stealth output for change
+        console.log("\n5. Creating stealth output for change...");
+        const changeMetaAddress = createStealthMetaAddress(changeRecipientKeys);
+        const changeStealth = await createStealthDeposit(changeMetaAddress, changeAmount);
+        const changeCommitment = bytesToBigint(changeStealth.commitment);
+        const changeEphemeralPubX = bytesToBigint(changeStealth.ephemeralPub.subarray(1, 33)); // X coord (skip prefix)
+        const changeYSign = extractYSign(changeStealth.ephemeralPub);
+        const changeEncryptedAmountWithSign = packEncryptedAmountWithSign(changeStealth.encryptedAmount, changeYSign);
         console.log(`   Change commitment: ${changeCommitment.toString(16).slice(0, 16)}...`);
+        console.log(`   Ephemeral pub X: ${changeEphemeralPubX.toString(16).slice(0, 16)}...`);
 
         // Convert recipient address to bigint for proof binding
         const recipientBytes = ctx.payer.publicKey.toBytes();
@@ -537,9 +604,11 @@ describe("SPEND_PARTIAL_PUBLIC E2E", () => {
           // Public output
           publicAmount: publicAmount,
           recipient: recipientAsBigint,
-          // Change output
+          // Change output (stealth)
           changePubKeyX: changeRecipientKeys.spendingPubKey.x,
           changeAmount: changeAmount,
+          changeEphemeralPubX: changeEphemeralPubX,
+          changeEncryptedAmountWithSign: changeEncryptedAmountWithSign,
         });
 
         const proofTime = ((Date.now() - proofStartTime) / 1000).toFixed(1);
@@ -586,7 +655,6 @@ describe("SPEND_PARTIAL_PUBLIC E2E", () => {
         );
 
         const spendIx = buildSpendPartialPublicInstruction({
-          proofSource: "buffer",
           bufferAddress: bufferKeypair.address,
           root: bigintToBytes(inputData.merkleProof.root, 32),
           nullifierHash: inputData.nullifierHashBytes,
@@ -594,6 +662,8 @@ describe("SPEND_PARTIAL_PUBLIC E2E", () => {
           changeCommitment: bigintToBytes(changeCommitment, 32),
           recipient: address(ctx.payer.publicKey.toBase58()),
           vkHash: generateMockVkHash(), // TODO: Use real VK hash
+          changeEphemeralPubX: bigintToBytes(changeEphemeralPubX, 32),
+          changeEncryptedAmountWithSign: bigintToBytes(changeEncryptedAmountWithSign, 32),
           accounts: {
             poolState,
             commitmentTree,
@@ -680,6 +750,9 @@ describe("SPEND_PARTIAL_PUBLIC E2E", () => {
         const changePubKeyX = 333333n;
         const changeAmount = 400_000n;
         const recipient = 999999n;
+        // Mock stealth output data
+        const changeEphemeralPubX = 111111n;
+        const changeEncryptedAmountWithSign = 222222n;
 
         // Generate proof
         console.log("Generating spend_partial_public proof...");
@@ -699,6 +772,8 @@ describe("SPEND_PARTIAL_PUBLIC E2E", () => {
           changePubKeyX,
           changeAmount,
           recipient,
+          changeEphemeralPubX,
+          changeEncryptedAmountWithSign,
         });
 
         const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);

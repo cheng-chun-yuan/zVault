@@ -48,13 +48,20 @@ import {
 } from "./stealth-helpers";
 
 import { initPoseidon, computeUnifiedCommitmentSync } from "../../src/poseidon";
-import { randomFieldElement, bigintToBytes } from "../../src/crypto";
+import { randomFieldElement, bigintToBytes, bytesToBigint } from "../../src/crypto";
+import { createStealthDeposit, extractYSign, packEncryptedAmountWithSign } from "../../src/stealth";
+import { createStealthMetaAddress } from "../../src/keys";
 import {
   derivePoolStatePDA,
   deriveCommitmentTreePDA,
   deriveNullifierRecordPDA,
+  deriveStealthAnnouncementPDA,
 } from "../../src/pda";
-import { buildSplitInstruction } from "../../src/instructions";
+import {
+  buildSplitInstruction,
+  buildVerifyFromBufferInstruction,
+  buildSplitVerifierInputs,
+} from "../../src/instructions";
 import { generateSpendSplitProof, verifyProof } from "../../src/prover/web";
 import { createChadBuffer, uploadProofToBuffer, closeChadBuffer } from "../../src/relay";
 
@@ -68,6 +75,15 @@ let ctx: E2ETestContext;
 // Helper Functions
 // =============================================================================
 
+interface SplitOutputs {
+  output1: TestNote;
+  output2: TestNote;
+  output1EphemeralPubX: Uint8Array;
+  output1EncryptedAmountWithSign: Uint8Array;
+  output2EphemeralPubX: Uint8Array;
+  output2EncryptedAmountWithSign: Uint8Array;
+}
+
 /**
  * Create output notes for a split operation
  */
@@ -75,7 +91,7 @@ function createSplitOutputNotes(
   inputNote: TestNote,
   output1Amount: bigint,
   output2Amount: bigint
-): { output1: TestNote; output2: TestNote } {
+): SplitOutputs {
   // Verify amounts conserve
   if (output1Amount + output2Amount !== inputNote.amount) {
     throw new Error(
@@ -87,7 +103,27 @@ function createSplitOutputNotes(
   const output1 = createTestNote(output1Amount, inputNote.leafIndex + 1n);
   const output2 = createTestNote(output2Amount, inputNote.leafIndex + 2n);
 
-  return { output1, output2 };
+  // Create mock stealth output data (32 bytes each)
+  const output1EphemeralPubX = new Uint8Array(32);
+  crypto.getRandomValues(output1EphemeralPubX);
+  const output1EncryptedAmountWithSign = new Uint8Array(32);
+  new DataView(output1EncryptedAmountWithSign.buffer).setBigUint64(0, output1Amount, true);
+  crypto.getRandomValues(output1EncryptedAmountWithSign.subarray(8));
+
+  const output2EphemeralPubX = new Uint8Array(32);
+  crypto.getRandomValues(output2EphemeralPubX);
+  const output2EncryptedAmountWithSign = new Uint8Array(32);
+  new DataView(output2EncryptedAmountWithSign.buffer).setBigUint64(0, output2Amount, true);
+  crypto.getRandomValues(output2EncryptedAmountWithSign.subarray(8));
+
+  return {
+    output1,
+    output2,
+    output1EphemeralPubX,
+    output1EncryptedAmountWithSign,
+    output2EphemeralPubX,
+    output2EncryptedAmountWithSign,
+  };
 }
 
 // =============================================================================
@@ -155,7 +191,7 @@ describe("SPEND_SPLIT E2E", () => {
     it("should build valid split instruction with buffer", async () => {
       const input = createTestNote(TEST_AMOUNTS.small);
       const merkleProof = createMockMerkleProof(input.commitment);
-      const { output1, output2 } = createSplitOutputNotes(input, 60_000n, 40_000n);
+      const outputs = createSplitOutputNotes(input, 60_000n, 40_000n);
 
       // Mock buffer address
       const bufferAddress = address(PublicKey.default.toBase58());
@@ -168,39 +204,50 @@ describe("SPEND_SPLIT E2E", () => {
         ctx.config.zvaultProgramId
       );
 
+      // Derive stealth announcement PDAs
+      const [stealthAnnouncement1] = await deriveStealthAnnouncementPDA(
+        outputs.output1.commitmentBytes,
+        ctx.config.zvaultProgramId
+      );
+      const [stealthAnnouncement2] = await deriveStealthAnnouncementPDA(
+        outputs.output2.commitmentBytes,
+        ctx.config.zvaultProgramId
+      );
+
       // Build split instruction
       const splitIx = buildSplitInstruction({
-        proofSource: "buffer",
         bufferAddress,
         root: bigintToBytes32(merkleProof.root),
         nullifierHash: input.nullifierHashBytes,
-        outputCommitment1: output1.commitmentBytes,
-        outputCommitment2: output2.commitmentBytes,
+        outputCommitment1: outputs.output1.commitmentBytes,
+        outputCommitment2: outputs.output2.commitmentBytes,
         vkHash: generateMockVkHash(),
+        output1EphemeralPubX: outputs.output1EphemeralPubX,
+        output1EncryptedAmountWithSign: outputs.output1EncryptedAmountWithSign,
+        output2EphemeralPubX: outputs.output2EphemeralPubX,
+        output2EncryptedAmountWithSign: outputs.output2EncryptedAmountWithSign,
         accounts: {
           poolState,
           commitmentTree,
           nullifierRecord,
           user: address(ctx.payer.publicKey.toBase58()),
+          stealthAnnouncement1,
+          stealthAnnouncement2,
         },
       });
 
       // Verify instruction structure
       expect(splitIx.data).toBeDefined();
-      expect(splitIx.accounts.length).toBeGreaterThan(0);
+      expect(splitIx.accounts.length).toBe(10);
 
       // Verify discriminator (SPEND_SPLIT = 4)
       expect(splitIx.data[0]).toBe(4);
-
-      // Verify proof source (buffer = 1)
-      expect(splitIx.data[1]).toBe(1);
     });
 
-    it("should build valid split instruction with inline proof", async () => {
+    it("should build instruction with correct data layout", async () => {
       const input = createTestNote(TEST_AMOUNTS.medium);
       const merkleProof = createMockMerkleProof(input.commitment);
-      const { output1, output2 } = createSplitOutputNotes(input, 600_000n, 400_000n);
-      const proofBytes = generateMockProof();
+      const outputs = createSplitOutputNotes(input, 600_000n, 400_000n);
 
       // Derive PDAs
       const [poolState] = await derivePoolStatePDA(ctx.config.zvaultProgramId);
@@ -209,35 +256,47 @@ describe("SPEND_SPLIT E2E", () => {
         input.nullifierHashBytes,
         ctx.config.zvaultProgramId
       );
+      const [stealthAnnouncement1] = await deriveStealthAnnouncementPDA(
+        outputs.output1.commitmentBytes,
+        ctx.config.zvaultProgramId
+      );
+      const [stealthAnnouncement2] = await deriveStealthAnnouncementPDA(
+        outputs.output2.commitmentBytes,
+        ctx.config.zvaultProgramId
+      );
 
-      // Build split instruction with inline proof
+      const bufferAddress = address(PublicKey.default.toBase58());
+
       const splitIx = buildSplitInstruction({
-        proofSource: "inline",
-        proofBytes,
+        bufferAddress,
         root: bigintToBytes32(merkleProof.root),
         nullifierHash: input.nullifierHashBytes,
-        outputCommitment1: output1.commitmentBytes,
-        outputCommitment2: output2.commitmentBytes,
+        outputCommitment1: outputs.output1.commitmentBytes,
+        outputCommitment2: outputs.output2.commitmentBytes,
         vkHash: generateMockVkHash(),
+        output1EphemeralPubX: outputs.output1EphemeralPubX,
+        output1EncryptedAmountWithSign: outputs.output1EncryptedAmountWithSign,
+        output2EphemeralPubX: outputs.output2EphemeralPubX,
+        output2EncryptedAmountWithSign: outputs.output2EncryptedAmountWithSign,
         accounts: {
           poolState,
           commitmentTree,
           nullifierRecord,
           user: address(ctx.payer.publicKey.toBase58()),
+          stealthAnnouncement1,
+          stealthAnnouncement2,
         },
       });
 
-      // Verify discriminator (SPEND_SPLIT = 4)
-      expect(splitIx.data[0]).toBe(4);
-
-      // Verify proof source (inline = 0)
-      expect(splitIx.data[1]).toBe(0);
+      // Verify data layout
+      expect(splitIx.data.length).toBeGreaterThan(200);
+      expect(splitIx.accounts.length).toBe(10);
     });
 
     it("should include both output commitments in instruction", async () => {
       const input = createTestNote(TEST_AMOUNTS.small);
       const merkleProof = createMockMerkleProof(input.commitment);
-      const { output1, output2 } = createSplitOutputNotes(input, 50_000n, 50_000n);
+      const outputs = createSplitOutputNotes(input, 50_000n, 50_000n);
 
       const bufferAddress = address(PublicKey.default.toBase58());
 
@@ -247,27 +306,39 @@ describe("SPEND_SPLIT E2E", () => {
         input.nullifierHashBytes,
         ctx.config.zvaultProgramId
       );
+      const [stealthAnnouncement1] = await deriveStealthAnnouncementPDA(
+        outputs.output1.commitmentBytes,
+        ctx.config.zvaultProgramId
+      );
+      const [stealthAnnouncement2] = await deriveStealthAnnouncementPDA(
+        outputs.output2.commitmentBytes,
+        ctx.config.zvaultProgramId
+      );
 
       const splitIx = buildSplitInstruction({
-        proofSource: "buffer",
         bufferAddress,
         root: bigintToBytes32(merkleProof.root),
         nullifierHash: input.nullifierHashBytes,
-        outputCommitment1: output1.commitmentBytes,
-        outputCommitment2: output2.commitmentBytes,
+        outputCommitment1: outputs.output1.commitmentBytes,
+        outputCommitment2: outputs.output2.commitmentBytes,
         vkHash: generateMockVkHash(),
+        output1EphemeralPubX: outputs.output1EphemeralPubX,
+        output1EncryptedAmountWithSign: outputs.output1EncryptedAmountWithSign,
+        output2EphemeralPubX: outputs.output2EphemeralPubX,
+        output2EncryptedAmountWithSign: outputs.output2EncryptedAmountWithSign,
         accounts: {
           poolState,
           commitmentTree,
           nullifierRecord,
           user: address(ctx.payer.publicKey.toBase58()),
+          stealthAnnouncement1,
+          stealthAnnouncement2,
         },
       });
 
-      // Instruction should contain both output commitments
-      // Layout: discriminator(1) + proof_source(1) + buffer(32) + root(32) + nullifier(32) + output1(32) + output2(32) + vk_hash(32)
-      // Total for buffer: 194 bytes
-      expect(splitIx.data.length).toBeGreaterThan(150);
+      // Instruction should contain both output commitments and stealth data
+      expect(splitIx.data.length).toBeGreaterThan(200);
+      expect(splitIx.accounts.length).toBe(10);
     });
   });
 
@@ -322,8 +393,8 @@ describe("SPEND_SPLIT E2E", () => {
   // ===========================================================================
 
   describe("Integration Flow", () => {
-    it("should simulate complete split flow", async () => {
-      console.log("\n=== Complete Split Flow Simulation ===\n");
+    it("should simulate complete split flow with 2-instruction pattern", async () => {
+      console.log("\n=== Complete Split Flow Simulation (2-IX Pattern) ===\n");
 
       // Step 1: Create input note
       console.log("1. Create input note");
@@ -340,19 +411,20 @@ describe("SPEND_SPLIT E2E", () => {
 
       // Step 3: Create output notes
       console.log("\n3. Create output notes");
-      const { output1, output2 } = createSplitOutputNotes(input, output1Amount, output2Amount);
-      console.log(`   Output 1 commitment: ${output1.commitment.toString(16).slice(0, 20)}...`);
-      console.log(`   Output 2 commitment: ${output2.commitment.toString(16).slice(0, 20)}...`);
+      const outputs = createSplitOutputNotes(input, output1Amount, output2Amount);
+      console.log(`   Output 1 commitment: ${outputs.output1.commitment.toString(16).slice(0, 20)}...`);
+      console.log(`   Output 2 commitment: ${outputs.output2.commitment.toString(16).slice(0, 20)}...`);
 
       // Step 4: Compute Merkle proof for input
       console.log("\n4. Compute Merkle proof for input");
       const merkleProof = createMockMerkleProof(input.commitment);
       console.log(`   Root: ${merkleProof.root.toString(16).slice(0, 20)}...`);
 
-      // Step 5: Generate ZK proof (mocked)
+      // Step 5: Generate ZK proof (mocked - in real flow, uploaded to ChadBuffer)
       console.log("\n5. Generate ZK proof (mocked)");
       const proofBytes = generateMockProof();
       console.log(`   Proof size: ${proofBytes.length} bytes`);
+      console.log(`   NOTE: In real flow, proof would be uploaded to ChadBuffer first`);
 
       // Step 6: Derive PDAs
       console.log("\n6. Derive PDAs");
@@ -362,43 +434,91 @@ describe("SPEND_SPLIT E2E", () => {
         input.nullifierHashBytes,
         ctx.config.zvaultProgramId
       );
+      const [stealthAnnouncement1] = await deriveStealthAnnouncementPDA(
+        outputs.output1.commitmentBytes,
+        ctx.config.zvaultProgramId
+      );
+      const [stealthAnnouncement2] = await deriveStealthAnnouncementPDA(
+        outputs.output2.commitmentBytes,
+        ctx.config.zvaultProgramId
+      );
       console.log(`   Nullifier Record: ${nullifierRecord.toString()}`);
+      console.log(`   Stealth Announcement 1: ${stealthAnnouncement1.toString()}`);
+      console.log(`   Stealth Announcement 2: ${stealthAnnouncement2.toString()}`);
 
-      // Step 7: Build split instruction
-      console.log("\n7. Build split instruction");
-      const splitIx = buildSplitInstruction({
-        proofSource: "inline",
-        proofBytes,
+      // Step 7: Build 2-instruction transaction (verifier + zVault)
+      console.log("\n7. Build 2-instruction transaction");
+      const bufferAddress = address(PublicKey.default.toBase58()); // Mock buffer
+      const vkHash = generateMockVkHash();
+
+      // 7a: Build verifier inputs for VERIFY_FROM_BUFFER
+      const verifierInputs = buildSplitVerifierInputs({
         root: bigintToBytes32(merkleProof.root),
         nullifierHash: input.nullifierHashBytes,
-        outputCommitment1: output1.commitmentBytes,
-        outputCommitment2: output2.commitmentBytes,
-        vkHash: generateMockVkHash(),
+        outputCommitment1: outputs.output1.commitmentBytes,
+        outputCommitment2: outputs.output2.commitmentBytes,
+        output1EphemeralPubX: outputs.output1EphemeralPubX,
+        output1EncryptedAmountWithSign: outputs.output1EncryptedAmountWithSign,
+        output2EphemeralPubX: outputs.output2EphemeralPubX,
+        output2EncryptedAmountWithSign: outputs.output2EncryptedAmountWithSign,
+      });
+      console.log(`   Verifier public inputs: ${verifierInputs.length}`);
+
+      // 7b: Build VERIFY_FROM_BUFFER instruction (IX #1)
+      const verifyIx = buildVerifyFromBufferInstruction({
+        bufferAddress,
+        publicInputs: verifierInputs,
+        vkHash,
+      });
+      console.log(`   IX #1 (verifier): ${verifyIx.data.length} bytes`);
+
+      // 7c: Build split instruction (IX #2)
+      const splitIx = buildSplitInstruction({
+        bufferAddress,
+        root: bigintToBytes32(merkleProof.root),
+        nullifierHash: input.nullifierHashBytes,
+        outputCommitment1: outputs.output1.commitmentBytes,
+        outputCommitment2: outputs.output2.commitmentBytes,
+        vkHash,
+        output1EphemeralPubX: outputs.output1EphemeralPubX,
+        output1EncryptedAmountWithSign: outputs.output1EncryptedAmountWithSign,
+        output2EphemeralPubX: outputs.output2EphemeralPubX,
+        output2EncryptedAmountWithSign: outputs.output2EncryptedAmountWithSign,
         accounts: {
           poolState,
           commitmentTree,
           nullifierRecord,
           user: address(ctx.payer.publicKey.toBase58()),
+          stealthAnnouncement1,
+          stealthAnnouncement2,
         },
       });
-      console.log(`   Instruction data size: ${splitIx.data.length} bytes`);
+      console.log(`   IX #2 (zVault split): ${splitIx.data.length} bytes`);
+      console.log(`   zVault accounts: ${splitIx.accounts.length}`);
 
       // Step 8: What happens on-chain
       console.log("\n8. On-chain execution (simulation):");
-      console.log("   a. Verify merkle root in root history");
-      console.log("   b. Check input nullifier not spent");
-      console.log("   c. Create nullifier record PDA");
-      console.log("   d. Verify ZK proof (conservation: in = out1 + out2)");
-      console.log("   e. Insert output1 commitment to tree");
-      console.log("   f. Insert output2 commitment to tree");
-      console.log("   g. Update tree root");
+      console.log("   TX contains 2 instructions in atomic transaction:");
+      console.log("   IX #1: UltraHonk VERIFY_FROM_BUFFER");
+      console.log("     → Verifies ZK proof from ChadBuffer");
+      console.log("     → If verification fails, TX fails atomically");
+      console.log("   IX #2: zVault SPEND_SPLIT");
+      console.log("     → Uses instruction introspection to verify IX #1 was called");
+      console.log("     → Verifies merkle root in root history");
+      console.log("     → Creates nullifier record PDA");
+      console.log("     → Inserts output1 commitment to tree");
+      console.log("     → Inserts output2 commitment to tree");
+      console.log("     → Creates stealth announcements");
+      console.log("     → Updates tree root");
 
-      console.log("\n=== Split Flow Complete ===\n");
+      console.log("\n=== Split Flow Complete (2-IX Pattern) ===\n");
 
       // Assertions
-      expect(input.amount).toBe(output1.amount + output2.amount);
-      expect(output1.commitment).not.toBe(output2.commitment);
+      expect(input.amount).toBe(outputs.output1.amount + outputs.output2.amount);
+      expect(outputs.output1.commitment).not.toBe(outputs.output2.commitment);
       expect(splitIx.data[0]).toBe(4); // SPEND_SPLIT discriminator
+      expect(splitIx.accounts.length).toBe(10); // Fixed account count
+      expect(verifierInputs.length).toBe(8); // root + nullifier + out1 + out2 + 4 stealth fields
     });
 
     it("should track tree state changes after split", () => {
@@ -475,16 +595,22 @@ describe("SPEND_SPLIT E2E", () => {
         console.log(`   Output 2: ${output2Amount} sats (30%)`);
         expect(output1Amount + output2Amount).toBe(inputAmount);
 
-        // Step 5: Compute output commitments
-        console.log("\n5. Computing output commitments...");
-        const output1Commitment = computeUnifiedCommitmentSync(
-          output1RecipientKeys.spendingPubKey.x,
-          output1Amount
-        );
-        const output2Commitment = computeUnifiedCommitmentSync(
-          output2RecipientKeys.spendingPubKey.x,
-          output2Amount
-        );
+        // Step 5: Create stealth outputs
+        console.log("\n5. Creating stealth outputs...");
+        const output1MetaAddress = createStealthMetaAddress(output1RecipientKeys);
+        const output1Stealth = await createStealthDeposit(output1MetaAddress, output1Amount);
+        const output1Commitment = bytesToBigint(output1Stealth.commitment);
+        const output1EphemeralPubX = bytesToBigint(output1Stealth.ephemeralPub.subarray(1, 33));
+        const output1YSign = extractYSign(output1Stealth.ephemeralPub);
+        const output1EncryptedAmountWithSign = packEncryptedAmountWithSign(output1Stealth.encryptedAmount, output1YSign);
+
+        const output2MetaAddress = createStealthMetaAddress(output2RecipientKeys);
+        const output2Stealth = await createStealthDeposit(output2MetaAddress, output2Amount);
+        const output2Commitment = bytesToBigint(output2Stealth.commitment);
+        const output2EphemeralPubX = bytesToBigint(output2Stealth.ephemeralPub.subarray(1, 33));
+        const output2YSign = extractYSign(output2Stealth.ephemeralPub);
+        const output2EncryptedAmountWithSign = packEncryptedAmountWithSign(output2Stealth.encryptedAmount, output2YSign);
+
         console.log(`   Output 1 commitment: ${output1Commitment.toString(16).slice(0, 16)}...`);
         console.log(`   Output 2 commitment: ${output2Commitment.toString(16).slice(0, 16)}...`);
 
@@ -506,9 +632,13 @@ describe("SPEND_SPLIT E2E", () => {
           // Output 1
           output1PubKeyX: output1RecipientKeys.spendingPubKey.x,
           output1Amount: output1Amount,
+          output1EphemeralPubX: output1EphemeralPubX,
+          output1EncryptedAmountWithSign: output1EncryptedAmountWithSign,
           // Output 2
           output2PubKeyX: output2RecipientKeys.spendingPubKey.x,
           output2Amount: output2Amount,
+          output2EphemeralPubX: output2EphemeralPubX,
+          output2EncryptedAmountWithSign: output2EncryptedAmountWithSign,
         });
 
         const proofTime = ((Date.now() - proofStartTime) / 1000).toFixed(1);
@@ -545,8 +675,8 @@ describe("SPEND_SPLIT E2E", () => {
         );
         console.log("\n   Upload complete!");
 
-        // Step 9: Build split transaction (buffer mode)
-        console.log("\n9. Building split transaction (buffer mode)...");
+        // Step 9: Build split transaction (2-instruction pattern)
+        console.log("\n9. Building split transaction (2-instruction pattern)...");
         const [poolState] = await derivePoolStatePDA(ctx.config.zvaultProgramId);
         const [commitmentTree] = await deriveCommitmentTreePDA(ctx.config.zvaultProgramId);
         const [nullifierRecord] = await deriveNullifierRecordPDA(
@@ -554,25 +684,68 @@ describe("SPEND_SPLIT E2E", () => {
           ctx.config.zvaultProgramId
         );
 
+        // Derive stealth announcement PDAs
+        const output1CommitmentBytes = bigintToBytes(output1Commitment, 32);
+        const output2CommitmentBytes = bigintToBytes(output2Commitment, 32);
+        const [stealthAnnouncement1] = await deriveStealthAnnouncementPDA(
+          output1CommitmentBytes,
+          ctx.config.zvaultProgramId
+        );
+        const [stealthAnnouncement2] = await deriveStealthAnnouncementPDA(
+          output2CommitmentBytes,
+          ctx.config.zvaultProgramId
+        );
+
+        const vkHash = generateMockVkHash(); // TODO: Use real VK hash
+        const output1EphemeralPubXBytes = bigintToBytes(output1EphemeralPubX, 32);
+        const output1EncryptedBytes = bigintToBytes(output1EncryptedAmountWithSign, 32);
+        const output2EphemeralPubXBytes = bigintToBytes(output2EphemeralPubX, 32);
+        const output2EncryptedBytes = bigintToBytes(output2EncryptedAmountWithSign, 32);
+
+        // Build verifier instruction (IX #1)
+        const verifierInputs = buildSplitVerifierInputs({
+          root: bigintToBytes(inputData.merkleProof.root, 32),
+          nullifierHash: inputData.nullifierHashBytes,
+          outputCommitment1: output1CommitmentBytes,
+          outputCommitment2: output2CommitmentBytes,
+          output1EphemeralPubX: output1EphemeralPubXBytes,
+          output1EncryptedAmountWithSign: output1EncryptedBytes,
+          output2EphemeralPubX: output2EphemeralPubXBytes,
+          output2EncryptedAmountWithSign: output2EncryptedBytes,
+        });
+
+        const verifyIx = buildVerifyFromBufferInstruction({
+          bufferAddress: bufferKeypair.address,
+          publicInputs: verifierInputs,
+          vkHash,
+        });
+
+        // Build zVault instruction (IX #2)
         const splitIx = buildSplitInstruction({
-          proofSource: "buffer",
           bufferAddress: bufferKeypair.address,
           root: bigintToBytes(inputData.merkleProof.root, 32),
           nullifierHash: inputData.nullifierHashBytes,
-          outputCommitment1: bigintToBytes(output1Commitment, 32),
-          outputCommitment2: bigintToBytes(output2Commitment, 32),
-          vkHash: generateMockVkHash(), // TODO: Use real VK hash
+          outputCommitment1: output1CommitmentBytes,
+          outputCommitment2: output2CommitmentBytes,
+          vkHash,
+          output1EphemeralPubX: output1EphemeralPubXBytes,
+          output1EncryptedAmountWithSign: output1EncryptedBytes,
+          output2EphemeralPubX: output2EphemeralPubXBytes,
+          output2EncryptedAmountWithSign: output2EncryptedBytes,
           accounts: {
             poolState,
             commitmentTree,
             nullifierRecord,
             user: address(ctx.payer.publicKey.toBase58()),
+            stealthAnnouncement1,
+            stealthAnnouncement2,
           },
         });
 
-        console.log(`   Instruction data size: ${splitIx.data.length} bytes`);
-        console.log(`   Proof source: buffer`);
-        console.log(`   NOTE: Full on-chain execution requires UltraHonk verifier`);
+        console.log(`   IX #1 (verifier): ${verifyIx.data.length} bytes`);
+        console.log(`   IX #2 (zVault split): ${splitIx.data.length} bytes`);
+        console.log(`   zVault accounts: ${splitIx.accounts.length}`);
+        console.log(`   2-instruction pattern: verifier introspection enabled`);
 
         // Step 10: Close ChadBuffer
         console.log("\n10. Closing ChadBuffer...");
@@ -595,7 +768,8 @@ describe("SPEND_SPLIT E2E", () => {
         console.log(`    ✓ Real ZK proof generated (${proofTime}s)`);
         console.log(`    ✓ Proof verified locally`);
         console.log(`    ✓ Proof uploaded to ChadBuffer`);
-        console.log(`    ✓ Split instruction built (buffer mode)`);
+        console.log(`    ✓ 2-instruction TX built (verifier + zVault split)`);
+        console.log(`    ✓ Instruction introspection pattern ready`);
         console.log(`    ✓ ChadBuffer closed`);
         console.log(`    ✓ Amount conservation verified: ${output1Amount} + ${output2Amount} = ${inputAmount}`);
 
@@ -645,6 +819,11 @@ describe("SPEND_SPLIT E2E", () => {
         const output1Amount = 600_000n;
         const output2PubKeyX = 222222n;
         const output2Amount = 400_000n;
+        // Mock stealth output data
+        const output1EphemeralPubX = 333333n;
+        const output1EncryptedAmountWithSign = 444444n;
+        const output2EphemeralPubX = 555555n;
+        const output2EncryptedAmountWithSign = 666666n;
 
         // Generate proof
         console.log("Generating spend_split proof...");
@@ -662,8 +841,12 @@ describe("SPEND_SPLIT E2E", () => {
           },
           output1PubKeyX,
           output1Amount,
+          output1EphemeralPubX,
+          output1EncryptedAmountWithSign,
           output2PubKeyX,
           output2Amount,
+          output2EphemeralPubX,
+          output2EncryptedAmountWithSign,
         });
 
         const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);

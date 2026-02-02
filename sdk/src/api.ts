@@ -62,7 +62,7 @@ import {
 } from "./stealth";
 import { type StealthMetaAddress, type ZVaultKeys } from "./keys";
 import { type MerkleProof, TREE_DEPTH, ZERO_VALUE } from "./merkle";
-import { bigintToBytes, bytesToBigint, hexToBytes } from "./crypto";
+import { bigintToBytes, bytesToBigint, hexToBytes, BN254_FIELD_PRIME } from "./crypto";
 import { hashNullifierSync, computeNullifierSync } from "./poseidon";
 import { pointMul, GRUMPKIN_GENERATOR } from "./crypto";
 
@@ -164,8 +164,8 @@ async function generatePartialWithdrawProof(
   const changePubKey = pointMul(changePrivKey, GRUMPKIN_GENERATOR);
   const changePubKeyX = changePubKey.x;
 
-  // Recipient as bigint (first 32 bytes interpreted as field element)
-  const recipientBigint = bytesToBigint(_recipient);
+  // Recipient as bigint (first 32 bytes interpreted as field element, reduced mod BN254 prime)
+  const recipientBigint = bytesToBigint(_recipient) % BN254_FIELD_PRIME;
 
   const inputs: SpendPartialPublicInputs = {
     privKey,
@@ -765,8 +765,8 @@ export async function claimNote(
   // Use provided merkle proof or create empty one
   const mp = merkleProof ?? createEmptyMerkleProofForNote();
 
-  // Convert payer address to bigint for proof recipient binding
-  const recipientBigint = bytesToBigint(addressToBytes(config.payer.address));
+  // Convert payer address to bigint for proof recipient binding (reduced mod BN254 prime)
+  const recipientBigint = bytesToBigint(addressToBytes(config.payer.address)) % BN254_FIELD_PRIME;
 
   // Generate ZK proof
   const proof = await generateClaimProof(note, mp, recipientBigint);
@@ -870,8 +870,8 @@ export async function claimPublic(
   // Use provided merkle proof or create empty one
   const mp = merkleProof ?? createEmptyMerkleProofForNote();
 
-  // Convert recipient address to bigint for proof binding
-  const recipientBigint = bytesToBigint(addressToBytes(recipientAddress));
+  // Convert recipient address to bigint for proof binding (reduced mod BN254 prime)
+  const recipientBigint = bytesToBigint(addressToBytes(recipientAddress)) % BN254_FIELD_PRIME;
 
   // Generate ZK proof
   const proof = await generateClaimProof(note, mp, recipientBigint);
