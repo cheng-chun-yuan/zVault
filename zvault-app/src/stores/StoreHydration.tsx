@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, type JSX } from "react";
 import { useBitcoinWalletStore } from "./bitcoin-wallet-store";
 import { useZVaultStore } from "./zvault-store";
 
@@ -9,7 +9,7 @@ import { useZVaultStore } from "./zvault-store";
  * Handles localStorage restoration and Poseidon initialization.
  * Also handles auto-refresh of inbox when keys become available (ONCE).
  */
-export function StoreHydration() {
+export function StoreHydration(): JSX.Element {
   const hydrateBtcWallet = useBitcoinWalletStore((s) => s._hydrate);
   const initPoseidon = useZVaultStore((s) => s.initPoseidon);
   const keys = useZVaultStore((s) => s.keys);
@@ -43,5 +43,5 @@ export function StoreHydration() {
     }
   }, [keys]);
 
-  return null;
+  return <></>;
 }
