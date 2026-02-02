@@ -7,14 +7,19 @@
 //!
 //! In devnet mode, cryptographic verification is skipped for faster iteration.
 
+#[cfg(not(feature = "devnet"))]
 use crate::bn254::{pairing_check, G2Point};
+#[cfg(not(feature = "devnet"))]
 use crate::constants::{
     BATCHED_RELATION_PARTIAL_LENGTH, NUMBER_OF_ALPHAS,
     NUMBER_OF_ENTITIES, SRS_G2_GENERATOR, SRS_G2_X,
 };
 use crate::error::UltraHonkError;
+#[cfg(not(feature = "devnet"))]
 use crate::transcript::{Transcript, split_challenge};
-use crate::types::{Fr, UltraHonkProof, VerificationKey, G1ProofPoint};
+#[cfg(not(feature = "devnet"))]
+use crate::types::{Fr, G1ProofPoint};
+use crate::types::{UltraHonkProof, VerificationKey};
 
 /// Verify an UltraHonk proof
 ///
