@@ -1,6 +1,6 @@
 {
-  "buildCommand": "bun run build:sdk && cd zvault-app && bun run build",
+  "buildCommand": "bun run build:sdk && bun run build:frontend",
   "outputDirectory": "zvault-app/.next",
   "installCommand": "bun install",
-  "framework": null
+  "framework": "nextjs"
 }
