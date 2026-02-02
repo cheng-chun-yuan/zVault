@@ -20,6 +20,7 @@ import {
   type PreparedStealthDeposit,
 } from "@zvault/sdk";
 import { Tooltip } from "@/components/ui/tooltip";
+import { registerCommitment } from "@/lib/merkle-indexer";
 
 // Network: "testnet" for tb1p... addresses, "mainnet" for bc1p... addresses
 const BITCOIN_NETWORK: "mainnet" | "testnet" = "testnet";
@@ -102,6 +103,13 @@ export function DepositFlow() {
         signature: result.signature,
         ephemeralPubKey: bytesToHex(stealthDepositData.ephemeralPub),
       });
+
+      // Register commitment in local cache for later proof generation
+      registerCommitment(
+        bytesToHex(stealthDepositData.commitment),
+        result.leafIndex ?? 0,
+        amount
+      );
 
       notifySuccess("Mock stealth deposit added on-chain!");
     } catch (err) {
