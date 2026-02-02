@@ -10,7 +10,7 @@ zVault is a privacy-preserving Bitcoin-to-Solana bridge using Zero-Knowledge Pro
 
 ## Commands
 
-### Frontend (Next.js) - `/zvault_app`
+### Frontend (Next.js) - `/zvault-app`
 ```bash
 bun run dev          # Start dev server (port 3000)
 bun run build        # Production build (builds SDK first)
@@ -88,7 +88,7 @@ Redeem: Burn zkBTC → FROST threshold signature → Return BTC to user
 | `sdk` | TypeScript SDK (@zvault/sdk) | TypeScript |
 | `frost_server` | FROST threshold signing for BTC | Rust |
 | `backend` | API server + header relayer | Rust + Node.js |
-| `zvault_app` | Web interface | Next.js + React |
+| `zvault-app` | Web interface | Next.js + React |
 | `mobile-app` | Mobile app | Expo + React Native |
 | `noir-circuits` | ZK circuits (6 circuits) | Noir |
 
