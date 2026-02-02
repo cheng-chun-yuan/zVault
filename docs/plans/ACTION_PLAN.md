@@ -171,8 +171,8 @@ interface NetworkConfig {
 ```
 
 **Action Items:**
-- [ ] Add `backendApiUrl` to NetworkConfig (optional)
-- [ ] Add `headerRelayerUrl` to NetworkConfig (optional)
+- [x] Add `backendApiUrl` to NetworkConfig (optional) ✅ v2.0.4
+- [x] Add `headerRelayerUrl` to NetworkConfig (optional) ✅ v2.0.4
 - [ ] Update SDK docs with custom deployment guide
 
 ---
