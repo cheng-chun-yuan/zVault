@@ -87,6 +87,16 @@ export interface NetworkConfig {
   circuitCdnUrl: string;
 
   // -------------------------------------------------------------------------
+  // Backend Services (Optional - for custom deployments)
+  // -------------------------------------------------------------------------
+
+  /** Backend API URL (deposit tracking, redemption) */
+  backendApiUrl?: string;
+
+  /** Header relayer service URL */
+  headerRelayerUrl?: string;
+
+  // -------------------------------------------------------------------------
   // UltraHonk Verifier (Client-side ZK)
   // -------------------------------------------------------------------------
 
@@ -172,6 +182,10 @@ export const DEVNET_CONFIG: NetworkConfig = {
   // Circuit CDN (UltraHonk artifacts: .json, .vk files)
   circuitCdnUrl: "https://circuits.amidoggy.xyz",
 
+  // Backend Services
+  backendApiUrl: "https://api.zvault.io",
+  headerRelayerUrl: "https://relay.zvault.io",
+
   // UltraHonk Verifier (browser proof generation via bb.js)
   ultrahonkVerifierProgramId: address("5uAoTLSexeKKLU3ZXniWFE2CsCWGPzMiYPpKiywCGqsd"),
 
@@ -218,6 +232,10 @@ export const MAINNET_CONFIG: NetworkConfig = {
   // Circuit CDN
   circuitCdnUrl: "https://cdn.jsdelivr.net/npm/@zvault/sdk@latest/circuits",
 
+  // Backend Services
+  backendApiUrl: "https://api.zvault.io",
+  headerRelayerUrl: "https://relay.zvault.io",
+
   // UltraHonk Verifier (placeholder)
   ultrahonkVerifierProgramId: address("11111111111111111111111111111111"),
 
@@ -263,6 +281,10 @@ export const LOCALNET_CONFIG: NetworkConfig = {
 
   // Circuit CDN (use local files for development)
   circuitCdnUrl: "/circuits",
+
+  // Backend Services (local development)
+  backendApiUrl: "http://127.0.0.1:3001",
+  headerRelayerUrl: "http://127.0.0.1:3002",
 
   // UltraHonk Verifier (use devnet for local testing)
   ultrahonkVerifierProgramId: address("5uAoTLSexeKKLU3ZXniWFE2CsCWGPzMiYPpKiywCGqsd"),
@@ -353,14 +375,40 @@ export const ZVAULT_PROGRAM_ID: Address = DEVNET_CONFIG.zvaultProgramId;
 export const BTC_LIGHT_CLIENT_PROGRAM_ID: Address = DEVNET_CONFIG.btcLightClientProgramId;
 
 // =============================================================================
+// Backend Service URLs
+// =============================================================================
+
+/** Default backend API URL */
+const DEFAULT_BACKEND_API_URL = "https://api.zvault.io";
+
+/** Default header relayer URL */
+const DEFAULT_HEADER_RELAYER_URL = "https://relay.zvault.io";
+
+/**
+ * Get the backend API URL from current config
+ * Falls back to default if not configured
+ */
+export function getBackendApiUrl(): string {
+  return currentConfig.backendApiUrl ?? DEFAULT_BACKEND_API_URL;
+}
+
+/**
+ * Get the header relayer URL from current config
+ * Falls back to default if not configured
+ */
+export function getHeaderRelayerUrl(): string {
+  return currentConfig.headerRelayerUrl ?? DEFAULT_HEADER_RELAYER_URL;
+}
+
+// =============================================================================
 // Version Info
 // =============================================================================
 
-export const SDK_VERSION = "2.0.3";
+export const SDK_VERSION = "2.0.4";
 
 export const DEPLOYMENT_INFO = {
   version: SDK_VERSION,
-  deployedAt: "2026-02-01",
+  deployedAt: "2026-02-02",
   network: "devnet" as NetworkType,
   features: [
     "demo-stealth",
@@ -368,6 +416,7 @@ export const DEPLOYMENT_INFO = {
     "stealth-addresses",
     "reverse-lookup",
     "ultrahonk-browser-proving",
+    "configurable-backend-urls",
   ],
-  notes: "Client-side UltraHonk proof generation via bb.js",
+  notes: "Client-side UltraHonk proof generation via bb.js. Configurable backend/relayer URLs.",
 };

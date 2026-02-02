@@ -275,6 +275,8 @@ export {
   getConfig,
   setConfig,
   createConfig,
+  getBackendApiUrl,
+  getHeaderRelayerUrl,
   DEVNET_CONFIG,
   MAINNET_CONFIG,
   LOCALNET_CONFIG,
