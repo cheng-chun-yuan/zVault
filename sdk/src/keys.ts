@@ -246,10 +246,18 @@ export function deriveKeysFromSignature(
 /**
  * Derive keys from a seed phrase (for deterministic testing)
  *
+ * @deprecated This function creates fake signatures and should only be used
+ * for testing purposes. In production, use deriveKeysFromSignature with a
+ * real wallet signature to ensure cryptographic security.
+ *
  * @param seed - Arbitrary seed bytes
  * @returns Complete zVault key hierarchy (with zero solanaPublicKey)
  */
 export function deriveKeysFromSeed(seed: Uint8Array): ZVaultKeys {
+  console.warn(
+    "[DEPRECATED] deriveKeysFromSeed uses fake signatures. " +
+    "Use deriveKeysFromSignature with real wallet signature in production."
+  );
   // Create a deterministic "signature" from seed
   const fakeSig = new Uint8Array(64);
   const hash1 = sha256(seed);
