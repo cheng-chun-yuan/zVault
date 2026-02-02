@@ -3,14 +3,14 @@
   "private": true,
   "workspaces": [
     "sdk",
-    "frontend"
+    "zvault_app"
   ],
   "scripts": {
     "build:sdk": "cd sdk && bun run build",
-    "build:frontend": "cd frontend && bun run build",
-    "build": "bun run build:sdk && bun run build:frontend",
-    "dev": "cd frontend && bun run dev",
-    "vercel-build": "bun run build:sdk && bun run build:frontend"
+    "build:app": "cd zvault_app && bun run build",
+    "build": "bun run build:app",
+    "dev": "cd zvault_app && bun run dev",
+    "dev:sdk": "cd sdk && bun run build && cd ../zvault_app && bun run dev"
   },
   "dependencies": {
     "@noble/hashes": "^2.0.1",

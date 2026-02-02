@@ -1,6 +1,7 @@
 {
-  "buildCommand": "bun run build:sdk && cd frontend && bun run build",
-  "outputDirectory": "frontend/.next",
-  "installCommand": "bun install",
-  "framework": "nextjs"
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "framework": "nextjs",
+  "buildCommand": "cd zvault_app && bun run build",
+  "outputDirectory": "zvault_app/.next",
+  "installCommand": "bun install"
 }
