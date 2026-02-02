@@ -114,4 +114,67 @@
 
 ---
 
+## Architecture Decisions
+
+### SDK Configuration Strategy
+
+**Current State:** SDK has `setConfig()` and `createConfig()` for custom deployments.
+
+```typescript
+// Already supported:
+import { setConfig, createConfig, DEVNET_CONFIG } from '@zvault/sdk';
+
+// Use preset network
+setConfig('devnet');
+
+// Custom deployment (user's own contracts)
+setConfig(createConfig(DEVNET_CONFIG, {
+  zvaultProgramId: address('UserDeployedProgram...'),
+  poolStatePda: address('UserPoolState...'),
+  // ... other overrides
+}));
+```
+
+**Decision Required:** How much customization to support?
+
+| Option | Pros | Cons |
+|--------|------|------|
+| **A) Current (presets + override)** | Simple, works now | Must know all addresses |
+| **B) Builder pattern** | Ergonomic, discoverable | More code to maintain |
+| **C) Auto-derive PDAs** | User only provides program ID | Complex, magic behavior |
+
+**Recommendation:** Option A (current) is sufficient. Users deploying their own contracts are advanced and can provide full config.
+
+### Relayer Configuration
+
+**Current State:** Relayer settings hardcoded in backend.
+
+**Decision Required:** Should SDK users configure their own relayers?
+
+| Setting | User Configurable? | Default |
+|---------|-------------------|---------|
+| `backendApiUrl` | ✅ Yes | `https://api.zvault.io` |
+| `headerRelayerUrl` | ✅ Yes | `https://relay.zvault.io` |
+| `esploraUrl` | ✅ Yes | Blockstream API |
+| `solanaRpcUrl` | ✅ Yes | Public devnet/mainnet |
+
+**Recommendation:** Add these to `NetworkConfig` interface:
+
+```typescript
+interface NetworkConfig {
+  // ... existing fields ...
+
+  // Backend Services (optional overrides)
+  backendApiUrl?: string;      // Default: https://api.zvault.io
+  headerRelayerUrl?: string;   // Default: https://relay.zvault.io
+}
+```
+
+**Action Items:**
+- [ ] Add `backendApiUrl` to NetworkConfig (optional)
+- [ ] Add `headerRelayerUrl` to NetworkConfig (optional)
+- [ ] Update SDK docs with custom deployment guide
+
+---
+
 *Last Updated: 2026-02-02*
