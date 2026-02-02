@@ -228,3 +228,29 @@ After implementation:
 - [ ] User can send stealth transfer with real `spend_split` proof
 - [ ] No fake signatures or hardcoded amounts in real mode
 - [ ] Demo toggle preserved for quick testing
+
+---
+
+## Implementation Plan
+
+**Status:** Ready for execution
+
+**Plan file:** `docs/plans/2026-02-02-devnet-completeness-implementation.md`
+
+**Key findings from planning:**
+1. VK hashes already configured in `sdk/src/config/presets.ts:97-104` (devnet)
+2. Web prover (`sdk/src/prover/web.ts`) is fully functional with all circuits
+3. Main gap: Frontend uses demo signatures instead of calling SDK proof functions
+4. Merkle proof indexer needed to enable full proof generation
+
+**10 tasks covering:**
+- SDK: Fix XOR placeholder → real Poseidon commitment
+- SDK: Add deprecation warning to test-only key derivation
+- App: Default demo mode OFF, wire real SDK calls
+- App: Initialize prover and prepare proof inputs
+- App: Create merkle indexer stub for proof generation
+
+**To execute:** Open new session and run:
+```
+Use superpowers:executing-plans to implement the plan at docs/plans/2026-02-02-devnet-completeness-implementation.md
+```
