@@ -1,0 +1,93 @@
+{
+  "version": "1.0",
+  "description": "Cross-implementation test vectors for merkle tree security testing",
+
+  "poseidon_hash": [
+    {
+      "name": "hash_two_zeros",
+      "inputs": ["0x0", "0x0"],
+      "expected": "0x2098f5fb9e239eab3ceac3f27b81e481dc3124d55ffed523a839ee8446b64864",
+      "description": "Poseidon(0, 0) - used to compute ZERO_HASHES[1]"
+    },
+    {
+      "name": "hash_small_values",
+      "inputs": ["0x1", "0x2"],
+      "expected": "COMPUTE_AT_RUNTIME",
+      "description": "Basic non-zero hash test"
+    },
+    {
+      "name": "hash_order_matters",
+      "inputs_a": ["0x1234", "0x5678"],
+      "inputs_b": ["0x5678", "0x1234"],
+      "should_differ": true,
+      "description": "Verify hash(a,b) != hash(b,a)"
+    }
+  ],
+
+  "zero_hashes": [
+    { "level": 0, "value": "0x0000000000000000000000000000000000000000000000000000000000000000" },
+    { "level": 1, "value": "0x2098f5fb9e239eab3ceac3f27b81e481dc3124d55ffed523a839ee8446b64864" },
+    { "level": 2, "value": "0x1069673dcdb12263df301a6ff584a7ec261a44cb9dc68df067a4774460b1f1e1" },
+    { "level": 3, "value": "0x18f43331537ee2af2e3d758d50f72106467c6eea50371dd528d57eb2b856d238" },
+    { "level": 4, "value": "0x07f9d837cb17b0d36320ffe93ba52345f1b728571a568265caac97559dbc952a" },
+    { "level": 5, "value": "0x2b94cf5e8746b3f5c9631f4c5df32907a699c58c94b2ad4d7b5cec1639183f55" },
+    { "level": 20, "value": "0x2134e76ac5d21aab186c2be1dd8f84ee880a1e46eaf712f9d371b6df22191f3e", "description": "Empty tree root" }
+  ],
+
+  "merkle_roots": [
+    {
+      "name": "empty_tree",
+      "leaves": [],
+      "expected_root": "0x2134e76ac5d21aab186c2be1dd8f84ee880a1e46eaf712f9d371b6df22191f3e",
+      "description": "Tree with no leaves"
+    },
+    {
+      "name": "single_leaf",
+      "leaves": ["0x0000000000000000000000000000000000000000000000000000000000000001"],
+      "leaf_index": 0,
+      "expected_root": "COMPUTE_AT_RUNTIME",
+      "description": "Tree with one leaf at index 0"
+    }
+  ],
+
+  "merkle_proofs": [
+    {
+      "name": "proof_index_0",
+      "leaf": "0x0000000000000000000000000000000000000000000000000000000000000001",
+      "leaf_index": 0,
+      "tree_size": 1,
+      "description": "Proof for single leaf at index 0"
+    },
+    {
+      "name": "proof_index_1",
+      "leaf": "0x0000000000000000000000000000000000000000000000000000000000000002",
+      "leaf_index": 1,
+      "tree_size": 2,
+      "description": "Proof for second leaf at index 1"
+    }
+  ],
+
+  "adversarial": [
+    {
+      "name": "tampered_sibling",
+      "description": "Proof with one sibling byte flipped should fail",
+      "should_fail": true
+    },
+    {
+      "name": "wrong_leaf_index",
+      "description": "Proof with incorrect leaf index should fail",
+      "should_fail": true
+    },
+    {
+      "name": "flipped_path_index",
+      "description": "Proof with path index 0<->1 swapped should fail",
+      "should_fail": true
+    }
+  ],
+
+  "constants": {
+    "TREE_DEPTH": 20,
+    "MAX_LEAVES": 1048576,
+    "ROOT_HISTORY_SIZE": 100
+  }
+}

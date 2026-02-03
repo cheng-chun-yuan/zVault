@@ -159,4 +159,193 @@ mod tests {
         let last = get_zero_hash(100);
         assert_eq!(last, &ZERO_HASHES[19]);
     }
+
+    // =========================================================================
+    // Property Tests
+    // =========================================================================
+
+    #[test]
+    fn test_different_leaves_produce_different_roots() {
+        let leaf_a = [1u8; 32];
+        let leaf_b = [2u8; 32];
+        let siblings = [[0u8; 32]; 3];
+
+        let root_a = compute_merkle_root(&leaf_a, 0, &siblings).unwrap();
+        let root_b = compute_merkle_root(&leaf_b, 0, &siblings).unwrap();
+
+        assert_ne!(root_a, root_b, "Different leaves must produce different roots");
+    }
+
+    #[test]
+    fn test_same_leaf_different_positions_different_roots() {
+        let leaf = [1u8; 32];
+        let siblings = [[2u8; 32], [3u8; 32], [4u8; 32]];
+
+        let root_pos_0 = compute_merkle_root(&leaf, 0, &siblings).unwrap();
+        let root_pos_1 = compute_merkle_root(&leaf, 1, &siblings).unwrap();
+        let root_pos_2 = compute_merkle_root(&leaf, 2, &siblings).unwrap();
+        let root_pos_3 = compute_merkle_root(&leaf, 3, &siblings).unwrap();
+
+        // All positions should yield different roots
+        assert_ne!(root_pos_0, root_pos_1);
+        assert_ne!(root_pos_0, root_pos_2);
+        assert_ne!(root_pos_0, root_pos_3);
+        assert_ne!(root_pos_1, root_pos_2);
+        assert_ne!(root_pos_1, root_pos_3);
+        assert_ne!(root_pos_2, root_pos_3);
+    }
+
+    #[test]
+    fn test_root_computation_is_deterministic() {
+        let leaf = [42u8; 32];
+        let siblings: Vec<[u8; 32]> = (0..20).map(|i| [i as u8; 32]).collect();
+
+        let root1 = compute_merkle_root(&leaf, 12345, &siblings).unwrap();
+        let root2 = compute_merkle_root(&leaf, 12345, &siblings).unwrap();
+        let root3 = compute_merkle_root(&leaf, 12345, &siblings).unwrap();
+
+        assert_eq!(root1, root2);
+        assert_eq!(root2, root3);
+    }
+
+    // =========================================================================
+    // Boundary Tests
+    // =========================================================================
+
+    #[test]
+    fn test_max_depth_proof() {
+        let leaf = [1u8; 32];
+        let siblings: Vec<[u8; 32]> = (0..20).map(|i| [(i + 1) as u8; 32]).collect();
+
+        let root = compute_merkle_root(&leaf, 0, &siblings).unwrap();
+        assert!(verify_merkle_proof(&leaf, 0, &siblings, &root).unwrap());
+    }
+
+    #[test]
+    fn test_max_leaf_index() {
+        let leaf = [1u8; 32];
+        let siblings: Vec<[u8; 32]> = (0..20).map(|_| [0u8; 32]).collect();
+        let max_index = (1u64 << 20) - 1; // 2^20 - 1 = 1048575
+
+        let root = compute_merkle_root(&leaf, max_index, &siblings).unwrap();
+        assert!(verify_merkle_proof(&leaf, max_index, &siblings, &root).unwrap());
+    }
+
+    #[test]
+    fn test_empty_siblings_returns_leaf() {
+        let leaf = [99u8; 32];
+        let siblings: &[[u8; 32]] = &[];
+
+        let root = compute_merkle_root(&leaf, 0, siblings).unwrap();
+        assert_eq!(root, leaf, "Empty siblings should return leaf as root");
+    }
+
+    #[test]
+    fn test_single_sibling() {
+        let leaf = [1u8; 32];
+        let siblings = [[2u8; 32]];
+
+        // At index 0 (even), leaf is left child: H(leaf, sibling)
+        let root_left = compute_merkle_root(&leaf, 0, &siblings).unwrap();
+        // At index 1 (odd), leaf is right child: H(sibling, leaf)
+        let root_right = compute_merkle_root(&leaf, 1, &siblings).unwrap();
+
+        assert_ne!(root_left, root_right, "Position affects root");
+    }
+
+    // =========================================================================
+    // Adversarial Tests
+    // =========================================================================
+
+    #[test]
+    fn test_tampered_sibling_fails_verification() {
+        let leaf = [1u8; 32];
+        let siblings = [[2u8; 32], [3u8; 32], [4u8; 32]];
+
+        let valid_root = compute_merkle_root(&leaf, 0, &siblings).unwrap();
+
+        // Tamper with one sibling
+        let mut tampered_siblings = siblings;
+        tampered_siblings[1][0] ^= 0xFF; // Flip bits in sibling
+
+        assert!(
+            !verify_merkle_proof(&leaf, 0, &tampered_siblings, &valid_root).unwrap(),
+            "Tampered sibling must fail verification"
+        );
+    }
+
+    #[test]
+    fn test_wrong_leaf_index_fails_verification() {
+        let leaf = [1u8; 32];
+        let siblings = [[2u8; 32], [3u8; 32], [4u8; 32]];
+
+        let root_at_0 = compute_merkle_root(&leaf, 0, &siblings).unwrap();
+
+        // Try to verify with wrong index
+        assert!(
+            !verify_merkle_proof(&leaf, 1, &siblings, &root_at_0).unwrap(),
+            "Wrong leaf index must fail verification"
+        );
+        assert!(
+            !verify_merkle_proof(&leaf, 2, &siblings, &root_at_0).unwrap(),
+            "Wrong leaf index must fail verification"
+        );
+    }
+
+    #[test]
+    fn test_truncated_proof_produces_different_root() {
+        let leaf = [1u8; 32];
+        let full_siblings = [[2u8; 32], [3u8; 32], [4u8; 32]];
+        let truncated_siblings = [[2u8; 32], [3u8; 32]];
+
+        let full_root = compute_merkle_root(&leaf, 0, &full_siblings).unwrap();
+        let truncated_root = compute_merkle_root(&leaf, 0, &truncated_siblings).unwrap();
+
+        assert_ne!(full_root, truncated_root, "Different depth = different root");
+    }
+
+    #[test]
+    fn test_swapped_siblings_fails_verification() {
+        let leaf = [1u8; 32];
+        let siblings = [[2u8; 32], [3u8; 32], [4u8; 32]];
+
+        let valid_root = compute_merkle_root(&leaf, 0, &siblings).unwrap();
+
+        // Swap first two siblings
+        let swapped_siblings = [[3u8; 32], [2u8; 32], [4u8; 32]];
+
+        assert!(
+            !verify_merkle_proof(&leaf, 0, &swapped_siblings, &valid_root).unwrap(),
+            "Swapped siblings must fail verification"
+        );
+    }
+
+    #[test]
+    fn test_wrong_root_fails_verification() {
+        let leaf = [1u8; 32];
+        let siblings = [[2u8; 32], [3u8; 32]];
+
+        let wrong_root = [0xFFu8; 32];
+
+        assert!(
+            !verify_merkle_proof(&leaf, 0, &siblings, &wrong_root).unwrap(),
+            "Wrong root must fail verification"
+        );
+    }
+
+    #[test]
+    fn test_all_zeros_is_valid_but_distinct() {
+        let zero_leaf = [0u8; 32];
+        let zero_siblings = [[0u8; 32], [0u8; 32]];
+
+        let zero_root = compute_merkle_root(&zero_leaf, 0, &zero_siblings).unwrap();
+
+        // Should produce a valid (non-error) result
+        assert!(verify_merkle_proof(&zero_leaf, 0, &zero_siblings, &zero_root).unwrap());
+
+        // But different from a non-zero leaf
+        let nonzero_leaf = [1u8; 32];
+        let nonzero_root = compute_merkle_root(&nonzero_leaf, 0, &zero_siblings).unwrap();
+        assert_ne!(zero_root, nonzero_root);
+    }
 }
