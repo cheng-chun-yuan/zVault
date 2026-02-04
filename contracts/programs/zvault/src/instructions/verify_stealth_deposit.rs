@@ -70,9 +70,21 @@ impl VerifyStealthDepositV2Data {
         let mut txid = [0u8; 32];
         txid.copy_from_slice(&data[0..32]);
 
-        let block_height = u64::from_le_bytes(data[32..40].try_into().unwrap());
-        let amount_sats = u64::from_le_bytes(data[40..48].try_into().unwrap());
-        let tx_size = u32::from_le_bytes(data[48..52].try_into().unwrap());
+        let block_height = u64::from_le_bytes(
+            data[32..40]
+                .try_into()
+                .map_err(|_| ProgramError::InvalidInstructionData)?,
+        );
+        let amount_sats = u64::from_le_bytes(
+            data[40..48]
+                .try_into()
+                .map_err(|_| ProgramError::InvalidInstructionData)?,
+        );
+        let tx_size = u32::from_le_bytes(
+            data[48..52]
+                .try_into()
+                .map_err(|_| ProgramError::InvalidInstructionData)?,
+        );
 
         let mut ephemeral_pub = [0u8; 33];
         ephemeral_pub.copy_from_slice(&data[52..85]);

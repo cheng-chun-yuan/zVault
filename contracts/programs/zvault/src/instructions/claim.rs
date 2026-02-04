@@ -142,7 +142,11 @@ impl<'a> ClaimData<'a> {
         nullifier_hash.copy_from_slice(&data[offset..offset + 32]);
         offset += 32;
 
-        let amount_sats = u64::from_le_bytes(data[offset..offset + 8].try_into().unwrap());
+        let amount_sats = u64::from_le_bytes(
+            data[offset..offset + 8]
+                .try_into()
+                .map_err(|_| ProgramError::InvalidInstructionData)?
+        );
         offset += 8;
 
         let mut recipient = [0u8; 32];
@@ -178,7 +182,11 @@ impl<'a> ClaimData<'a> {
         nullifier_hash.copy_from_slice(&data[offset..offset + 32]);
         offset += 32;
 
-        let amount_sats = u64::from_le_bytes(data[offset..offset + 8].try_into().unwrap());
+        let amount_sats = u64::from_le_bytes(
+            data[offset..offset + 8]
+                .try_into()
+                .map_err(|_| ProgramError::InvalidInstructionData)?,
+        );
         offset += 8;
 
         let mut recipient = [0u8; 32];
@@ -202,7 +210,7 @@ impl<'a> ClaimData<'a> {
 
 /// Claim accounts
 ///
-/// ## Inline Mode (10 accounts)
+/// ## Inline Mode (11 accounts)
 /// 0. pool_state (writable) - Pool state PDA
 /// 1. commitment_tree (readonly) - Commitment tree for root validation
 /// 2. nullifier_record (writable) - Nullifier PDA (created)
@@ -213,9 +221,10 @@ impl<'a> ClaimData<'a> {
 /// 7. token_program - Token-2022 program
 /// 8. system_program - System program
 /// 9. ultrahonk_verifier - UltraHonk verifier program
+/// 10. vk_account (readonly) - Verification key account
 ///
-/// ## Buffer Mode (11 accounts - adds proof_buffer)
-/// 10. proof_buffer (readonly) - ChadBuffer account containing proof data
+/// ## Buffer Mode (12 accounts - adds proof_buffer)
+/// 11. proof_buffer (readonly) - ChadBuffer account containing proof data
 pub struct ClaimAccounts<'a> {
     pub pool_state: &'a AccountInfo,
     pub commitment_tree: &'a AccountInfo,
@@ -227,6 +236,7 @@ pub struct ClaimAccounts<'a> {
     pub token_program: &'a AccountInfo,
     pub system_program: &'a AccountInfo,
     pub ultrahonk_verifier: &'a AccountInfo,
+    pub vk_account: &'a AccountInfo,
     pub proof_buffer: Option<&'a AccountInfo>,
 }
 
@@ -235,7 +245,7 @@ impl<'a> ClaimAccounts<'a> {
         accounts: &'a [AccountInfo],
         use_buffer: bool,
     ) -> Result<Self, ProgramError> {
-        let min_accounts = if use_buffer { 11 } else { 10 };
+        let min_accounts = if use_buffer { 12 } else { 11 };
         if accounts.len() < min_accounts {
             return Err(ProgramError::NotEnoughAccountKeys);
         }
@@ -250,8 +260,9 @@ impl<'a> ClaimAccounts<'a> {
         let token_program = &accounts[7];
         let system_program = &accounts[8];
         let ultrahonk_verifier = &accounts[9];
+        let vk_account = &accounts[10];
         let proof_buffer = if use_buffer {
-            Some(&accounts[10])
+            Some(&accounts[11])
         } else {
             None
         };
@@ -272,6 +283,7 @@ impl<'a> ClaimAccounts<'a> {
             token_program,
             system_program,
             ultrahonk_verifier,
+            vk_account,
             proof_buffer,
         })
     }
@@ -393,6 +405,7 @@ pub fn process_claim(
 
             verify_ultrahonk_claim_proof(
                 accounts.ultrahonk_verifier,
+                accounts.vk_account,
                 proof,
                 &ix_data.root,
                 &ix_data.nullifier_hash,
@@ -417,6 +430,7 @@ pub fn process_claim(
             verify_ultrahonk_claim_proof_from_buffer(
                 accounts.ultrahonk_verifier,
                 proof_buffer_account,
+                accounts.vk_account,
                 &ix_data.root,
                 &ix_data.nullifier_hash,
                 ix_data.amount_sats,

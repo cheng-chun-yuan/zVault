@@ -19,7 +19,8 @@ use axum::{
 };
 use std::sync::Arc;
 use tokio::sync::RwLock;
-use tower_http::cors::{Any, CorsLayer};
+use axum::http::{header, Method};
+use tower_http::cors::CorsLayer;
 use tower_http::trace::TraceLayer;
 
 /// Application state shared across handlers
@@ -56,10 +57,30 @@ impl AppState {
 
 /// Create the router with all endpoints
 pub fn create_router(state: Arc<AppState>) -> Router {
+    // Production CORS configuration
+    // Restrict origins to production domains and localhost for development
+    let allowed_origins = [
+        "https://zvault.app",
+        "https://www.zvault.app",
+        "https://app.zvault.app",
+        "http://localhost:3000",     // Local Next.js development
+        "http://127.0.0.1:3000",     // Alternative localhost
+    ];
+
     let cors = CorsLayer::new()
-        .allow_origin(Any)
-        .allow_methods(Any)
-        .allow_headers(Any);
+        .allow_origin(
+            allowed_origins
+                .iter()
+                .filter_map(|o| o.parse().ok())
+                .collect::<Vec<_>>()
+        )
+        .allow_methods([Method::GET, Method::POST, Method::OPTIONS])
+        .allow_headers([
+            header::CONTENT_TYPE,
+            header::AUTHORIZATION,
+            header::ACCEPT,
+        ])
+        .max_age(std::time::Duration::from_secs(3600));
 
     Router::new()
         // Health & info

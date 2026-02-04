@@ -91,6 +91,7 @@
     "test:e2e:partial": "bun test test/e2e/partial-public.test.ts",
     "test:e2e:nullifier": "bun test test/e2e/nullifier.test.ts",
     "test:e2e:tree": "bun test test/e2e/tree-consistency.test.ts",
+    "test:real-proofs": "bun test test/e2e/real-proofs.test.ts --timeout 600000",
     "copy-circuits": "mkdir -p circuits && cp ../noir-circuits/target/zvault_*.json circuits/",
     "e2e": "bun run scripts/e2e-instructions.ts",
     "e2e:localnet": "NETWORK=localnet bun run scripts/e2e-instructions.ts",

@@ -148,15 +148,17 @@ pub fn build_ultrahonk_verify_data(
 ///
 /// # Arguments
 /// * `verifier_program` - The UltraHonk verifier program account
+/// * `vk_account` - The verification key account
 /// * `proof_bytes` - Raw proof from bb.js/mopro
 /// * `public_inputs` - Public inputs for the circuit
-/// * `vk_hash` - Hash of the verification key
+/// * `vk_hash` - Hash of the verification key for integrity check
 ///
 /// # Returns
 /// * `Ok(())` if proof is valid
 /// * `Err(ProgramError)` if proof is invalid or CPI fails
 pub fn verify_ultrahonk_proof_cpi(
     verifier_program: &AccountInfo,
+    vk_account: &AccountInfo,
     proof_bytes: &[u8],
     public_inputs: &[[u8; 32]],
     vk_hash: &[u8; 32],
@@ -164,16 +166,19 @@ pub fn verify_ultrahonk_proof_cpi(
     // Build instruction data
     let ix_data = build_ultrahonk_verify_data(proof_bytes, public_inputs, vk_hash);
 
-    // Create CPI instruction (no accounts needed for basic verification)
+    // Account meta for VK account
+    let account_metas = [AccountMeta::readonly(vk_account.key())];
+
+    // Create CPI instruction with VK account
     let instruction = Instruction {
         program_id: verifier_program.key(),
-        accounts: &[],
+        accounts: &account_metas,
         data: &ix_data,
     };
 
     // Invoke the verifier program
     // If verification fails, the verifier program returns an error
-    invoke(&instruction, &[])?;
+    invoke(&instruction, &[vk_account])?;
 
     Ok(())
 }
@@ -240,6 +245,7 @@ pub fn verify_ultrahonk_proof_with_vk_cpi(
 /// Recipient is bound to the proof - it cannot be changed after signing
 pub fn verify_ultrahonk_claim_proof(
     verifier_program: &AccountInfo,
+    vk_account: &AccountInfo,
     proof_bytes: &[u8],
     root: &[u8; 32],
     nullifier_hash: &[u8; 32],
@@ -259,7 +265,7 @@ pub fn verify_ultrahonk_claim_proof(
         *recipient,
     ];
 
-    verify_ultrahonk_proof_cpi(verifier_program, proof_bytes, &public_inputs, vk_hash)
+    verify_ultrahonk_proof_cpi(verifier_program, vk_account, proof_bytes, &public_inputs, vk_hash)
 }
 
 /// Verify claim proof from buffer (for large proofs > 10KB)
@@ -272,6 +278,7 @@ pub fn verify_ultrahonk_claim_proof(
 pub fn verify_ultrahonk_claim_proof_from_buffer(
     verifier_program: &AccountInfo,
     proof_buffer: &AccountInfo,
+    vk_account: &AccountInfo,
     root: &[u8; 32],
     nullifier_hash: &[u8; 32],
     amount: u64,
@@ -310,8 +317,11 @@ pub fn verify_ultrahonk_claim_proof_from_buffer(
     // VK hash
     ix_data.extend_from_slice(vk_hash);
 
-    // Account meta for proof buffer
-    let account_metas = [AccountMeta::readonly(proof_buffer.key())];
+    // Account metas: [proof_buffer, vk_account]
+    let account_metas = [
+        AccountMeta::readonly(proof_buffer.key()),
+        AccountMeta::readonly(vk_account.key()),
+    ];
 
     // Create CPI instruction
     let instruction = Instruction {
@@ -320,8 +330,8 @@ pub fn verify_ultrahonk_claim_proof_from_buffer(
         data: &ix_data,
     };
 
-    // Invoke with proof buffer account
-    invoke(&instruction, &[proof_buffer])?;
+    // Invoke with proof buffer and VK accounts
+    invoke(&instruction, &[proof_buffer, vk_account])?;
 
     Ok(())
 }
@@ -337,6 +347,7 @@ pub fn verify_ultrahonk_claim_proof_from_buffer(
 #[allow(clippy::too_many_arguments)]
 pub fn verify_ultrahonk_split_proof(
     verifier_program: &AccountInfo,
+    vk_account: &AccountInfo,
     proof_bytes: &[u8],
     root: &[u8; 32],
     nullifier_hash: &[u8; 32],
@@ -359,7 +370,7 @@ pub fn verify_ultrahonk_split_proof(
         *output2_encrypted_amount_with_sign,
     ];
 
-    verify_ultrahonk_proof_cpi(verifier_program, proof_bytes, &public_inputs, vk_hash)
+    verify_ultrahonk_proof_cpi(verifier_program, vk_account, proof_bytes, &public_inputs, vk_hash)
 }
 
 /// Verify split proof from buffer (for large proofs > 10KB)
@@ -374,6 +385,7 @@ pub fn verify_ultrahonk_split_proof(
 pub fn verify_ultrahonk_split_proof_from_buffer(
     verifier_program: &AccountInfo,
     proof_buffer: &AccountInfo,
+    vk_account: &AccountInfo,
     root: &[u8; 32],
     nullifier_hash: &[u8; 32],
     output_commitment_1: &[u8; 32],
@@ -409,7 +421,10 @@ pub fn verify_ultrahonk_split_proof_from_buffer(
 
     ix_data.extend_from_slice(vk_hash);
 
-    let account_metas = [AccountMeta::readonly(proof_buffer.key())];
+    let account_metas = [
+        AccountMeta::readonly(proof_buffer.key()),
+        AccountMeta::readonly(vk_account.key()),
+    ];
 
     let instruction = Instruction {
         program_id: verifier_program.key(),
@@ -417,7 +432,7 @@ pub fn verify_ultrahonk_split_proof_from_buffer(
         data: &ix_data,
     };
 
-    invoke(&instruction, &[proof_buffer])?;
+    invoke(&instruction, &[proof_buffer, vk_account])?;
 
     Ok(())
 }
@@ -433,6 +448,7 @@ pub fn verify_ultrahonk_split_proof_from_buffer(
 #[allow(clippy::too_many_arguments)]
 pub fn verify_ultrahonk_spend_partial_public_proof(
     verifier_program: &AccountInfo,
+    vk_account: &AccountInfo,
     proof_bytes: &[u8],
     root: &[u8; 32],
     nullifier_hash: &[u8; 32],
@@ -457,7 +473,7 @@ pub fn verify_ultrahonk_spend_partial_public_proof(
         *change_encrypted_amount_with_sign,
     ];
 
-    verify_ultrahonk_proof_cpi(verifier_program, proof_bytes, &public_inputs, vk_hash)
+    verify_ultrahonk_proof_cpi(verifier_program, vk_account, proof_bytes, &public_inputs, vk_hash)
 }
 
 /// Verify spend partial public proof from buffer (for large proofs > 10KB)
@@ -471,6 +487,7 @@ pub fn verify_ultrahonk_spend_partial_public_proof(
 pub fn verify_ultrahonk_spend_partial_public_proof_from_buffer(
     verifier_program: &AccountInfo,
     proof_buffer: &AccountInfo,
+    vk_account: &AccountInfo,
     root: &[u8; 32],
     nullifier_hash: &[u8; 32],
     public_amount: u64,
@@ -506,7 +523,10 @@ pub fn verify_ultrahonk_spend_partial_public_proof_from_buffer(
 
     ix_data.extend_from_slice(vk_hash);
 
-    let account_metas = [AccountMeta::readonly(proof_buffer.key())];
+    let account_metas = [
+        AccountMeta::readonly(proof_buffer.key()),
+        AccountMeta::readonly(vk_account.key()),
+    ];
 
     let instruction = Instruction {
         program_id: verifier_program.key(),
@@ -514,7 +534,7 @@ pub fn verify_ultrahonk_spend_partial_public_proof_from_buffer(
         data: &ix_data,
     };
 
-    invoke(&instruction, &[proof_buffer])?;
+    invoke(&instruction, &[proof_buffer, vk_account])?;
 
     Ok(())
 }
@@ -528,6 +548,7 @@ pub fn verify_ultrahonk_spend_partial_public_proof_from_buffer(
 /// Public inputs: [input_merkle_root, input_nullifier_hash, pool_commitment, principal]
 pub fn verify_ultrahonk_pool_deposit_proof(
     verifier_program: &AccountInfo,
+    vk_account: &AccountInfo,
     proof_bytes: &[u8],
     input_merkle_root: &[u8; 32],
     input_nullifier_hash: &[u8; 32],
@@ -545,7 +566,7 @@ pub fn verify_ultrahonk_pool_deposit_proof(
         principal_bytes,
     ];
 
-    verify_ultrahonk_proof_cpi(verifier_program, proof_bytes, &public_inputs, vk_hash)
+    verify_ultrahonk_proof_cpi(verifier_program, vk_account, proof_bytes, &public_inputs, vk_hash)
 }
 
 /// Verify pool withdraw proof for UltraHonk
@@ -553,6 +574,7 @@ pub fn verify_ultrahonk_pool_deposit_proof(
 /// Public inputs: [pool_merkle_root, pool_nullifier_hash, output_commitment, current_epoch, yield_rate_bps]
 pub fn verify_ultrahonk_pool_withdraw_proof(
     verifier_program: &AccountInfo,
+    vk_account: &AccountInfo,
     proof_bytes: &[u8],
     pool_merkle_root: &[u8; 32],
     pool_nullifier_hash: &[u8; 32],
@@ -575,7 +597,7 @@ pub fn verify_ultrahonk_pool_withdraw_proof(
         rate_bytes,
     ];
 
-    verify_ultrahonk_proof_cpi(verifier_program, proof_bytes, &public_inputs, vk_hash)
+    verify_ultrahonk_proof_cpi(verifier_program, vk_account, proof_bytes, &public_inputs, vk_hash)
 }
 
 /// Verify pool claim yield proof for UltraHonk
@@ -584,6 +606,7 @@ pub fn verify_ultrahonk_pool_withdraw_proof(
 #[allow(clippy::too_many_arguments)]
 pub fn verify_ultrahonk_pool_claim_yield_proof(
     verifier_program: &AccountInfo,
+    vk_account: &AccountInfo,
     proof_bytes: &[u8],
     pool_merkle_root: &[u8; 32],
     old_nullifier_hash: &[u8; 32],
@@ -608,7 +631,7 @@ pub fn verify_ultrahonk_pool_claim_yield_proof(
         rate_bytes,
     ];
 
-    verify_ultrahonk_proof_cpi(verifier_program, proof_bytes, &public_inputs, vk_hash)
+    verify_ultrahonk_proof_cpi(verifier_program, vk_account, proof_bytes, &public_inputs, vk_hash)
 }
 
 /// Verify pool compound proof for UltraHonk
@@ -616,6 +639,7 @@ pub fn verify_ultrahonk_pool_claim_yield_proof(
 /// Public inputs: [pool_merkle_root, old_nullifier_hash, new_pool_commitment, current_epoch, yield_rate_bps]
 pub fn verify_ultrahonk_pool_compound_proof(
     verifier_program: &AccountInfo,
+    vk_account: &AccountInfo,
     proof_bytes: &[u8],
     pool_merkle_root: &[u8; 32],
     old_nullifier_hash: &[u8; 32],
@@ -638,7 +662,7 @@ pub fn verify_ultrahonk_pool_compound_proof(
         rate_bytes,
     ];
 
-    verify_ultrahonk_proof_cpi(verifier_program, proof_bytes, &public_inputs, vk_hash)
+    verify_ultrahonk_proof_cpi(verifier_program, vk_account, proof_bytes, &public_inputs, vk_hash)
 }
 
 #[cfg(test)]

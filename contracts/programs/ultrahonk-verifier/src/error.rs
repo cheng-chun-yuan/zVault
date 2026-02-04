@@ -35,6 +35,8 @@ pub enum UltraHonkError {
     BufferTooSmall,
     /// Computation overflow
     Overflow,
+    /// VK hash mismatch - computed hash doesn't match provided hash
+    VkHashMismatch,
 }
 
 impl From<UltraHonkError> for ProgramError {
@@ -55,6 +57,7 @@ impl From<UltraHonkError> for ProgramError {
             UltraHonkError::Bn254SyscallError => ProgramError::InvalidArgument,
             UltraHonkError::BufferTooSmall => ProgramError::AccountDataTooSmall,
             UltraHonkError::Overflow => ProgramError::ArithmeticOverflow,
+            UltraHonkError::VkHashMismatch => ProgramError::InvalidArgument,
         }
     }
 }

@@ -85,22 +85,38 @@ impl<'a> CompoundYieldData<'a> {
         let proof = &data[5..5 + proof_len];
         let mut offset = 5 + proof_len;
 
-        let old_nullifier_hash: &[u8; 32] = data[offset..offset + 32].try_into().unwrap();
+        let old_nullifier_hash: &[u8; 32] = data[offset..offset + 32]
+            .try_into()
+            .map_err(|_| ProgramError::InvalidInstructionData)?;
         offset += 32;
 
-        let new_pool_commitment: &[u8; 32] = data[offset..offset + 32].try_into().unwrap();
+        let new_pool_commitment: &[u8; 32] = data[offset..offset + 32]
+            .try_into()
+            .map_err(|_| ProgramError::InvalidInstructionData)?;
         offset += 32;
 
-        let pool_merkle_root: &[u8; 32] = data[offset..offset + 32].try_into().unwrap();
+        let pool_merkle_root: &[u8; 32] = data[offset..offset + 32]
+            .try_into()
+            .map_err(|_| ProgramError::InvalidInstructionData)?;
         offset += 32;
 
-        let old_principal = u64::from_le_bytes(data[offset..offset + 8].try_into().unwrap());
+        let old_principal = u64::from_le_bytes(
+            data[offset..offset + 8]
+                .try_into()
+                .map_err(|_| ProgramError::InvalidInstructionData)?,
+        );
         offset += 8;
 
-        let deposit_epoch = u64::from_le_bytes(data[offset..offset + 8].try_into().unwrap());
+        let deposit_epoch = u64::from_le_bytes(
+            data[offset..offset + 8]
+                .try_into()
+                .map_err(|_| ProgramError::InvalidInstructionData)?,
+        );
         offset += 8;
 
-        let vk_hash: &[u8; 32] = data[offset..offset + 32].try_into().unwrap();
+        let vk_hash: &[u8; 32] = data[offset..offset + 32]
+            .try_into()
+            .map_err(|_| ProgramError::InvalidInstructionData)?;
 
         Ok(Self {
             proof_source: CompoundProofSource::Inline,
@@ -121,22 +137,38 @@ impl<'a> CompoundYieldData<'a> {
 
         let mut offset = 1;
 
-        let old_nullifier_hash: &[u8; 32] = data[offset..offset + 32].try_into().unwrap();
+        let old_nullifier_hash: &[u8; 32] = data[offset..offset + 32]
+            .try_into()
+            .map_err(|_| ProgramError::InvalidInstructionData)?;
         offset += 32;
 
-        let new_pool_commitment: &[u8; 32] = data[offset..offset + 32].try_into().unwrap();
+        let new_pool_commitment: &[u8; 32] = data[offset..offset + 32]
+            .try_into()
+            .map_err(|_| ProgramError::InvalidInstructionData)?;
         offset += 32;
 
-        let pool_merkle_root: &[u8; 32] = data[offset..offset + 32].try_into().unwrap();
+        let pool_merkle_root: &[u8; 32] = data[offset..offset + 32]
+            .try_into()
+            .map_err(|_| ProgramError::InvalidInstructionData)?;
         offset += 32;
 
-        let old_principal = u64::from_le_bytes(data[offset..offset + 8].try_into().unwrap());
+        let old_principal = u64::from_le_bytes(
+            data[offset..offset + 8]
+                .try_into()
+                .map_err(|_| ProgramError::InvalidInstructionData)?,
+        );
         offset += 8;
 
-        let deposit_epoch = u64::from_le_bytes(data[offset..offset + 8].try_into().unwrap());
+        let deposit_epoch = u64::from_le_bytes(
+            data[offset..offset + 8]
+                .try_into()
+                .map_err(|_| ProgramError::InvalidInstructionData)?,
+        );
         offset += 8;
 
-        let vk_hash: &[u8; 32] = data[offset..offset + 32].try_into().unwrap();
+        let vk_hash: &[u8; 32] = data[offset..offset + 32]
+            .try_into()
+            .map_err(|_| ProgramError::InvalidInstructionData)?;
 
         Ok(Self {
             proof_source: CompoundProofSource::Buffer,
@@ -159,12 +191,13 @@ pub struct CompoundYieldAccounts<'a> {
     pub compounder: &'a AccountInfo,
     pub system_program: &'a AccountInfo,
     pub ultrahonk_verifier: &'a AccountInfo,
+    pub vk_account: &'a AccountInfo,
     pub proof_buffer: Option<&'a AccountInfo>,
 }
 
 impl<'a> CompoundYieldAccounts<'a> {
     pub fn from_accounts(accounts: &'a [AccountInfo], use_buffer: bool) -> Result<Self, ProgramError> {
-        let min_accounts = if use_buffer { 7 } else { 6 };
+        let min_accounts = if use_buffer { 8 } else { 7 };
         if accounts.len() < min_accounts {
             return Err(ProgramError::NotEnoughAccountKeys);
         }
@@ -180,7 +213,8 @@ impl<'a> CompoundYieldAccounts<'a> {
             compounder: &accounts[3],
             system_program: &accounts[4],
             ultrahonk_verifier: &accounts[5],
-            proof_buffer: if use_buffer { Some(&accounts[6]) } else { None },
+            vk_account: &accounts[6],
+            proof_buffer: if use_buffer { Some(&accounts[7]) } else { None },
         })
     }
 }
@@ -307,6 +341,7 @@ pub fn process_compound_yield(
             pinocchio::msg!("Verifying UltraHonk compound proof (inline)...");
             verify_ultrahonk_pool_compound_proof(
                 accounts.ultrahonk_verifier,
+                accounts.vk_account,
                 proof,
                 ix_data.pool_merkle_root,
                 ix_data.old_nullifier_hash,
@@ -332,6 +367,7 @@ pub fn process_compound_yield(
             pinocchio::msg!("Verifying UltraHonk compound proof (buffer)...");
             verify_ultrahonk_pool_compound_proof(
                 accounts.ultrahonk_verifier,
+                accounts.vk_account,
                 proof,
                 ix_data.pool_merkle_root,
                 ix_data.old_nullifier_hash,

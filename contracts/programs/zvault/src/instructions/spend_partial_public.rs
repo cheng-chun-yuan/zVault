@@ -67,22 +67,36 @@ impl<'a> SpendPartialPublicData<'a> {
 
         let mut offset = 0;
 
-        let root: &[u8; 32] = data[offset..offset + 32].try_into().unwrap();
+        let root: &[u8; 32] = data[offset..offset + 32]
+            .try_into()
+            .map_err(|_| ProgramError::InvalidInstructionData)?;
         offset += 32;
 
-        let nullifier_hash: &[u8; 32] = data[offset..offset + 32].try_into().unwrap();
+        let nullifier_hash: &[u8; 32] = data[offset..offset + 32]
+            .try_into()
+            .map_err(|_| ProgramError::InvalidInstructionData)?;
         offset += 32;
 
-        let public_amount = u64::from_le_bytes(data[offset..offset + 8].try_into().unwrap());
+        let public_amount = u64::from_le_bytes(
+            data[offset..offset + 8]
+                .try_into()
+                .map_err(|_| ProgramError::InvalidInstructionData)?,
+        );
         offset += 8;
 
-        let change_commitment: &[u8; 32] = data[offset..offset + 32].try_into().unwrap();
+        let change_commitment: &[u8; 32] = data[offset..offset + 32]
+            .try_into()
+            .map_err(|_| ProgramError::InvalidInstructionData)?;
         offset += 32;
 
-        let recipient: &[u8; 32] = data[offset..offset + 32].try_into().unwrap();
+        let recipient: &[u8; 32] = data[offset..offset + 32]
+            .try_into()
+            .map_err(|_| ProgramError::InvalidInstructionData)?;
         offset += 32;
 
-        let vk_hash: &[u8; 32] = data[offset..offset + 32].try_into().unwrap();
+        let vk_hash: &[u8; 32] = data[offset..offset + 32]
+            .try_into()
+            .map_err(|_| ProgramError::InvalidInstructionData)?;
         offset += 32;
 
         let mut change_ephemeral_pub_x = [0u8; 32];

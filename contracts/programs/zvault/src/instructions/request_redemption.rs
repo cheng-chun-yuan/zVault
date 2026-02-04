@@ -63,7 +63,11 @@ impl RequestRedemptionData {
         let mut nullifier_hash = [0u8; 32];
         nullifier_hash.copy_from_slice(&data[64..96]);
 
-        let amount_sats = u64::from_le_bytes(data[96..104].try_into().unwrap());
+        let amount_sats = u64::from_le_bytes(
+            data[96..104]
+                .try_into()
+                .map_err(|_| ProgramError::InvalidInstructionData)?,
+        );
 
         let mut vk_hash = [0u8; 32];
         vk_hash.copy_from_slice(&data[104..136]);
@@ -81,7 +85,11 @@ impl RequestRedemptionData {
         let mut btc_address = [0u8; 62];
         btc_address[..btc_address_len as usize].copy_from_slice(&data[137..addr_end]);
 
-        let request_nonce = u64::from_le_bytes(data[addr_end..addr_end + 8].try_into().unwrap());
+        let request_nonce = u64::from_le_bytes(
+            data[addr_end..addr_end + 8]
+                .try_into()
+                .map_err(|_| ProgramError::InvalidInstructionData)?,
+        );
 
         Ok(Self {
             proof_hash,

@@ -89,19 +89,31 @@ impl<'a> DepositToPoolData<'a> {
         let proof = &data[5..5 + proof_len];
         let mut offset = 5 + proof_len;
 
-        let input_nullifier_hash: &[u8; 32] = data[offset..offset + 32].try_into().unwrap();
+        let input_nullifier_hash: &[u8; 32] = data[offset..offset + 32]
+            .try_into()
+            .map_err(|_| ProgramError::InvalidInstructionData)?;
         offset += 32;
 
-        let pool_commitment: &[u8; 32] = data[offset..offset + 32].try_into().unwrap();
+        let pool_commitment: &[u8; 32] = data[offset..offset + 32]
+            .try_into()
+            .map_err(|_| ProgramError::InvalidInstructionData)?;
         offset += 32;
 
-        let principal = u64::from_le_bytes(data[offset..offset + 8].try_into().unwrap());
+        let principal = u64::from_le_bytes(
+            data[offset..offset + 8]
+                .try_into()
+                .map_err(|_| ProgramError::InvalidInstructionData)?,
+        );
         offset += 8;
 
-        let input_merkle_root: &[u8; 32] = data[offset..offset + 32].try_into().unwrap();
+        let input_merkle_root: &[u8; 32] = data[offset..offset + 32]
+            .try_into()
+            .map_err(|_| ProgramError::InvalidInstructionData)?;
         offset += 32;
 
-        let vk_hash: &[u8; 32] = data[offset..offset + 32].try_into().unwrap();
+        let vk_hash: &[u8; 32] = data[offset..offset + 32]
+            .try_into()
+            .map_err(|_| ProgramError::InvalidInstructionData)?;
 
         Ok(Self {
             proof_source: PoolDepositProofSource::Inline,
@@ -121,19 +133,31 @@ impl<'a> DepositToPoolData<'a> {
 
         let mut offset = 1;
 
-        let input_nullifier_hash: &[u8; 32] = data[offset..offset + 32].try_into().unwrap();
+        let input_nullifier_hash: &[u8; 32] = data[offset..offset + 32]
+            .try_into()
+            .map_err(|_| ProgramError::InvalidInstructionData)?;
         offset += 32;
 
-        let pool_commitment: &[u8; 32] = data[offset..offset + 32].try_into().unwrap();
+        let pool_commitment: &[u8; 32] = data[offset..offset + 32]
+            .try_into()
+            .map_err(|_| ProgramError::InvalidInstructionData)?;
         offset += 32;
 
-        let principal = u64::from_le_bytes(data[offset..offset + 8].try_into().unwrap());
+        let principal = u64::from_le_bytes(
+            data[offset..offset + 8]
+                .try_into()
+                .map_err(|_| ProgramError::InvalidInstructionData)?,
+        );
         offset += 8;
 
-        let input_merkle_root: &[u8; 32] = data[offset..offset + 32].try_into().unwrap();
+        let input_merkle_root: &[u8; 32] = data[offset..offset + 32]
+            .try_into()
+            .map_err(|_| ProgramError::InvalidInstructionData)?;
         offset += 32;
 
-        let vk_hash: &[u8; 32] = data[offset..offset + 32].try_into().unwrap();
+        let vk_hash: &[u8; 32] = data[offset..offset + 32]
+            .try_into()
+            .map_err(|_| ProgramError::InvalidInstructionData)?;
 
         Ok(Self {
             proof_source: PoolDepositProofSource::Buffer,
@@ -156,12 +180,13 @@ pub struct DepositToPoolAccounts<'a> {
     pub depositor: &'a AccountInfo,
     pub system_program: &'a AccountInfo,
     pub ultrahonk_verifier: &'a AccountInfo,
+    pub vk_account: &'a AccountInfo,
     pub proof_buffer: Option<&'a AccountInfo>,
 }
 
 impl<'a> DepositToPoolAccounts<'a> {
     pub fn from_accounts(accounts: &'a [AccountInfo], use_buffer: bool) -> Result<Self, ProgramError> {
-        let min_accounts = if use_buffer { 8 } else { 7 };
+        let min_accounts = if use_buffer { 9 } else { 8 };
         if accounts.len() < min_accounts {
             return Err(ProgramError::NotEnoughAccountKeys);
         }
@@ -173,7 +198,8 @@ impl<'a> DepositToPoolAccounts<'a> {
         let depositor = &accounts[4];
         let system_program = &accounts[5];
         let ultrahonk_verifier = &accounts[6];
-        let proof_buffer = if use_buffer { Some(&accounts[7]) } else { None };
+        let vk_account = &accounts[7];
+        let proof_buffer = if use_buffer { Some(&accounts[8]) } else { None };
 
         if !depositor.is_signer() {
             return Err(ProgramError::MissingRequiredSignature);
@@ -187,6 +213,7 @@ impl<'a> DepositToPoolAccounts<'a> {
             depositor,
             system_program,
             ultrahonk_verifier,
+            vk_account,
             proof_buffer,
         })
     }
@@ -274,6 +301,7 @@ pub fn process_deposit_to_pool(
             pinocchio::msg!("Verifying UltraHonk pool deposit proof (inline)...");
             verify_ultrahonk_pool_deposit_proof(
                 accounts.ultrahonk_verifier,
+                accounts.vk_account,
                 proof,
                 ix_data.input_merkle_root,
                 ix_data.input_nullifier_hash,
@@ -300,6 +328,7 @@ pub fn process_deposit_to_pool(
             pinocchio::msg!("Verifying UltraHonk pool deposit proof (buffer)...");
             verify_ultrahonk_pool_deposit_proof(
                 accounts.ultrahonk_verifier,
+                accounts.vk_account,
                 proof,
                 ix_data.input_merkle_root,
                 ix_data.input_nullifier_hash,

@@ -86,25 +86,43 @@ impl<'a> ClaimPoolYieldData<'a> {
         let proof = &data[5..5 + proof_len];
         let mut offset = 5 + proof_len;
 
-        let old_nullifier_hash: &[u8; 32] = data[offset..offset + 32].try_into().unwrap();
+        let old_nullifier_hash: &[u8; 32] = data[offset..offset + 32]
+            .try_into()
+            .map_err(|_| ProgramError::InvalidInstructionData)?;
         offset += 32;
 
-        let new_pool_commitment: &[u8; 32] = data[offset..offset + 32].try_into().unwrap();
+        let new_pool_commitment: &[u8; 32] = data[offset..offset + 32]
+            .try_into()
+            .map_err(|_| ProgramError::InvalidInstructionData)?;
         offset += 32;
 
-        let yield_commitment: &[u8; 32] = data[offset..offset + 32].try_into().unwrap();
+        let yield_commitment: &[u8; 32] = data[offset..offset + 32]
+            .try_into()
+            .map_err(|_| ProgramError::InvalidInstructionData)?;
         offset += 32;
 
-        let pool_merkle_root: &[u8; 32] = data[offset..offset + 32].try_into().unwrap();
+        let pool_merkle_root: &[u8; 32] = data[offset..offset + 32]
+            .try_into()
+            .map_err(|_| ProgramError::InvalidInstructionData)?;
         offset += 32;
 
-        let principal = u64::from_le_bytes(data[offset..offset + 8].try_into().unwrap());
+        let principal = u64::from_le_bytes(
+            data[offset..offset + 8]
+                .try_into()
+                .map_err(|_| ProgramError::InvalidInstructionData)?,
+        );
         offset += 8;
 
-        let deposit_epoch = u64::from_le_bytes(data[offset..offset + 8].try_into().unwrap());
+        let deposit_epoch = u64::from_le_bytes(
+            data[offset..offset + 8]
+                .try_into()
+                .map_err(|_| ProgramError::InvalidInstructionData)?,
+        );
         offset += 8;
 
-        let vk_hash: &[u8; 32] = data[offset..offset + 32].try_into().unwrap();
+        let vk_hash: &[u8; 32] = data[offset..offset + 32]
+            .try_into()
+            .map_err(|_| ProgramError::InvalidInstructionData)?;
 
         Ok(Self {
             proof_source: ClaimYieldProofSource::Inline,
@@ -126,25 +144,43 @@ impl<'a> ClaimPoolYieldData<'a> {
 
         let mut offset = 1;
 
-        let old_nullifier_hash: &[u8; 32] = data[offset..offset + 32].try_into().unwrap();
+        let old_nullifier_hash: &[u8; 32] = data[offset..offset + 32]
+            .try_into()
+            .map_err(|_| ProgramError::InvalidInstructionData)?;
         offset += 32;
 
-        let new_pool_commitment: &[u8; 32] = data[offset..offset + 32].try_into().unwrap();
+        let new_pool_commitment: &[u8; 32] = data[offset..offset + 32]
+            .try_into()
+            .map_err(|_| ProgramError::InvalidInstructionData)?;
         offset += 32;
 
-        let yield_commitment: &[u8; 32] = data[offset..offset + 32].try_into().unwrap();
+        let yield_commitment: &[u8; 32] = data[offset..offset + 32]
+            .try_into()
+            .map_err(|_| ProgramError::InvalidInstructionData)?;
         offset += 32;
 
-        let pool_merkle_root: &[u8; 32] = data[offset..offset + 32].try_into().unwrap();
+        let pool_merkle_root: &[u8; 32] = data[offset..offset + 32]
+            .try_into()
+            .map_err(|_| ProgramError::InvalidInstructionData)?;
         offset += 32;
 
-        let principal = u64::from_le_bytes(data[offset..offset + 8].try_into().unwrap());
+        let principal = u64::from_le_bytes(
+            data[offset..offset + 8]
+                .try_into()
+                .map_err(|_| ProgramError::InvalidInstructionData)?,
+        );
         offset += 8;
 
-        let deposit_epoch = u64::from_le_bytes(data[offset..offset + 8].try_into().unwrap());
+        let deposit_epoch = u64::from_le_bytes(
+            data[offset..offset + 8]
+                .try_into()
+                .map_err(|_| ProgramError::InvalidInstructionData)?,
+        );
         offset += 8;
 
-        let vk_hash: &[u8; 32] = data[offset..offset + 32].try_into().unwrap();
+        let vk_hash: &[u8; 32] = data[offset..offset + 32]
+            .try_into()
+            .map_err(|_| ProgramError::InvalidInstructionData)?;
 
         Ok(Self {
             proof_source: ClaimYieldProofSource::Buffer,
@@ -169,12 +205,13 @@ pub struct ClaimPoolYieldAccounts<'a> {
     pub claimer: &'a AccountInfo,
     pub system_program: &'a AccountInfo,
     pub ultrahonk_verifier: &'a AccountInfo,
+    pub vk_account: &'a AccountInfo,
     pub proof_buffer: Option<&'a AccountInfo>,
 }
 
 impl<'a> ClaimPoolYieldAccounts<'a> {
     pub fn from_accounts(accounts: &'a [AccountInfo], use_buffer: bool) -> Result<Self, ProgramError> {
-        let min_accounts = if use_buffer { 8 } else { 7 };
+        let min_accounts = if use_buffer { 9 } else { 8 };
         if accounts.len() < min_accounts {
             return Err(ProgramError::NotEnoughAccountKeys);
         }
@@ -191,7 +228,8 @@ impl<'a> ClaimPoolYieldAccounts<'a> {
             claimer: &accounts[4],
             system_program: &accounts[5],
             ultrahonk_verifier: &accounts[6],
-            proof_buffer: if use_buffer { Some(&accounts[7]) } else { None },
+            vk_account: &accounts[7],
+            proof_buffer: if use_buffer { Some(&accounts[8]) } else { None },
         })
     }
 }
@@ -316,6 +354,7 @@ pub fn process_claim_pool_yield(
             pinocchio::msg!("Verifying UltraHonk claim yield proof (inline)...");
             verify_ultrahonk_pool_claim_yield_proof(
                 accounts.ultrahonk_verifier,
+                accounts.vk_account,
                 proof,
                 ix_data.pool_merkle_root,
                 ix_data.old_nullifier_hash,
@@ -342,6 +381,7 @@ pub fn process_claim_pool_yield(
             pinocchio::msg!("Verifying UltraHonk claim yield proof (buffer)...");
             verify_ultrahonk_pool_claim_yield_proof(
                 accounts.ultrahonk_verifier,
+                accounts.vk_account,
                 proof,
                 ix_data.pool_merkle_root,
                 ix_data.old_nullifier_hash,

@@ -12,6 +12,7 @@ crate-type = ["cdylib", "lib"]
 default = []
 no-entrypoint = []
 cpi = ["no-entrypoint"]
+# devnet feature only affects log verbosity, NOT verification logic
 devnet = []
 
 [dependencies]
