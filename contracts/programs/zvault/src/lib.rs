@@ -67,7 +67,7 @@ pub mod instruction {
     pub const TRANSFER_NAME: u8 = 19;
 
     // Demo/testing (admin only) - DISABLED IN PRODUCTION
-    #[cfg(feature = "devnet")]
+    #[cfg(any(feature = "devnet", feature = "localnet"))]
     pub const ADD_DEMO_STEALTH: u8 = 22;
 
     // Unified stealth deposit (authority only) - THE deposit instruction
@@ -136,7 +136,7 @@ pub fn process_instruction(
             instructions::process_transfer_name(program_id, accounts, data)
         }
         // Demo/testing - DISABLED IN PRODUCTION
-        #[cfg(feature = "devnet")]
+        #[cfg(any(feature = "devnet", feature = "localnet"))]
         instruction::ADD_DEMO_STEALTH => {
             instructions::process_add_demo_stealth(program_id, accounts, data)
         }
@@ -253,7 +253,7 @@ mod tests {
             instruction::INIT_VK_REGISTRY,
             instruction::UPDATE_VK_REGISTRY,
             // Demo instructions (only in devnet builds)
-            #[cfg(feature = "devnet")]
+            #[cfg(any(feature = "devnet", feature = "localnet"))]
             instruction::ADD_DEMO_STEALTH,
         ];
 
