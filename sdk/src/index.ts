@@ -150,7 +150,10 @@ export {
 export {
   poseidonHash,
   poseidonHashSync,
+  merkleHashSync,
   initPoseidon,
+  useLocalnetMode,
+  isLocalnetMode,
   computeUnifiedCommitment,
   computeNullifier,
   hashNullifier,
@@ -679,6 +682,7 @@ export {
   buildPoolClaimYieldInstruction,
   // Verifier instruction builders (for instruction introspection pattern)
   buildVerifyFromBufferInstruction,
+  buildClaimVerifierInputs,
   buildPartialPublicVerifierInputs,
   buildSplitVerifierInputs,
   // Utilities

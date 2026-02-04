@@ -30,7 +30,7 @@ import {
 
 import {
   createTestNote,
-  createMockMerkleProof,
+  createRealMerkleProof,
   verifyMerkleProof,
   bigintToBytes32,
   bytes32ToBigint,
@@ -330,7 +330,7 @@ describe("TREE CONSISTENCY E2E", () => {
   describe("Merkle Proof Verification", () => {
     it("should verify proof with correct commitment", () => {
       const note = createTestNote(TEST_AMOUNTS.small);
-      const proof = createMockMerkleProof(note.commitment);
+      const proof = createRealMerkleProof(note.commitment);
 
       const isValid = verifyMerkleProof(note.commitment, proof);
       expect(isValid).toBe(true);
@@ -341,7 +341,7 @@ describe("TREE CONSISTENCY E2E", () => {
       const note2 = createTestNote(TEST_AMOUNTS.medium);
 
       // Create proof for note1
-      const proof = createMockMerkleProof(note1.commitment);
+      const proof = createRealMerkleProof(note1.commitment);
 
       // Try to verify with note2's commitment (should fail)
       const isValid = verifyMerkleProof(note2.commitment, proof);
@@ -350,7 +350,7 @@ describe("TREE CONSISTENCY E2E", () => {
 
     it("should reject proof with tampered sibling", () => {
       const note = createTestNote(TEST_AMOUNTS.small);
-      const proof = createMockMerkleProof(note.commitment);
+      const proof = createRealMerkleProof(note.commitment);
 
       // Tamper with a sibling
       const tamperedProof: MerkleProof = {
@@ -365,7 +365,7 @@ describe("TREE CONSISTENCY E2E", () => {
 
     it("should reject proof with wrong path", () => {
       const note = createTestNote(TEST_AMOUNTS.small);
-      const proof = createMockMerkleProof(note.commitment);
+      const proof = createRealMerkleProof(note.commitment);
 
       // Flip a path index
       const tamperedProof: MerkleProof = {

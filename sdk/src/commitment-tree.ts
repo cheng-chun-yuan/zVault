@@ -8,10 +8,10 @@
  * Standard Merkle path proofs compatible with ZK circuits.
  */
 
-import { poseidonHashSync, initPoseidon } from "./poseidon";
+import { poseidonHashSync, merkleHashSync, initPoseidon, useLocalnetMode, isLocalnetMode } from "./poseidon";
 
-// Re-export initPoseidon for tree initialization
-export { initPoseidon };
+// Re-export for tree initialization and localnet mode
+export { initPoseidon, useLocalnetMode, isLocalnetMode };
 
 /**
  * Convert Uint8Array to bigint (little-endian)
@@ -245,10 +245,10 @@ export class CommitmentTreeIndex {
       if (currentIndex % 2 === 0) {
         // This is a left child - save to frontier and pair with zero hash
         this.frontier[level] = currentHash;
-        currentHash = poseidonHashSync([currentHash, ZERO_HASHES[level]]);
+        currentHash = merkleHashSync(currentHash, ZERO_HASHES[level]);
       } else {
         // This is a right child - pair with frontier (left sibling)
-        currentHash = poseidonHashSync([this.frontier[level], currentHash]);
+        currentHash = merkleHashSync(this.frontier[level], currentHash);
       }
       currentIndex = Math.floor(currentIndex / 2);
     }
@@ -339,7 +339,7 @@ export class CommitmentTreeIndex {
       for (let i = 0; i < numPairs; i++) {
         const left = currentLevel[i * 2] ?? ZERO_HASHES[level];
         const right = currentLevel[i * 2 + 1] ?? ZERO_HASHES[level];
-        nextLevel.push(poseidonHashSync([left, right]));
+        nextLevel.push(merkleHashSync(left, right));
       }
 
       // If our path goes beyond the computed nodes, we need to add zero-hash parents

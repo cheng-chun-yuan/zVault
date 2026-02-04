@@ -29,9 +29,7 @@ import {
 
 import {
   createTestNote,
-  generateMockProof,
-  generateMockVkHash,
-  createMockMerkleProof,
+  getVkHashForCircuit,
   bigintToBytes32,
   bytesToHex,
   TEST_AMOUNTS,

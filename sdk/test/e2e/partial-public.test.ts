@@ -30,12 +30,12 @@ import {
 
 import {
   createTestNote,
-  generateMockProof,
-  generateMockVkHash,
-  createMockMerkleProof,
+  getVkHashForCircuit,
+  createRealMerkleProof,
   bigintToBytes32,
   bytesToHex,
   TEST_AMOUNTS,
+  generateRealSpendPartialPublicProof,
   type TestNote,
 } from "./helpers";
 
@@ -47,7 +47,7 @@ import {
 } from "./stealth-helpers";
 
 import { initPoseidon, computeUnifiedCommitmentSync } from "../../src/poseidon";
-import { bigintToBytes, bytesToBigint } from "../../src/crypto";
+import { bigintToBytes, bytesToBigint, randomFieldElement } from "../../src/crypto";
 import { createStealthDeposit, extractYSign, packEncryptedAmountWithSign } from "../../src/stealth";
 import { createStealthMetaAddress } from "../../src/keys";
 import {
@@ -106,17 +106,14 @@ function createPartialPublicOutputs(
   // Create change note
   const changeNote = createTestNote(changeAmount, inputNote.leafIndex + 1n);
 
-  // Create mock stealth output data (32 bytes each)
-  // In real usage, these come from createStealthDeposit
-  const changeEphemeralPubX = new Uint8Array(32);
-  crypto.getRandomValues(changeEphemeralPubX);
+  // Create field-safe stealth output data (must be within BN254 field modulus)
+  // Use randomFieldElement which ensures values are within field bounds
+  const changeEphemeralPubXBigint = randomFieldElement();
+  const changeEncryptedAmountWithSignBigint = changeAmount; // Amount with y-sign bit 0
 
-  const changeEncryptedAmountWithSign = new Uint8Array(32);
-  // Pack amount in first 8 bytes (little-endian)
-  const view = new DataView(changeEncryptedAmountWithSign.buffer);
-  view.setBigUint64(0, changeAmount, true);
-  // Random padding for the rest (simulating encryption)
-  crypto.getRandomValues(changeEncryptedAmountWithSign.subarray(8));
+  // Convert to bytes for instruction building
+  const changeEphemeralPubX = bigintToBytes(changeEphemeralPubXBigint, 32);
+  const changeEncryptedAmountWithSign = bigintToBytes(changeEncryptedAmountWithSignBigint, 32);
 
   return {
     publicAmount,
@@ -203,7 +200,7 @@ describe("SPEND_PARTIAL_PUBLIC E2E", () => {
   describe("Instruction Building", () => {
     it("should build valid spend partial public instruction with buffer", async () => {
       const input = createTestNote(TEST_AMOUNTS.small);
-      const merkleProof = createMockMerkleProof(input.commitment);
+      const merkleProof = createRealMerkleProof(input.commitment);
       const outputs = createPartialPublicOutputs(input, 60_000n);
 
       const bufferAddress = address(PublicKey.default.toBase58());
@@ -227,7 +224,7 @@ describe("SPEND_PARTIAL_PUBLIC E2E", () => {
         publicAmountSats: outputs.publicAmount,
         changeCommitment: outputs.changeNote.commitmentBytes,
         recipient: address(outputs.recipient.toBase58()),
-        vkHash: generateMockVkHash(),
+        vkHash: getVkHashForCircuit("spend_partial_public"),
         changeEphemeralPubX: outputs.changeEphemeralPubX,
         changeEncryptedAmountWithSign: outputs.changeEncryptedAmountWithSign,
         accounts: {
@@ -253,7 +250,7 @@ describe("SPEND_PARTIAL_PUBLIC E2E", () => {
 
     it("should have correct data format", async () => {
       const input = createTestNote(TEST_AMOUNTS.medium);
-      const merkleProof = createMockMerkleProof(input.commitment);
+      const merkleProof = createRealMerkleProof(input.commitment);
       const outputs = createPartialPublicOutputs(input, 600_000n);
 
       const bufferAddress = address(PublicKey.default.toBase58());
@@ -276,7 +273,7 @@ describe("SPEND_PARTIAL_PUBLIC E2E", () => {
         publicAmountSats: outputs.publicAmount,
         changeCommitment: outputs.changeNote.commitmentBytes,
         recipient: address(outputs.recipient.toBase58()),
-        vkHash: generateMockVkHash(),
+        vkHash: getVkHashForCircuit("spend_partial_public"),
         changeEphemeralPubX: outputs.changeEphemeralPubX,
         changeEncryptedAmountWithSign: outputs.changeEncryptedAmountWithSign,
         accounts: {
@@ -298,7 +295,7 @@ describe("SPEND_PARTIAL_PUBLIC E2E", () => {
 
     it("should include public amount in instruction data", async () => {
       const input = createTestNote(TEST_AMOUNTS.small);
-      const merkleProof = createMockMerkleProof(input.commitment);
+      const merkleProof = createRealMerkleProof(input.commitment);
       const outputs = createPartialPublicOutputs(input, 60_000n);
 
       const bufferAddress = address(PublicKey.default.toBase58());
@@ -320,7 +317,7 @@ describe("SPEND_PARTIAL_PUBLIC E2E", () => {
         publicAmountSats: outputs.publicAmount,
         changeCommitment: outputs.changeNote.commitmentBytes,
         recipient: address(outputs.recipient.toBase58()),
-        vkHash: generateMockVkHash(),
+        vkHash: getVkHashForCircuit("spend_partial_public"),
         changeEphemeralPubX: outputs.changeEphemeralPubX,
         changeEncryptedAmountWithSign: outputs.changeEncryptedAmountWithSign,
         accounts: {
@@ -399,13 +396,39 @@ describe("SPEND_PARTIAL_PUBLIC E2E", () => {
 
       // Step 4: Compute Merkle proof
       console.log("\n4. Compute Merkle proof");
-      const merkleProof = createMockMerkleProof(input.commitment);
+      const merkleProof = createRealMerkleProof(input.commitment);
       console.log(`   Root: ${merkleProof.root.toString(16).slice(0, 20)}...`);
 
-      // Step 5: Generate ZK proof (mocked)
-      console.log("\n5. Generate ZK proof (mocked)");
-      const proofBytes = generateMockProof();
-      console.log(`   Proof size: ${proofBytes.length} bytes`);
+      // Step 5: Generate real ZK proof
+      console.log("\n5. Generate real ZK proof");
+      let proofBytes: Uint8Array;
+      if (ctx.proverReady) {
+        // Convert recipient address to bigint for proof binding
+        // Reduce modulo BN254 field to ensure it fits within circuit constraints
+        const BN254_FIELD_MODULUS = 21888242871839275222246405745257275088548364400416034343698204186575808495617n;
+        const recipientBytes = outputs.recipient.toBytes();
+        let recipientAsBigint = 0n;
+        for (let i = 0; i < recipientBytes.length; i++) {
+          recipientAsBigint = (recipientAsBigint << 8n) | BigInt(recipientBytes[i]);
+        }
+        recipientAsBigint = recipientAsBigint % BN254_FIELD_MODULUS;
+        const changeData = {
+          pubKeyX: outputs.changeNote.pubKeyX,
+          amount: outputs.changeNote.amount,
+          ephemeralPubX: bytesToBigint(outputs.changeEphemeralPubX),
+          encryptedAmountWithSign: bytesToBigint(outputs.changeEncryptedAmountWithSign),
+        };
+        proofBytes = await generateRealSpendPartialPublicProof(
+          input,
+          merkleProof,
+          outputs.publicAmount,
+          changeData,
+          recipientAsBigint
+        );
+        console.log(`   Generated REAL proof: ${proofBytes.length} bytes`);
+      } else {
+        throw new Error("Prover not ready - circuits must be compiled");
+      }
 
       // Step 6: Derive PDAs
       console.log("\n6. Derive PDAs");
@@ -425,7 +448,7 @@ describe("SPEND_PARTIAL_PUBLIC E2E", () => {
 
       // Step 7: Build instruction (buffer mode with instruction introspection)
       console.log("\n7. Build spend partial public instruction (buffer mode)");
-      const vkHash = generateMockVkHash();
+      const vkHash = getVkHashForCircuit("spend_partial_public");
       const spendIx = buildSpendPartialPublicInstruction({
         bufferAddress,
         root: bigintToBytes32(merkleProof.root),
@@ -580,11 +603,14 @@ describe("SPEND_PARTIAL_PUBLIC E2E", () => {
         console.log(`   Ephemeral pub X: ${changeEphemeralPubX.toString(16).slice(0, 16)}...`);
 
         // Convert recipient address to bigint for proof binding
+        // Reduce modulo BN254 field to ensure it fits within circuit constraints
+        const BN254_FIELD_MODULUS = 21888242871839275222246405745257275088548364400416034343698204186575808495617n;
         const recipientBytes = ctx.payer.publicKey.toBytes();
         let recipientAsBigint = 0n;
         for (let i = 0; i < recipientBytes.length; i++) {
           recipientAsBigint = (recipientAsBigint << 8n) | BigInt(recipientBytes[i]);
         }
+        recipientAsBigint = recipientAsBigint % BN254_FIELD_MODULUS;
 
         // Step 6: Generate REAL ZK proof
         console.log("\n6. Generating REAL spend_partial_public proof (this may take 30-120 seconds)...");
@@ -661,7 +687,7 @@ describe("SPEND_PARTIAL_PUBLIC E2E", () => {
           publicAmountSats: publicAmount,
           changeCommitment: bigintToBytes(changeCommitment, 32),
           recipient: address(ctx.payer.publicKey.toBase58()),
-          vkHash: generateMockVkHash(), // TODO: Use real VK hash
+          vkHash: getVkHashForCircuit("spend_partial_public"), // TODO: Use real VK hash
           changeEphemeralPubX: bigintToBytes(changeEphemeralPubX, 32),
           changeEncryptedAmountWithSign: bigintToBytes(changeEncryptedAmountWithSign, 32),
           accounts: {

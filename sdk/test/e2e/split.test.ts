@@ -30,13 +30,13 @@ import {
 
 import {
   createTestNote,
-  generateMockProof,
-  generateMockVkHash,
-  createMockMerkleProof,
+  getVkHashForCircuit,
+  createRealMerkleProof,
   bigintToBytes32,
   bytesToHex,
   TEST_AMOUNTS,
   TREE_DEPTH,
+  generateRealSpendSplitProof,
   type TestNote,
 } from "./helpers";
 
@@ -103,18 +103,18 @@ function createSplitOutputNotes(
   const output1 = createTestNote(output1Amount, inputNote.leafIndex + 1n);
   const output2 = createTestNote(output2Amount, inputNote.leafIndex + 2n);
 
-  // Create mock stealth output data (32 bytes each)
-  const output1EphemeralPubX = new Uint8Array(32);
-  crypto.getRandomValues(output1EphemeralPubX);
-  const output1EncryptedAmountWithSign = new Uint8Array(32);
-  new DataView(output1EncryptedAmountWithSign.buffer).setBigUint64(0, output1Amount, true);
-  crypto.getRandomValues(output1EncryptedAmountWithSign.subarray(8));
+  // Create field-safe stealth output data (must be within BN254 field modulus)
+  // Use randomFieldElement which ensures values are within field bounds
+  const output1EphemeralPubXBigint = randomFieldElement();
+  const output1EncryptedAmountWithSignBigint = output1Amount; // Amount with y-sign bit 0
+  const output2EphemeralPubXBigint = randomFieldElement();
+  const output2EncryptedAmountWithSignBigint = output2Amount; // Amount with y-sign bit 0
 
-  const output2EphemeralPubX = new Uint8Array(32);
-  crypto.getRandomValues(output2EphemeralPubX);
-  const output2EncryptedAmountWithSign = new Uint8Array(32);
-  new DataView(output2EncryptedAmountWithSign.buffer).setBigUint64(0, output2Amount, true);
-  crypto.getRandomValues(output2EncryptedAmountWithSign.subarray(8));
+  // Convert to bytes for instruction building
+  const output1EphemeralPubX = bigintToBytes(output1EphemeralPubXBigint, 32);
+  const output1EncryptedAmountWithSign = bigintToBytes(output1EncryptedAmountWithSignBigint, 32);
+  const output2EphemeralPubX = bigintToBytes(output2EphemeralPubXBigint, 32);
+  const output2EncryptedAmountWithSign = bigintToBytes(output2EncryptedAmountWithSignBigint, 32);
 
   return {
     output1,
@@ -190,7 +190,7 @@ describe("SPEND_SPLIT E2E", () => {
   describe("Instruction Building", () => {
     it("should build valid split instruction with buffer", async () => {
       const input = createTestNote(TEST_AMOUNTS.small);
-      const merkleProof = createMockMerkleProof(input.commitment);
+      const merkleProof = createRealMerkleProof(input.commitment);
       const outputs = createSplitOutputNotes(input, 60_000n, 40_000n);
 
       // Mock buffer address
@@ -221,7 +221,7 @@ describe("SPEND_SPLIT E2E", () => {
         nullifierHash: input.nullifierHashBytes,
         outputCommitment1: outputs.output1.commitmentBytes,
         outputCommitment2: outputs.output2.commitmentBytes,
-        vkHash: generateMockVkHash(),
+        vkHash: getVkHashForCircuit("spend_split"),
         output1EphemeralPubX: outputs.output1EphemeralPubX,
         output1EncryptedAmountWithSign: outputs.output1EncryptedAmountWithSign,
         output2EphemeralPubX: outputs.output2EphemeralPubX,
@@ -246,7 +246,7 @@ describe("SPEND_SPLIT E2E", () => {
 
     it("should build instruction with correct data layout", async () => {
       const input = createTestNote(TEST_AMOUNTS.medium);
-      const merkleProof = createMockMerkleProof(input.commitment);
+      const merkleProof = createRealMerkleProof(input.commitment);
       const outputs = createSplitOutputNotes(input, 600_000n, 400_000n);
 
       // Derive PDAs
@@ -273,7 +273,7 @@ describe("SPEND_SPLIT E2E", () => {
         nullifierHash: input.nullifierHashBytes,
         outputCommitment1: outputs.output1.commitmentBytes,
         outputCommitment2: outputs.output2.commitmentBytes,
-        vkHash: generateMockVkHash(),
+        vkHash: getVkHashForCircuit("spend_split"),
         output1EphemeralPubX: outputs.output1EphemeralPubX,
         output1EncryptedAmountWithSign: outputs.output1EncryptedAmountWithSign,
         output2EphemeralPubX: outputs.output2EphemeralPubX,
@@ -295,7 +295,7 @@ describe("SPEND_SPLIT E2E", () => {
 
     it("should include both output commitments in instruction", async () => {
       const input = createTestNote(TEST_AMOUNTS.small);
-      const merkleProof = createMockMerkleProof(input.commitment);
+      const merkleProof = createRealMerkleProof(input.commitment);
       const outputs = createSplitOutputNotes(input, 50_000n, 50_000n);
 
       const bufferAddress = address(PublicKey.default.toBase58());
@@ -321,7 +321,7 @@ describe("SPEND_SPLIT E2E", () => {
         nullifierHash: input.nullifierHashBytes,
         outputCommitment1: outputs.output1.commitmentBytes,
         outputCommitment2: outputs.output2.commitmentBytes,
-        vkHash: generateMockVkHash(),
+        vkHash: getVkHashForCircuit("spend_split"),
         output1EphemeralPubX: outputs.output1EphemeralPubX,
         output1EncryptedAmountWithSign: outputs.output1EncryptedAmountWithSign,
         output2EphemeralPubX: outputs.output2EphemeralPubX,
@@ -356,7 +356,7 @@ describe("SPEND_SPLIT E2E", () => {
         }
         // Simulate trying to spend the same commitment twice
         const input = createTestNote(TEST_AMOUNTS.small);
-        const merkleProof = createMockMerkleProof(input.commitment);
+        const merkleProof = createRealMerkleProof(input.commitment);
 
         // First split: 60k + 40k
         const { output1: out1a, output2: out1b } = createSplitOutputNotes(input, 60_000n, 40_000n);
@@ -417,14 +417,32 @@ describe("SPEND_SPLIT E2E", () => {
 
       // Step 4: Compute Merkle proof for input
       console.log("\n4. Compute Merkle proof for input");
-      const merkleProof = createMockMerkleProof(input.commitment);
+      const merkleProof = createRealMerkleProof(input.commitment);
       console.log(`   Root: ${merkleProof.root.toString(16).slice(0, 20)}...`);
 
-      // Step 5: Generate ZK proof (mocked - in real flow, uploaded to ChadBuffer)
-      console.log("\n5. Generate ZK proof (mocked)");
-      const proofBytes = generateMockProof();
-      console.log(`   Proof size: ${proofBytes.length} bytes`);
-      console.log(`   NOTE: In real flow, proof would be uploaded to ChadBuffer first`);
+      // Step 5: Generate real ZK proof
+      console.log("\n5. Generate real ZK proof");
+      let proofBytes: Uint8Array;
+      if (ctx.proverReady) {
+        // Convert outputs to format needed for real proof
+        const output1 = {
+          pubKeyX: outputs.output1.pubKeyX,
+          amount: outputs.output1.amount,
+          ephemeralPubX: bytesToBigint(outputs.output1EphemeralPubX),
+          encryptedAmountWithSign: bytesToBigint(outputs.output1EncryptedAmountWithSign),
+        };
+        const output2 = {
+          pubKeyX: outputs.output2.pubKeyX,
+          amount: outputs.output2.amount,
+          ephemeralPubX: bytesToBigint(outputs.output2EphemeralPubX),
+          encryptedAmountWithSign: bytesToBigint(outputs.output2EncryptedAmountWithSign),
+        };
+        proofBytes = await generateRealSpendSplitProof(input, merkleProof, output1, output2);
+        console.log(`   Generated REAL proof: ${proofBytes.length} bytes`);
+      } else {
+        throw new Error("Prover not ready - circuits must be compiled");
+      }
+      console.log(`   NOTE: In real flow, proof is uploaded to ChadBuffer first`);
 
       // Step 6: Derive PDAs
       console.log("\n6. Derive PDAs");
@@ -449,7 +467,7 @@ describe("SPEND_SPLIT E2E", () => {
       // Step 7: Build 2-instruction transaction (verifier + zVault)
       console.log("\n7. Build 2-instruction transaction");
       const bufferAddress = address(PublicKey.default.toBase58()); // Mock buffer
-      const vkHash = generateMockVkHash();
+      const vkHash = getVkHashForCircuit("spend_split");
 
       // 7a: Build verifier inputs for VERIFY_FROM_BUFFER
       const verifierInputs = buildSplitVerifierInputs({
@@ -696,7 +714,7 @@ describe("SPEND_SPLIT E2E", () => {
           ctx.config.zvaultProgramId
         );
 
-        const vkHash = generateMockVkHash(); // TODO: Use real VK hash
+        const vkHash = getVkHashForCircuit("spend_split"); // TODO: Use real VK hash
         const output1EphemeralPubXBytes = bigintToBytes(output1EphemeralPubX, 32);
         const output1EncryptedBytes = bigintToBytes(output1EncryptedAmountWithSign, 32);
         const output2EphemeralPubXBytes = bigintToBytes(output2EphemeralPubX, 32);

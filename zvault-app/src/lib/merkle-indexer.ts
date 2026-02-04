@@ -169,7 +169,7 @@ export async function getMerkleProofForCommitment(
         // Return proof from tree at this index if possible
         const localProof = tree.getMerkleProof(commitmentBigint);
         if (localProof) {
-          return convertToMerkleProof(localProof, proof?.root || tree.getRoot());
+          return convertToMerkleProof(localProof, tree.getRoot());
         }
       }
 
@@ -194,6 +194,18 @@ export async function getMerkleProofForCommitment(
 }
 
 /**
+ * Convert bigint to 32-byte Uint8Array (big-endian)
+ */
+function bigintToBytes32(value: bigint): Uint8Array {
+  const hex = value.toString(16).padStart(64, "0");
+  const bytes = new Uint8Array(32);
+  for (let i = 0; i < 32; i++) {
+    bytes[i] = parseInt(hex.slice(i * 2, i * 2 + 2), 16);
+  }
+  return bytes;
+}
+
+/**
  * Convert SDK proof format to MerkleProof type
  */
 function convertToMerkleProof(
@@ -206,10 +218,10 @@ function convertToMerkleProof(
   root: bigint
 ): MerkleProof {
   return {
-    pathElements: proof.siblings.map((s) => s.toString(16).padStart(64, "0")),
+    pathElements: proof.siblings.map((s) => bigintToBytes32(s)),
     pathIndices: proof.indices,
     leafIndex: Number(proof.leafIndex),
-    root: root.toString(16).padStart(64, "0"),
+    root: bigintToBytes32(root),
   };
 }
 
