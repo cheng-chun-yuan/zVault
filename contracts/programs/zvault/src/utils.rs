@@ -10,5 +10,7 @@ pub use crate::shared::*;
 pub use crate::shared::bitcoin;
 pub use crate::shared::crypto;
 pub use crate::shared::cpi::chadbuffer;
-pub use crate::shared::cpi::ultrahonk;
 pub use crate::shared::introspection;
+
+// Re-export UltraHonk verifier program ID from introspection module
+pub use crate::shared::introspection::ULTRAHONK_VERIFIER_PROGRAM_ID;

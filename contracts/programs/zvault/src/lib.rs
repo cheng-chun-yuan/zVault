@@ -33,12 +33,14 @@ use pinocchio::{
     ProgramResult,
 };
 
-pub mod constants;
-pub mod error;
 pub mod instructions;
 pub mod shared;
 pub mod state;
 pub mod utils;
+
+// Re-export commonly used types from shared
+pub use shared::constants;
+pub use shared::error;
 
 /// Program ID (update after deployment)
 pub const ID: Pubkey = [

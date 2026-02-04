@@ -19,11 +19,12 @@ use pinocchio::{
 
 use crate::error::ZVaultError;
 use crate::state::{
-    CommitmentTree, NullifierOperationType, NullifierRecord, PoolState,
-    StealthAnnouncement, NULLIFIER_RECORD_DISCRIMINATOR, STEALTH_ANNOUNCEMENT_DISCRIMINATOR,
+    CommitmentTree, NullifierOperationType, PoolState,
+    StealthAnnouncement, STEALTH_ANNOUNCEMENT_DISCRIMINATOR,
 };
 use crate::utils::{
-    create_pda_account, validate_account_writable, validate_program_owner,
+    create_pda_account, read_bytes32, require_prior_zk_verification,
+    validate_account_writable, validate_program_owner, verify_and_create_nullifier,
 };
 
 
@@ -55,49 +56,20 @@ pub struct SpendSplitData {
 
 impl SpendSplitData {
     /// Size: root(32) + nullifier(32) + out1(32) + out2(32) + vk_hash(32) + eph1_x(32) + enc1(32) + eph2_x(32) + enc2(32) = 288 bytes
-    pub const SIZE: usize = 32 + 32 + 32 + 32 + 32 + 32 + 32 + 32 + 32;
+    pub const SIZE: usize = 32 * 9;
 
     pub fn from_bytes(data: &[u8]) -> Result<Self, ProgramError> {
-        if data.len() < Self::SIZE {
-            return Err(ProgramError::InvalidInstructionData);
-        }
-
         let mut offset = 0;
 
-        let mut root = [0u8; 32];
-        root.copy_from_slice(&data[offset..offset + 32]);
-        offset += 32;
-
-        let mut nullifier_hash = [0u8; 32];
-        nullifier_hash.copy_from_slice(&data[offset..offset + 32]);
-        offset += 32;
-
-        let mut output_commitment_1 = [0u8; 32];
-        output_commitment_1.copy_from_slice(&data[offset..offset + 32]);
-        offset += 32;
-
-        let mut output_commitment_2 = [0u8; 32];
-        output_commitment_2.copy_from_slice(&data[offset..offset + 32]);
-        offset += 32;
-
-        let mut vk_hash = [0u8; 32];
-        vk_hash.copy_from_slice(&data[offset..offset + 32]);
-        offset += 32;
-
-        let mut output1_ephemeral_pub_x = [0u8; 32];
-        output1_ephemeral_pub_x.copy_from_slice(&data[offset..offset + 32]);
-        offset += 32;
-
-        let mut output1_encrypted_amount_with_sign = [0u8; 32];
-        output1_encrypted_amount_with_sign.copy_from_slice(&data[offset..offset + 32]);
-        offset += 32;
-
-        let mut output2_ephemeral_pub_x = [0u8; 32];
-        output2_ephemeral_pub_x.copy_from_slice(&data[offset..offset + 32]);
-        offset += 32;
-
-        let mut output2_encrypted_amount_with_sign = [0u8; 32];
-        output2_encrypted_amount_with_sign.copy_from_slice(&data[offset..offset + 32]);
+        let root = read_bytes32(data, &mut offset)?;
+        let nullifier_hash = read_bytes32(data, &mut offset)?;
+        let output_commitment_1 = read_bytes32(data, &mut offset)?;
+        let output_commitment_2 = read_bytes32(data, &mut offset)?;
+        let vk_hash = read_bytes32(data, &mut offset)?;
+        let output1_ephemeral_pub_x = read_bytes32(data, &mut offset)?;
+        let output1_encrypted_amount_with_sign = read_bytes32(data, &mut offset)?;
+        let output2_ephemeral_pub_x = read_bytes32(data, &mut offset)?;
+        let output2_encrypted_amount_with_sign = read_bytes32(data, &mut offset)?;
 
         Ok(Self {
             root,
@@ -280,76 +252,29 @@ pub fn process_spend_split(
         }
     }
 
-    // Verify nullifier PDA
-    let nullifier_seeds: &[&[u8]] = &[NullifierRecord::SEED, &ix_data.nullifier_hash];
-    let (expected_nullifier_pda, nullifier_bump) =
-        find_program_address(nullifier_seeds, program_id);
-    if accounts.nullifier_record.key() != &expected_nullifier_pda {
-        return Err(ProgramError::InvalidSeeds);
-    }
-
     // Get clock and rent for account creation
     let clock = Clock::get()?;
     let rent = Rent::get()?;
 
     // SECURITY: Create nullifier PDA FIRST to prevent race conditions
-    {
-        let nullifier_data_len = accounts.nullifier_record.data_len();
-        if nullifier_data_len > 0 {
-            let nullifier_data = accounts.nullifier_record.try_borrow_data()?;
-            if !nullifier_data.is_empty() && nullifier_data[0] == NULLIFIER_RECORD_DISCRIMINATOR {
-                return Err(ZVaultError::NullifierAlreadyUsed.into());
-            }
-        } else {
-            let lamports = rent.minimum_balance(NullifierRecord::LEN);
-            let bump_bytes = [nullifier_bump];
-            let signer_seeds: &[&[u8]] = &[
-                NullifierRecord::SEED,
-                &ix_data.nullifier_hash,
-                &bump_bytes,
-            ];
+    // Verifies PDA, checks double-spend, creates and initializes in one call
+    let user_key: &[u8; 32] = accounts.user.key();
+    verify_and_create_nullifier(
+        accounts.nullifier_record,
+        accounts.user,
+        program_id,
+        &ix_data.nullifier_hash,
+        NullifierOperationType::Split,
+        clock.unix_timestamp,
+        &user_key,
+    )?;
 
-            create_pda_account(
-                accounts.user,
-                accounts.nullifier_record,
-                program_id,
-                lamports,
-                NullifierRecord::LEN as u64,
-                signer_seeds,
-            )?;
-        }
-    }
-
-    // Verify that UltraHonk verifier was called in an earlier instruction of this TX.
-    // Uses instruction introspection - the verifier must have been called with the
-    // same buffer account. This avoids Solana's CPI data size limit (10KB < 16KB proof).
-    pinocchio::msg!("Verifying prior verification instruction...");
-
-    crate::utils::verify_prior_buffer_verification(
+    // Verify that UltraHonk verifier was called in an earlier instruction
+    require_prior_zk_verification(
         accounts.instructions_sysvar,
         accounts.ultrahonk_verifier.key(),
         accounts.proof_buffer.key(),
-    ).map_err(|_| {
-        pinocchio::msg!("No valid prior verification instruction found");
-        ZVaultError::ZkVerificationFailed
-    })?;
-
-    pinocchio::msg!("Prior verification confirmed");
-
-    // Initialize nullifier record
-    {
-        let mut nullifier_data = accounts.nullifier_record.try_borrow_mut_data()?;
-        let nullifier = NullifierRecord::init(&mut nullifier_data)?;
-
-        nullifier
-            .nullifier_hash
-            .copy_from_slice(&ix_data.nullifier_hash);
-        nullifier.set_spent_at(clock.unix_timestamp);
-        nullifier
-            .spent_by
-            .copy_from_slice(accounts.user.key().as_ref());
-        nullifier.set_operation_type(NullifierOperationType::Split);
-    }
+    )?;
 
     // Update commitment tree with both new commitments and capture leaf indices
     let (leaf_index_1, leaf_index_2) = {

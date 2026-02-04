@@ -15,5 +15,6 @@
 pub mod prior_verification;
 
 pub use prior_verification::{
-    verify_prior_buffer_verification, verify_prior_verification_any, verifier_instruction,
+    require_prior_zk_verification, verify_prior_buffer_verification,
+    verify_prior_verification_any, verifier_instruction, ULTRAHONK_VERIFIER_PROGRAM_ID,
 };

@@ -30,6 +30,8 @@ pub use accounts::{
     validate_program_accounts, validate_program_accounts_writable, validate_program_owner,
     validate_program_owners, validate_rent_exempt, validate_system_program,
     validate_token_2022_owner, validate_token_mint, validate_token_program_key,
+    verify_and_create_nullifier, verify_nullifier_pda, create_nullifier_record,
+    read_bytes32, parse_u64_le, parse_u16_le, parse_u8, read_bytes, ensure_min_len,
 };
 
 pub use constants::{
@@ -38,7 +40,7 @@ pub use constants::{
     TOKEN_2022_PROGRAM_ID,
 };
 
-pub use crypto::{compute_merkle_root, poseidon2_hash, ZERO_HASHES};
+pub use crypto::{compute_merkle_root, poseidon2_hash, TREE_DEPTH, ZERO_HASHES};
 
 pub use error::ZVaultError;
 
@@ -47,20 +49,7 @@ pub use bitcoin::{
     ParsedTransaction, StealthOpReturnData, TxOutput,
 };
 
-pub use cpi::token_2022::{
-    burn_zbtc, burn_zbtc_signed, get_token_balance, is_token_2022_account, mint_zbtc,
-    transfer_zbtc, validate_token_account,
-};
-
-pub use cpi::ultrahonk::{
-    verify_ultrahonk_claim_proof, verify_ultrahonk_claim_proof_from_buffer,
-    verify_ultrahonk_pool_claim_yield_proof, verify_ultrahonk_pool_compound_proof,
-    verify_ultrahonk_pool_deposit_proof, verify_ultrahonk_pool_withdraw_proof,
-    verify_ultrahonk_proof_cpi, verify_ultrahonk_proof_with_vk_cpi,
-    verify_ultrahonk_spend_partial_public_proof,
-    verify_ultrahonk_spend_partial_public_proof_from_buffer, verify_ultrahonk_split_proof,
-    verify_ultrahonk_split_proof_from_buffer, ULTRAHONK_VERIFIER_PROGRAM_ID,
-};
+pub use cpi::token_2022::{burn_zbtc, burn_zbtc_signed, mint_zbtc, transfer_zbtc};
 
 pub use cpi::chadbuffer::{
     get_buffer_authority, read_transaction_from_buffer, validate_buffer_account,
@@ -68,5 +57,6 @@ pub use cpi::chadbuffer::{
 };
 
 pub use introspection::{
-    verify_prior_buffer_verification, verify_prior_verification_any, verifier_instruction,
+    require_prior_zk_verification, verify_prior_buffer_verification,
+    verify_prior_verification_any, verifier_instruction,
 };

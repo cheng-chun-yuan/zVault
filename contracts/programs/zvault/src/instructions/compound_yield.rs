@@ -1,8 +1,7 @@
 //! Compound yield instruction - Reinvest yield into principal (UltraHonk)
 //!
-//! ## Proof Sources
-//! - **Inline (proof_source=0)**: Proof data included directly in instruction data
-//! - **Buffer (proof_source=1)**: Proof read from ChadBuffer account (for large proofs)
+//! The UltraHonk verifier must be called in an earlier instruction of the same transaction.
+//! This instruction uses instruction introspection to verify the verifier was called.
 
 use pinocchio::{
     account_info::AccountInfo,
@@ -17,87 +16,49 @@ use crate::state::{
     PoolCommitmentTree, PoolNullifierRecord, PoolOperationType, YieldPool,
     POOL_NULLIFIER_RECORD_DISCRIMINATOR,
 };
-use crate::utils::{create_pda_account, verify_ultrahonk_pool_compound_proof, validate_program_owner, validate_account_writable, MAX_ULTRAHONK_PROOF_SIZE};
+use crate::utils::{create_pda_account, validate_program_owner, validate_account_writable};
 
-const CHADBUFFER_AUTHORITY_SIZE: usize = 32;
-
-#[repr(u8)]
-#[derive(Clone, Copy, PartialEq, Eq)]
-pub enum CompoundProofSource {
-    Inline = 0,
-    Buffer = 1,
-}
-
-impl CompoundProofSource {
-    pub fn from_u8(value: u8) -> Option<Self> {
-        match value {
-            0 => Some(Self::Inline),
-            1 => Some(Self::Buffer),
-            _ => None,
-        }
-    }
-}
-
-/// Compound yield instruction data (UltraHonk proof)
-pub struct CompoundYieldData<'a> {
-    pub proof_source: CompoundProofSource,
-    pub proof: Option<&'a [u8]>,
-    pub old_nullifier_hash: &'a [u8; 32],
-    pub new_pool_commitment: &'a [u8; 32],
-    pub pool_merkle_root: &'a [u8; 32],
+/// Compound yield instruction data (UltraHonk proof via buffer)
+///
+/// Layout:
+/// - old_nullifier_hash: [u8; 32]
+/// - new_pool_commitment: [u8; 32]
+/// - pool_merkle_root: [u8; 32]
+/// - old_principal: u64
+/// - deposit_epoch: u64
+/// - vk_hash: [u8; 32]
+///
+/// Proof is in ChadBuffer account, verified by earlier verifier instruction in same TX.
+pub struct CompoundYieldData {
+    pub old_nullifier_hash: [u8; 32],
+    pub new_pool_commitment: [u8; 32],
+    pub pool_merkle_root: [u8; 32],
     pub old_principal: u64,
     pub deposit_epoch: u64,
-    pub vk_hash: &'a [u8; 32],
+    pub vk_hash: [u8; 32],
 }
 
-impl<'a> CompoundYieldData<'a> {
-    pub const MIN_SIZE_INLINE: usize = 1 + 4 + 32 + 32 + 32 + 8 + 8 + 32;
-    pub const MIN_SIZE_BUFFER: usize = 1 + 32 + 32 + 32 + 8 + 8 + 32;
+impl CompoundYieldData {
+    /// Data size: nullifier(32) + new_commit(32) + root(32) + principal(8) + epoch(8) + vk_hash(32) = 144 bytes
+    pub const SIZE: usize = 32 + 32 + 32 + 8 + 8 + 32;
 
-    pub fn from_bytes(data: &'a [u8]) -> Result<Self, ProgramError> {
-        if data.is_empty() {
+    pub fn from_bytes(data: &[u8]) -> Result<Self, ProgramError> {
+        if data.len() < Self::SIZE {
             return Err(ProgramError::InvalidInstructionData);
         }
 
-        let proof_source = CompoundProofSource::from_u8(data[0]).ok_or(ProgramError::InvalidInstructionData)?;
+        let mut offset = 0;
 
-        match proof_source {
-            CompoundProofSource::Inline => Self::parse_inline(data),
-            CompoundProofSource::Buffer => Self::parse_buffer(data),
-        }
-    }
-
-    fn parse_inline(data: &'a [u8]) -> Result<Self, ProgramError> {
-        if data.len() < Self::MIN_SIZE_INLINE {
-            return Err(ProgramError::InvalidInstructionData);
-        }
-
-        let proof_len = u32::from_le_bytes([data[1], data[2], data[3], data[4]]) as usize;
-        if proof_len > MAX_ULTRAHONK_PROOF_SIZE {
-            return Err(ProgramError::InvalidInstructionData);
-        }
-
-        let expected_size = 1 + 4 + proof_len + 32 + 32 + 32 + 8 + 8 + 32;
-        if data.len() < expected_size {
-            return Err(ProgramError::InvalidInstructionData);
-        }
-
-        let proof = &data[5..5 + proof_len];
-        let mut offset = 5 + proof_len;
-
-        let old_nullifier_hash: &[u8; 32] = data[offset..offset + 32]
-            .try_into()
-            .map_err(|_| ProgramError::InvalidInstructionData)?;
+        let mut old_nullifier_hash = [0u8; 32];
+        old_nullifier_hash.copy_from_slice(&data[offset..offset + 32]);
         offset += 32;
 
-        let new_pool_commitment: &[u8; 32] = data[offset..offset + 32]
-            .try_into()
-            .map_err(|_| ProgramError::InvalidInstructionData)?;
+        let mut new_pool_commitment = [0u8; 32];
+        new_pool_commitment.copy_from_slice(&data[offset..offset + 32]);
         offset += 32;
 
-        let pool_merkle_root: &[u8; 32] = data[offset..offset + 32]
-            .try_into()
-            .map_err(|_| ProgramError::InvalidInstructionData)?;
+        let mut pool_merkle_root = [0u8; 32];
+        pool_merkle_root.copy_from_slice(&data[offset..offset + 32]);
         offset += 32;
 
         let old_principal = u64::from_le_bytes(
@@ -114,65 +75,10 @@ impl<'a> CompoundYieldData<'a> {
         );
         offset += 8;
 
-        let vk_hash: &[u8; 32] = data[offset..offset + 32]
-            .try_into()
-            .map_err(|_| ProgramError::InvalidInstructionData)?;
+        let mut vk_hash = [0u8; 32];
+        vk_hash.copy_from_slice(&data[offset..offset + 32]);
 
         Ok(Self {
-            proof_source: CompoundProofSource::Inline,
-            proof: Some(proof),
-            old_nullifier_hash,
-            new_pool_commitment,
-            pool_merkle_root,
-            old_principal,
-            deposit_epoch,
-            vk_hash,
-        })
-    }
-
-    fn parse_buffer(data: &'a [u8]) -> Result<Self, ProgramError> {
-        if data.len() < Self::MIN_SIZE_BUFFER {
-            return Err(ProgramError::InvalidInstructionData);
-        }
-
-        let mut offset = 1;
-
-        let old_nullifier_hash: &[u8; 32] = data[offset..offset + 32]
-            .try_into()
-            .map_err(|_| ProgramError::InvalidInstructionData)?;
-        offset += 32;
-
-        let new_pool_commitment: &[u8; 32] = data[offset..offset + 32]
-            .try_into()
-            .map_err(|_| ProgramError::InvalidInstructionData)?;
-        offset += 32;
-
-        let pool_merkle_root: &[u8; 32] = data[offset..offset + 32]
-            .try_into()
-            .map_err(|_| ProgramError::InvalidInstructionData)?;
-        offset += 32;
-
-        let old_principal = u64::from_le_bytes(
-            data[offset..offset + 8]
-                .try_into()
-                .map_err(|_| ProgramError::InvalidInstructionData)?,
-        );
-        offset += 8;
-
-        let deposit_epoch = u64::from_le_bytes(
-            data[offset..offset + 8]
-                .try_into()
-                .map_err(|_| ProgramError::InvalidInstructionData)?,
-        );
-        offset += 8;
-
-        let vk_hash: &[u8; 32] = data[offset..offset + 32]
-            .try_into()
-            .map_err(|_| ProgramError::InvalidInstructionData)?;
-
-        Ok(Self {
-            proof_source: CompoundProofSource::Buffer,
-            proof: None,
             old_nullifier_hash,
             new_pool_commitment,
             pool_merkle_root,
@@ -183,7 +89,16 @@ impl<'a> CompoundYieldData<'a> {
     }
 }
 
-/// Compound yield accounts
+/// Compound yield accounts (8 accounts)
+///
+/// 0. yield_pool (writable)
+/// 1. pool_commitment_tree (writable)
+/// 2. pool_nullifier_record (writable)
+/// 3. compounder (signer)
+/// 4. system_program
+/// 5. ultrahonk_verifier - UltraHonk verifier program (for introspection check)
+/// 6. proof_buffer (readonly) - ChadBuffer account containing proof data
+/// 7. instructions_sysvar (readonly) - For verifying prior verification instruction
 pub struct CompoundYieldAccounts<'a> {
     pub yield_pool: &'a AccountInfo,
     pub pool_commitment_tree: &'a AccountInfo,
@@ -191,14 +106,15 @@ pub struct CompoundYieldAccounts<'a> {
     pub compounder: &'a AccountInfo,
     pub system_program: &'a AccountInfo,
     pub ultrahonk_verifier: &'a AccountInfo,
-    pub vk_account: &'a AccountInfo,
-    pub proof_buffer: Option<&'a AccountInfo>,
+    pub proof_buffer: &'a AccountInfo,
+    pub instructions_sysvar: &'a AccountInfo,
 }
 
 impl<'a> CompoundYieldAccounts<'a> {
-    pub fn from_accounts(accounts: &'a [AccountInfo], use_buffer: bool) -> Result<Self, ProgramError> {
-        let min_accounts = if use_buffer { 8 } else { 7 };
-        if accounts.len() < min_accounts {
+    pub const ACCOUNT_COUNT: usize = 8;
+
+    pub fn from_accounts(accounts: &'a [AccountInfo]) -> Result<Self, ProgramError> {
+        if accounts.len() < Self::ACCOUNT_COUNT {
             return Err(ProgramError::NotEnoughAccountKeys);
         }
 
@@ -213,24 +129,19 @@ impl<'a> CompoundYieldAccounts<'a> {
             compounder: &accounts[3],
             system_program: &accounts[4],
             ultrahonk_verifier: &accounts[5],
-            vk_account: &accounts[6],
-            proof_buffer: if use_buffer { Some(&accounts[7]) } else { None },
+            proof_buffer: &accounts[6],
+            instructions_sysvar: &accounts[7],
         })
     }
 }
 
-/// Process compound yield instruction (UltraHonk proof)
+/// Process compound yield instruction (UltraHonk proof via introspection)
 pub fn process_compound_yield(
     program_id: &Pubkey,
     accounts: &[AccountInfo],
     data: &[u8],
 ) -> ProgramResult {
-    if data.is_empty() {
-        return Err(ProgramError::InvalidInstructionData);
-    }
-    let use_buffer = data[0] == CompoundProofSource::Buffer as u8;
-
-    let accounts = CompoundYieldAccounts::from_accounts(accounts, use_buffer)?;
+    let accounts = CompoundYieldAccounts::from_accounts(accounts)?;
     let ix_data = CompoundYieldData::from_bytes(data)?;
 
     if ix_data.old_principal == 0 {
@@ -246,7 +157,6 @@ pub fn process_compound_yield(
 
     let pool_id: [u8; 8];
     let current_epoch: u64;
-    let yield_rate_bps: u16;
     let yield_amount: u64;
     {
         let pool_data = accounts.yield_pool.try_borrow_data()?;
@@ -258,7 +168,6 @@ pub fn process_compound_yield(
 
         pool_id = pool.pool_id;
         current_epoch = pool.current_epoch();
-        yield_rate_bps = pool.yield_rate_bps();
 
         let epochs_staked = current_epoch.saturating_sub(ix_data.deposit_epoch);
         yield_amount = pool.calculate_yield_checked(ix_data.old_principal, epochs_staked)?;
@@ -284,7 +193,7 @@ pub fn process_compound_yield(
             return Err(ZVaultError::InvalidPoolId.into());
         }
 
-        if !tree.is_valid_root(ix_data.pool_merkle_root) {
+        if !tree.is_valid_root(&ix_data.pool_merkle_root) {
             return Err(ZVaultError::InvalidPoolRoot.into());
         }
 
@@ -296,7 +205,7 @@ pub fn process_compound_yield(
     let nullifier_seeds: &[&[u8]] = &[
         PoolNullifierRecord::SEED,
         &pool_id,
-        ix_data.old_nullifier_hash,
+        &ix_data.old_nullifier_hash,
     ];
     let (expected_nullifier_pda, nullifier_bump) = find_program_address(nullifier_seeds, program_id);
     if accounts.pool_nullifier_record.key() != &expected_nullifier_pda {
@@ -319,7 +228,7 @@ pub fn process_compound_yield(
             let signer_seeds: &[&[u8]] = &[
                 PoolNullifierRecord::SEED,
                 &pool_id,
-                ix_data.old_nullifier_hash,
+                &ix_data.old_nullifier_hash,
                 &bump_bytes,
             ];
 
@@ -334,59 +243,19 @@ pub fn process_compound_yield(
         }
     }
 
-    // Verify UltraHonk proof via CPI
-    match ix_data.proof_source {
-        CompoundProofSource::Inline => {
-            let proof = ix_data.proof.ok_or(ProgramError::InvalidInstructionData)?;
-            pinocchio::msg!("Verifying UltraHonk compound proof (inline)...");
-            verify_ultrahonk_pool_compound_proof(
-                accounts.ultrahonk_verifier,
-                accounts.vk_account,
-                proof,
-                ix_data.pool_merkle_root,
-                ix_data.old_nullifier_hash,
-                ix_data.new_pool_commitment,
-                current_epoch,
-                yield_rate_bps,
-                ix_data.vk_hash,
-            ).map_err(|_| {
-                pinocchio::msg!("UltraHonk proof verification failed");
-                ZVaultError::ZkVerificationFailed
-            })?;
-        }
-        CompoundProofSource::Buffer => {
-            let proof_buffer_account = accounts.proof_buffer.ok_or(ProgramError::NotEnoughAccountKeys)?;
-            let buffer_data = proof_buffer_account.try_borrow_data()?;
-            if buffer_data.len() <= CHADBUFFER_AUTHORITY_SIZE {
-                return Err(ProgramError::InvalidAccountData);
-            }
-            let proof = &buffer_data[CHADBUFFER_AUTHORITY_SIZE..];
-            if proof.len() > MAX_ULTRAHONK_PROOF_SIZE {
-                return Err(ZVaultError::InvalidProofLength.into());
-            }
-            pinocchio::msg!("Verifying UltraHonk compound proof (buffer)...");
-            verify_ultrahonk_pool_compound_proof(
-                accounts.ultrahonk_verifier,
-                accounts.vk_account,
-                proof,
-                ix_data.pool_merkle_root,
-                ix_data.old_nullifier_hash,
-                ix_data.new_pool_commitment,
-                current_epoch,
-                yield_rate_bps,
-                ix_data.vk_hash,
-            ).map_err(|_| {
-                pinocchio::msg!("UltraHonk proof verification failed");
-                ZVaultError::ZkVerificationFailed
-            })?;
-        }
-    }
+    // Verify that UltraHonk verifier was called in an earlier instruction
+    // SECURITY: require_prior_zk_verification validates the verifier program ID
+    crate::utils::require_prior_zk_verification(
+        accounts.instructions_sysvar,
+        accounts.ultrahonk_verifier.key(),
+        accounts.proof_buffer.key(),
+    )?;
 
     {
         let mut nullifier_data = accounts.pool_nullifier_record.try_borrow_mut_data()?;
         let nullifier = PoolNullifierRecord::init(&mut nullifier_data)?;
 
-        nullifier.nullifier_hash.copy_from_slice(ix_data.old_nullifier_hash);
+        nullifier.nullifier_hash.copy_from_slice(&ix_data.old_nullifier_hash);
         nullifier.set_spent_at(clock.unix_timestamp);
         nullifier.pool_id.copy_from_slice(&pool_id);
         nullifier.set_epoch_at_operation(current_epoch);
@@ -397,7 +266,7 @@ pub fn process_compound_yield(
     {
         let mut tree_data = accounts.pool_commitment_tree.try_borrow_mut_data()?;
         let tree = PoolCommitmentTree::from_bytes_mut(&mut tree_data)?;
-        tree.insert_leaf(ix_data.new_pool_commitment)?;
+        tree.insert_leaf(&ix_data.new_pool_commitment)?;
     }
 
     {

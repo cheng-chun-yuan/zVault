@@ -166,6 +166,9 @@ pub enum ZVaultError {
 
     #[error("Account is closed")]
     AccountClosed = 6065,
+
+    #[error("Invalid verifier program ID")]
+    InvalidVerifierProgram = 6066,
 }
 
 impl From<ZVaultError> for ProgramError {
@@ -191,6 +194,7 @@ mod tests {
         // Security errors: 6060-6069
         assert_eq!(ZVaultError::AccountNotWritable as u32, 6060);
         assert_eq!(ZVaultError::AccountClosed as u32, 6065);
+        assert_eq!(ZVaultError::InvalidVerifierProgram as u32, 6066);
     }
 
     #[test]

@@ -13,6 +13,6 @@ pub mod poseidon;
 pub mod sha256;
 
 // Re-export commonly used items
-pub use merkle::{compute_merkle_root, ZERO_HASHES};
+pub use merkle::{compute_merkle_root, TREE_DEPTH, ZERO_HASHES};
 pub use poseidon::poseidon2_hash;
 pub use sha256::{double_sha256, double_sha256_pair, sha256};

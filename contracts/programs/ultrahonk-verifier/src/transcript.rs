@@ -3,8 +3,7 @@
 //! Generates deterministic challenges from proof elements using Keccak256.
 //! This implementation matches the bb.js/barretenberg transcript format.
 
-use crate::bn254::Fr;
-use crate::constants::FR_MODULUS;
+use crate::bn254::{Fr, SCALAR_MODULUS};
 use solana_nostd_keccak::hashv;
 
 /// Keccak256 hash output size
@@ -96,9 +95,9 @@ fn reduce_to_field(hash: &[u8; 32]) -> Fr {
     let mut result = *hash;
 
     // Compare with modulus (big-endian)
-    if compare_be(&result, &FR_MODULUS) >= 0 {
+    if compare_be(&result, &SCALAR_MODULUS) >= 0 {
         // Subtract modulus
-        subtract_be(&mut result, &FR_MODULUS);
+        subtract_be(&mut result, &SCALAR_MODULUS);
     }
 
     Fr(result)

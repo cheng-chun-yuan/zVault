@@ -330,21 +330,13 @@ pub fn process_spend_partial_public(
     }
     .invoke_signed(&nullifier_signer)?;
 
-    // Verify that UltraHonk verifier was called in an earlier instruction of this TX.
-    // Uses instruction introspection - the verifier must have been called with the
-    // same buffer account. This avoids Solana's CPI data size limit (10KB < 16KB proof).
-    pinocchio::msg!("Verifying prior verification instruction...");
-
-    crate::utils::verify_prior_buffer_verification(
+    // Verify that UltraHonk verifier was called in an earlier instruction
+    // SECURITY: require_prior_zk_verification validates the verifier program ID
+    crate::utils::require_prior_zk_verification(
         accounts.instructions_sysvar,
         accounts.ultrahonk_verifier.key(),
         accounts.proof_buffer.key(),
-    ).map_err(|_| {
-        pinocchio::msg!("No valid prior verification instruction found");
-        ZVaultError::ZkVerificationFailed
-    })?;
-
-    pinocchio::msg!("Prior verification confirmed");
+    )?;
 
     // Initialize nullifier record
     {

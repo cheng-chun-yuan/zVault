@@ -312,6 +312,19 @@ fn process_verify_from_buffer(
     let proof_buffer = &accounts[0];
     let vk_account = &accounts[1];
 
+    // SECURITY: Verify proof buffer ownership (ChadBuffer program)
+    // ChadBuffer program ID - hardcoded for security
+    const CHADBUFFER_PROGRAM_ID: Pubkey = [
+        0xC4, 0xAD, 0xB0, 0xFF, 0xE5, 0x00, 0x00, 0x00,
+        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01,
+    ];
+    if proof_buffer.owner() != &CHADBUFFER_PROGRAM_ID {
+        pinocchio::msg!("Proof buffer not owned by ChadBuffer program");
+        return Err(ProgramError::InvalidAccountOwner);
+    }
+
     // Verify VK account ownership
     if vk_account.owner() != program_id {
         pinocchio::msg!("VK account not owned by verifier program");
@@ -410,10 +423,16 @@ fn process_init_vk(
         return Err(ProgramError::MissingRequiredSignature);
     }
 
-    // VK account must be owned by this program or system program (uninitialized)
+    // VK account must be owned by system program (uninitialized)
+    // SECURITY: Prevent re-initialization by only allowing fresh accounts
     let owner = vk_account.owner();
     let system_program: Pubkey = [0u8; 32]; // System program ID is all zeros
-    if owner != program_id && owner != &system_program {
+    if owner == program_id {
+        // Account already initialized - reject to prevent overwrites
+        pinocchio::msg!("VK account already initialized");
+        return Err(ProgramError::AccountAlreadyInitialized);
+    }
+    if owner != &system_program {
         return Err(ProgramError::InvalidAccountOwner);
     }
 

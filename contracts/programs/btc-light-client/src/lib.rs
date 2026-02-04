@@ -274,7 +274,13 @@ fn process_initialize(
 
     let light_client = &accounts[0];
     let payer = &accounts[1];
-    let _system_program = &accounts[2];
+    let system_program = &accounts[2];
+
+    // SECURITY: Validate system program
+    const SYSTEM_PROGRAM_ID: Pubkey = [0u8; 32];
+    if system_program.key() != &SYSTEM_PROGRAM_ID {
+        return Err(ProgramError::IncorrectProgramId);
+    }
 
     // Parse instruction data
     let start_height = u64::from_le_bytes(data[0..8].try_into().unwrap());
@@ -359,7 +365,13 @@ fn process_submit_header(
     let light_client = &accounts[0];
     let block_header_acc = &accounts[1];
     let submitter = &accounts[2];
-    let _system_program = &accounts[3];
+    let system_program = &accounts[3];
+
+    // SECURITY: Validate system program
+    const SYSTEM_PROGRAM_ID: Pubkey = [0u8; 32];
+    if system_program.key() != &SYSTEM_PROGRAM_ID {
+        return Err(ProgramError::IncorrectProgramId);
+    }
 
     // Parse instruction data
     let mut raw_header = [0u8; 80];

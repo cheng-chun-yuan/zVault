@@ -7,7 +7,6 @@ use pinocchio::{
     account_info::AccountInfo,
     cpi::{invoke, invoke_signed},
     instruction::{AccountMeta, Instruction, Seed, Signer},
-    program_error::ProgramError,
     pubkey::Pubkey,
     ProgramResult,
 };
@@ -186,64 +185,4 @@ pub fn transfer_zbtc(
         let signers = [signer];
         invoke_signed(&instruction, &[source, destination, authority], &signers)
     }
-}
-
-/// Check if an account is owned by Token-2022 program
-#[inline(always)]
-pub fn is_token_2022_account(account: &AccountInfo) -> bool {
-    account.owner() == &Pubkey::from(TOKEN_2022_PROGRAM_ID)
-}
-
-/// Validate token account basics
-///
-/// Checks that the account:
-/// 1. Is owned by Token-2022 program
-/// 2. Has the expected mint
-/// 3. Has the expected owner
-///
-/// # Token Account Layout (Token-2022)
-/// - [0..32] mint
-/// - [32..64] owner
-/// - [64..72] amount
-pub fn validate_token_account(
-    account: &AccountInfo,
-    expected_mint: &Pubkey,
-    expected_owner: &Pubkey,
-) -> Result<(), ProgramError> {
-    // Check program owner
-    if !is_token_2022_account(account) {
-        return Err(ProgramError::InvalidAccountOwner);
-    }
-
-    let data = account.try_borrow_data()?;
-    if data.len() < 72 {
-        return Err(ProgramError::InvalidAccountData);
-    }
-
-    // Check mint
-    let mint = Pubkey::from(<[u8; 32]>::try_from(&data[0..32]).unwrap());
-    if &mint != expected_mint {
-        return Err(ProgramError::InvalidAccountData);
-    }
-
-    // Check owner
-    let owner = Pubkey::from(<[u8; 32]>::try_from(&data[32..64]).unwrap());
-    if &owner != expected_owner {
-        return Err(ProgramError::InvalidAccountData);
-    }
-
-    Ok(())
-}
-
-/// Get token account balance
-///
-/// # Token Account Layout (Token-2022)
-/// - [64..72] amount (u64, little-endian)
-pub fn get_token_balance(account: &AccountInfo) -> Result<u64, ProgramError> {
-    let data = account.try_borrow_data()?;
-    if data.len() < 72 {
-        return Err(ProgramError::InvalidAccountData);
-    }
-
-    Ok(u64::from_le_bytes(data[64..72].try_into().unwrap()))
 }
