@@ -1,13 +1,57 @@
 /**
- * Prover Subpath
+ * ZVault Prover Module
  *
- * Auto-detects platform and exports the appropriate prover backend.
- * For explicit imports, use:
- * - @zvault/sdk/prover/web for browser WASM prover
- * - @zvault/sdk/prover/mobile for React Native mopro prover
+ * Supports two proof systems:
+ * - Groth16 via Sunspot (recommended for on-chain verification)
+ * - UltraHonk via bb.js (legacy, exceeds Solana CU limits)
+ *
+ * Default: Sunspot/Groth16 for smaller proofs (~388 bytes) that fit
+ * within Solana's compute budget.
  */
 
-// Re-export everything from the web prover (default for browser/Node.js)
+export type ProofBackend = "sunspot" | "ultrahonk";
+
+// Default to Sunspot for Solana compatibility
+let currentBackend: ProofBackend = "sunspot";
+
+/**
+ * Set the proof generation backend
+ */
+export function setProofBackend(backend: ProofBackend): void {
+  currentBackend = backend;
+}
+
+/**
+ * Get the current proof backend
+ */
+export function getProofBackend(): ProofBackend {
+  return currentBackend;
+}
+
+// Re-export Sunspot prover (recommended for on-chain verification)
+export {
+  configureSunspot,
+  getSunspotConfig,
+  isSunspotAvailable,
+  generateGroth16Proof,
+  getVerificationKey as getSunspotVk,
+  getVkHash as getSunspotVkHash,
+  verifyGroth16Proof,
+  GROTH16_PROOF_SIZE,
+  canFitInline,
+  getSunspotVerifierProgramId,
+  // High-level proof generators
+  generateClaimProofGroth16,
+  generateSplitProofGroth16,
+  generatePartialPublicProofGroth16,
+  type SunspotProofResult,
+  type SunspotConfig,
+  type ClaimInputs as SunspotClaimInputs,
+  type SpendSplitInputs as SunspotSplitInputs,
+  type SpendPartialPublicInputs as SunspotPartialPublicInputs,
+} from "./sunspot";
+
+// Re-export UltraHonk prover (legacy)
 export * from "./web";
 
 // Re-export types
