@@ -1,21 +1,35 @@
 /**
- * ZVault SDK v2.0
+ * ZVault SDK v2.1
  *
  * Complete client library for interacting with the ZVault protocol.
  * Privacy-preserving BTC to Solana bridge using ZK proofs.
  *
  * Networks: Solana Devnet + Bitcoin Testnet3
  *
- * ## Subpath Imports (Recommended for Tree-Shaking)
+ * ## Instance-Based SDK (Recommended)
+ *
+ * ```typescript
+ * import { createZVaultSDK } from "@zvault/sdk";
+ *
+ * const sdk = createZVaultSDK({
+ *   programId: "YourProgramId...",
+ *   network: "devnet",
+ *   rpcUrl: "https://custom-rpc.example.com",
+ * });
+ *
+ * const note = sdk.generateNote(100_000n);
+ * const ix = sdk.instructions.claim({ ... });
+ * ```
+ *
+ * ## Subpath Imports (for Tree-Shaking)
  *
  * ```typescript
  * import { generateClaimProof } from '@zvault/sdk/prover'
  * import { createStealthDeposit } from '@zvault/sdk/stealth'
  * import { deriveTaprootAddress } from '@zvault/sdk/bitcoin'
- * import { DEVNET_CONFIG } from '@zvault/sdk/solana'
  * ```
  *
- * ## Quick Start
+ * ## Legacy Quick Start (still supported)
  * ```typescript
  * import { depositToNote, claimNote, splitNote, formatBtc } from '@zvault/sdk';
  *
@@ -30,6 +44,28 @@
  * const { output1, output2 } = await splitNote(config, result.note, 50_000n);
  * ```
  */
+
+// ==========================================================================
+// Instance-Based SDK (New API)
+// ==========================================================================
+
+export {
+  createZVaultSDK,
+  ZVaultSDK,
+  InstructionBuilders,
+  PDADerivation,
+  ProverInterface,
+  SDK_VERSION,
+} from "./sdk";
+
+export type {
+  ZVaultSDKConfig,
+  ResolvedConfig,
+  NetworkConfig,
+  NetworkType,
+  BitcoinNetwork,
+  VKHashes,
+} from "./types/config";
 
 // ==========================================================================
 // Cryptographic utilities (from merged crypto.ts)
@@ -280,10 +316,8 @@ export {
   LOCALNET_CONFIG,
   TOKEN_2022_PROGRAM_ID,
   ATA_PROGRAM_ID,
-  SDK_VERSION,
   DEPLOYMENT_INFO,
-  type NetworkConfig,
-  type NetworkType,
+  // Note: SDK_VERSION, NetworkConfig, NetworkType are already exported from ./sdk and ./types/config
 } from "./config";
 
 // ==========================================================================
@@ -345,7 +379,7 @@ export {
   type ConnectionAdapter,
   type ViewOnlyKeys,
   type ViewOnlyScannedNote,
-} from "./stealth";
+} from "./stealth/index";
 
 // ==========================================================================
 // Direct stealth deposit (combined BTC deposit + stealth announcement)
@@ -599,7 +633,7 @@ export {
   type PoolOperationStep,
   type PoolOperationStatus,
   type PoolOperationProgressCallback,
-} from "./yield-pool";
+} from "./pool";
 
 // ==========================================================================
 // UltraHonk Browser Proof Generation
@@ -626,30 +660,37 @@ export {
 
 export {
   INSTRUCTION_DISCRIMINATORS,
+  VERIFIER_DISCRIMINATORS,
+  // Data builders (no config dependency)
   buildClaimInstructionData,
-  buildClaimInstruction,
   buildSplitInstructionData,
-  buildSplitInstruction,
   buildSpendPartialPublicInstructionData,
-  buildSpendPartialPublicInstruction,
   buildRedemptionRequestInstructionData,
-  buildRedemptionRequestInstruction,
   buildPoolDepositInstructionData,
-  buildPoolDepositInstruction,
   buildPoolWithdrawInstructionData,
-  buildPoolWithdrawInstruction,
   buildPoolClaimYieldInstructionData,
+  // Complete instruction builders (legacy - uses global config)
+  buildClaimInstruction,
+  buildSplitInstruction,
+  buildSpendPartialPublicInstruction,
+  buildRedemptionRequestInstruction,
+  buildPoolDepositInstruction,
+  buildPoolWithdrawInstruction,
   buildPoolClaimYieldInstruction,
   // Verifier instruction builders (for instruction introspection pattern)
   buildVerifyFromBufferInstruction,
   buildPartialPublicVerifierInputs,
   buildSplitVerifierInputs,
+  // Utilities
   needsBuffer,
   calculateAvailableProofSpace,
   hexToBytes as instructionHexToBytes,
   bytesToHex as instructionBytesToHex,
   bigintTo32Bytes,
   bytes32ToBigint,
+  addressToBytes,
+  SYSTEM_PROGRAM_ADDRESS,
+  INSTRUCTIONS_SYSVAR,
   type Instruction,
   type ProofSource,
   type ClaimInstructionOptions,

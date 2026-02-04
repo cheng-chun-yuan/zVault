@@ -1,8 +1,0 @@
-amount = ""
-amount_pub = ""
-merkle_path = ["", "", "", "", "", "", "", "", "", ""]
-merkle_root = ""
-nullifier = ""
-nullifier_hash = ""
-path_indices = ["", "", "", "", "", "", "", "", "", ""]
-secret = ""

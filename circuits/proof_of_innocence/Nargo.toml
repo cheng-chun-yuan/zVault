@@ -1,0 +1,9 @@
+[package]
+name = "zvault_proof_of_innocence"
+type = "bin"
+authors = ["zVault Team"]
+compiler_version = ">=0.30.0"
+
+[dependencies]
+zvault_utils = { path = "../lib/utils" }
+poseidon = { tag = "v0.2.3", git = "https://github.com/noir-lang/poseidon" }

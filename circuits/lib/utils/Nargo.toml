@@ -1,0 +1,9 @@
+[package]
+name = "zvault_utils"
+type = "lib"
+authors = ["zVault Team"]
+compiler_version = ">=0.30.0"
+
+[dependencies]
+# Using poseidon::bn254 (Circom-compatible, matches Solana's sol_poseidon)
+poseidon = { tag = "v0.2.3", git = "https://github.com/noir-lang/poseidon" }

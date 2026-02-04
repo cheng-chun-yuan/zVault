@@ -1,0 +1,16 @@
+[workspace]
+members = [
+    "lib/utils",
+    "claim",
+    "spend_split",
+    "spend_partial_public",
+    "pool_deposit",
+    "pool_withdraw",
+    "pool_claim_yield",
+    "proof_of_innocence",
+]
+
+[workspace.package]
+authors = ["zVault Team"]
+compiler_version = ">=0.30.0"
+type = "lib"

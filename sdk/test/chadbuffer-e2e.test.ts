@@ -157,50 +157,35 @@ describe("ChadBuffer Integration", () => {
     const mockOutput1 = createMock32Bytes(3);
     const mockOutput2 = createMock32Bytes(4);
     const mockVkHash = createMock32Bytes(5);
+    const mockEphPubX1 = createMock32Bytes(6);
+    const mockEncAmount1 = createMock32Bytes(7);
+    const mockEphPubX2 = createMock32Bytes(8);
+    const mockEncAmount2 = createMock32Bytes(9);
 
-    it("should build inline mode instruction data correctly", () => {
-      const mockProof = new Uint8Array(600);
-
+    it("should build instruction data correctly (uses instruction introspection)", () => {
+      // Split instruction always uses buffer mode via instruction introspection
+      // Format: disc(1) + root(32) + nullifier(32) + out1(32) + out2(32) + vk_hash(32) + stealth fields (4x32)
       const data = buildSplitInstructionData({
-        proofSource: "inline",
-        proofBytes: mockProof,
         root: mockRoot,
         nullifierHash: mockNullifier,
         outputCommitment1: mockOutput1,
         outputCommitment2: mockOutput2,
         vkHash: mockVkHash,
+        output1EphemeralPubX: mockEphPubX1,
+        output1EncryptedAmountWithSign: mockEncAmount1,
+        output2EphemeralPubX: mockEphPubX2,
+        output2EncryptedAmountWithSign: mockEncAmount2,
       });
 
-      // Check structure: discriminator(1) + proof_source(1) + proof_len(4) + proof(600) + root(32) + nullifier(32) + out1(32) + out2(32) + vk_hash(32)
-      const expectedSize = 1 + 1 + 4 + 600 + 32 + 32 + 32 + 32 + 32;
+      // Check structure: disc(1) + root(32) + nullifier(32) + out1(32) + out2(32) + vk_hash(32) + eph1(32) + enc1(32) + eph2(32) + enc2(32)
+      const expectedSize = 1 + 32 + 32 + 32 + 32 + 32 + 32 + 32 + 32 + 32;
       expect(data.length).toBe(expectedSize);
 
       // Check discriminator (SPEND_SPLIT = 4)
       expect(data[0]).toBe(4);
 
-      // Check proof_source (inline = 0)
-      expect(data[1]).toBe(0);
-    });
-
-    it("should build buffer mode instruction data correctly", () => {
-      const data = buildSplitInstructionData({
-        proofSource: "buffer",
-        root: mockRoot,
-        nullifierHash: mockNullifier,
-        outputCommitment1: mockOutput1,
-        outputCommitment2: mockOutput2,
-        vkHash: mockVkHash,
-      });
-
-      // Check structure: discriminator(1) + proof_source(1) + root(32) + nullifier(32) + out1(32) + out2(32) + vk_hash(32)
-      const expectedSize = 1 + 1 + 32 + 32 + 32 + 32 + 32;
-      expect(data.length).toBe(expectedSize);
-
-      // Check discriminator (SPEND_SPLIT = 4)
-      expect(data[0]).toBe(4);
-
-      // Check proof_source (buffer = 1)
-      expect(data[1]).toBe(1);
+      // Verify root is at correct position
+      expect(data.slice(1, 33)).toEqual(mockRoot);
     });
   });
 

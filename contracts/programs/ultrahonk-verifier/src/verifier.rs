@@ -5,21 +5,16 @@
 //! 2. Verify sumcheck
 //! 3. Verify shplemini (batch KZG opening + pairing)
 //!
-//! In devnet mode, cryptographic verification is skipped for faster iteration.
+//! All proofs are cryptographically verified regardless of network.
 
-#[cfg(not(feature = "devnet"))]
 use crate::bn254::{pairing_check, G2Point};
-#[cfg(not(feature = "devnet"))]
 use crate::constants::{
     BATCHED_RELATION_PARTIAL_LENGTH, NUMBER_OF_ALPHAS,
     NUMBER_OF_ENTITIES, SRS_G2_GENERATOR, SRS_G2_X,
 };
 use crate::error::UltraHonkError;
-#[cfg(not(feature = "devnet"))]
 use crate::transcript::{Transcript, split_challenge};
-#[cfg(not(feature = "devnet"))]
-use crate::types::{Fr, G1ProofPoint};
-use crate::types::{UltraHonkProof, VerificationKey};
+use crate::types::{Fr, G1ProofPoint, UltraHonkProof, VerificationKey};
 
 /// Verify an UltraHonk proof
 ///
@@ -51,22 +46,11 @@ pub fn verify_ultrahonk_proof(
         return Err(UltraHonkError::InvalidPublicInput);
     }
 
-    // Demo mode: skip full cryptographic verification for faster devnet iteration
-    #[cfg(feature = "devnet")]
-    {
-        pinocchio::msg!("Demo mode: basic validation passed, skipping cryptographic verification");
-        return Ok(true);
-    }
-
-    // Full cryptographic verification
-    #[cfg(not(feature = "devnet"))]
-    {
-        verify_full(vk, proof, public_inputs)
-    }
+    // Full cryptographic verification (always enabled)
+    verify_full(vk, proof, public_inputs)
 }
 
 /// Full cryptographic verification
-#[cfg(not(feature = "devnet"))]
 #[inline(never)]
 fn verify_full(
     vk: &VerificationKey,
@@ -99,7 +83,6 @@ fn verify_full(
 /// Transcript challenges for UltraHonk verification
 ///
 /// Uses Vec instead of fixed arrays to avoid stack overflow on Solana (4KB limit).
-#[cfg(not(feature = "devnet"))]
 #[derive(Debug)]
 pub struct TranscriptChallenges {
     // Relation parameters
@@ -126,7 +109,6 @@ pub struct TranscriptChallenges {
 }
 
 /// Generate all Fiat-Shamir challenges from proof and public inputs
-#[cfg(not(feature = "devnet"))]
 #[inline(never)]
 fn generate_transcript(
     vk: &VerificationKey,
@@ -245,7 +227,6 @@ fn generate_transcript(
 }
 
 /// Helper to absorb G1ProofPoint into transcript
-#[cfg(not(feature = "devnet"))]
 fn absorb_g1_proof_point(t: &mut Transcript, point: &G1ProofPoint) {
     t.absorb_bytes(&point.x_0);
     t.absorb_bytes(&point.x_1);
@@ -258,7 +239,6 @@ fn absorb_g1_proof_point(t: &mut Transcript, point: &G1ProofPoint) {
 /// delta = prod_i((gamma + beta*(n+offset+i) + pi_i) / (gamma - beta*(offset+1+i) + pi_i))
 ///
 /// This is used in the grand product permutation argument.
-#[cfg(not(feature = "devnet"))]
 fn compute_public_inputs_delta(
     beta: &Fr,
     gamma: &Fr,
@@ -311,7 +291,6 @@ fn compute_public_inputs_delta(
 ///
 /// Sumcheck verifies that a multivariate polynomial evaluates to the claimed sum.
 /// Each round reduces the degree of the polynomial by fixing one variable.
-#[cfg(not(feature = "devnet"))]
 #[inline(never)]
 fn verify_sumcheck(
     proof: &UltraHonkProof,
@@ -382,7 +361,6 @@ fn verify_sumcheck(
 /// evaluate at point x using:
 ///   P(x) = B(x) * sum_i(y_i / (d_i * (x - i)))
 /// where B(x) = prod_i(x - i) and d_i = prod_{j != i}(i - j)
-#[cfg(not(feature = "devnet"))]
 fn evaluate_univariate_barycentric(
     univariate: &[Fr; BATCHED_RELATION_PARTIAL_LENGTH],
     challenge: &Fr,
@@ -444,7 +422,6 @@ fn evaluate_univariate_barycentric(
 ///   P = sum(scalars[i] * commitments[i])
 /// And verifies:
 ///   e(P, [x]_2) * e(-kzg_quotient, G2) == 1
-#[cfg(not(feature = "devnet"))]
 #[inline(never)]
 fn verify_shplemini(
     _vk: &VerificationKey,
@@ -540,13 +517,10 @@ mod tests {
             0x19, 0x1a, 0x1b, 0x1c, 0x1d, 0x1e, 0x1f, 0x20,
         ]);
 
-        #[cfg(not(feature = "devnet"))]
-        {
-            let (lower, upper) = split_challenge(&challenge);
-            // Lower should have bytes 16-31 in positions 16-31
-            assert_eq!(lower.0[16..32], challenge.0[16..32]);
-            // Upper should have bytes 0-15 in positions 16-31
-            assert_eq!(upper.0[16..32], challenge.0[0..16]);
-        }
+        let (lower, upper) = split_challenge(&challenge);
+        // Lower should have bytes 16-31 in positions 16-31
+        assert_eq!(lower.0[16..32], challenge.0[16..32]);
+        // Upper should have bytes 0-15 in positions 16-31
+        assert_eq!(upper.0[16..32], challenge.0[0..16]);
     }
 }

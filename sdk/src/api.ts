@@ -59,7 +59,7 @@ import {
   createStealthDeposit,
   prepareClaimInputs,
   type ScannedNote,
-} from "./stealth";
+} from "./stealth/index";
 import { type StealthMetaAddress, type ZVaultKeys } from "./keys";
 import { type MerkleProof, TREE_DEPTH, ZERO_VALUE } from "./merkle";
 import { bigintToBytes, bytesToBigint, hexToBytes, BN254_FIELD_PRIME } from "./crypto";
@@ -1367,8 +1367,8 @@ export {
   scanAnnouncements,
   prepareClaimInputs,
   isWalletAdapter,
-} from "./stealth";
+} from "./stealth/index";
 export type { Note } from "./note";
 export type { MerkleProof } from "./merkle";
-export type { StealthDeposit, ScannedNote, ClaimInputs } from "./stealth";
+export type { StealthDeposit, ScannedNote, ClaimInputs } from "./stealth/index";
 export type { StealthMetaAddress, ZVaultKeys } from "./keys";

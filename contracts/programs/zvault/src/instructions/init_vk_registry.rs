@@ -179,7 +179,12 @@ pub fn process_update_vk_registry(
         let registry = VkRegistry::from_bytes_mut(&mut vk_data)?;
 
         // Verify caller is authority
-        if !registry.is_authority(authority.key().as_ref().try_into().unwrap()) {
+        let authority_key: &[u8; 32] = authority
+            .key()
+            .as_ref()
+            .try_into()
+            .map_err(|_| ProgramError::InvalidAccountData)?;
+        if !registry.is_authority(authority_key) {
             return Err(ZVaultError::Unauthorized.into());
         }
 

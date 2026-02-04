@@ -1,0 +1,22 @@
+# Build artifacts
+target/
+
+# Generated prover config (contains test values)
+**/Prover.toml
+
+# Proof files
+*.proof
+*.gz
+
+# Node modules
+node_modules/
+
+# Bun lockfile (if not committed)
+# bun.lock
+
+# IDE
+.vscode/
+.idea/
+
+# OS files
+.DS_Store

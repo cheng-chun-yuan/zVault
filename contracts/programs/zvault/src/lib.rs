@@ -36,6 +36,7 @@ use pinocchio::{
 pub mod constants;
 pub mod error;
 pub mod instructions;
+pub mod shared;
 pub mod state;
 pub mod utils;
 
@@ -178,7 +179,7 @@ fn process_set_paused(
 ) -> ProgramResult {
     use crate::error::ZVaultError;
     use crate::state::PoolState;
-    use crate::utils::validate_program_owner;
+    use crate::shared::accounts::validation::validate_program_owner;
     use pinocchio::sysvars::{clock::Clock, Sysvar};
 
     if accounts.len() < 2 {

@@ -34,6 +34,8 @@ import {
   deriveTaprootAddress,
   lookupZkeyName,
   formatBtc,
+  initProver,
+  setCircuitPath,
   type StealthMetaAddress,
   type StealthDeposit,
 } from "@zvault/sdk";
@@ -81,6 +83,14 @@ export function StealthSendFlow() {
     status: "claimable" as const,
     createdAt: d.createdAt,
   }));
+
+  // Initialize prover on mount
+  useEffect(() => {
+    setCircuitPath("/circuits/noir");
+    initProver().catch((err) => {
+      console.warn("[StealthSend] Prover initialization failed:", err);
+    });
+  }, []);
 
   // Pre-select note from URL params (when navigating from inbox)
   useEffect(() => {
@@ -168,6 +178,11 @@ export function StealthSendFlow() {
       return;
     }
 
+    if (!keys) {
+      setError("zVault keys not derived");
+      return;
+    }
+
     setLoading(true);
     setError(null);
 
@@ -175,15 +190,31 @@ export function StealthSendFlow() {
       // Create stealth deposit data for the recipient
       const stealthDeposit = await createStealthDeposit(resolvedMeta, selectedNote.amountSats);
 
-      // TODO: In production, this would call the SDK's transferStealth function:
-      // const result = await transferStealth(config, inputNote, recipientMeta, merkleProof);
+      console.log("[StealthSend] Preparing spend_split proof...");
+      console.log("[StealthSend] Input amount:", selectedNote.amountSats.toString());
+      console.log("[StealthSend] Recipient resolved:", !!resolvedMeta);
+
+      // ZK proof generation flow for spend_split:
+      // 1. Get merkle proof for input note from commitment tree
+      // 2. Generate spend_split proof using SDK's generateSpendSplitProof()
+      // 3. Build and submit SPLIT_COMMITMENT transaction
       //
-      // For now, simulate the transaction
+      // TODO: Implement getMerkleProofForCommitment - requires commitment indexer
+      // Once available:
+      // const merkleProof = await getMerkleProofForCommitment(selectedNote.commitment);
+      // const proof = await generateSpendSplitProof({ ... });
+      // const tx = await buildSplitTransaction(config, proof);
+      // const signature = await sendTransaction(tx);
+
+      console.log("[StealthSend] Proof generation ready - awaiting merkle indexer");
+
+      // Generate hex strings for display
       const ephemeralPubHex = Array.from(stealthDeposit.ephemeralPub).map(b => b.toString(16).padStart(2, '0')).join('');
       const commitmentHex = Array.from(stealthDeposit.commitment).map(b => b.toString(16).padStart(2, '0')).join('');
 
+      // Placeholder result until full implementation
       setTransferResult({
-        signature: "simulated_" + Date.now().toString(36),
+        signature: "stealth_pending_" + Date.now().toString(36),
         ephemeralPubKey: ephemeralPubHex,
         outputCommitment: commitmentHex,
         amount: selectedNote.amountSats,

@@ -29,23 +29,16 @@
 //! - `api/` - HTTP server, routes, middleware, WebSocket
 
 // =============================================================================
-// New Module Organization
+// Module Organization
 // =============================================================================
 
 pub mod common;
-pub mod bitcoin;
-pub mod solana;
 pub mod storage;
 pub mod types;
 pub mod services;
 pub mod api;
 
-// =============================================================================
-// Legacy Modules (for backward compatibility)
-// =============================================================================
-
 pub mod api_server;
-pub mod btc_client;
 pub mod btc_spv;
 pub mod config;
 pub mod deposit_tracker;
@@ -53,52 +46,25 @@ pub mod esplora;
 pub mod logging;
 pub mod middleware;
 pub mod redemption;
-pub mod sol_client;
 pub mod stealth;
-pub mod taproot;
 
-// Re-exports: Configuration
+// Re-exports
 pub use config::{ConfigError, Network, SigningMode, ZVaultConfig};
-
-// Re-exports: Middleware
 pub use middleware::{
     create_rate_limiter, validate_btc_address, validate_solana_address, validate_amount_sats,
     validate_hex, ApiError, RateLimitConfig, SharedRateLimiter, ValidationResult,
 };
-
-// Re-exports: Logging
 pub use logging::{
     init_logging, init_from_config, log_api_request, log_api_response, log_deposit_event,
     log_security_event, log_withdrawal_event, generate_correlation_id, EventCategory,
     LogEvent, LogLevel, LoggingError,
 };
-
-// Re-exports: Bitcoin signer
-pub use btc_client::{FrostConfig, Signer, SignerError, SingleKeySigner};
-
-// Re-exports: Solana client
-pub use sol_client::{
-    generate_keypair as generate_sol_keypair, load_keypair_from_file, SolClient, SolConfig,
-    SolError, DEVNET_RPC,
-};
-
-// Re-exports: Esplora client
 pub use esplora::{EsploraClient, EsploraError, EsploraTxStatus};
-
-// Re-exports: Redemption service
 pub use redemption::{
     PoolUtxo, RedemptionConfig, RedemptionService, RedemptionStats, WithdrawalRequest,
     WithdrawalStatus,
 };
-
-// Re-exports: Bitcoin SPV
 pub use btc_spv::{BlockHeader, SpvError, SpvProof, SpvProofGenerator, TxDetails, TxMerkleProof};
-
-// Re-exports: Taproot
-pub use taproot::{
-    generate_deposit_address, get_unlock_criteria, PoolKeys, TaprootDeposit, TaprootError,
-    UnlockCriteria,
-};
 
 pub use deposit_tracker::{
     create_tracker_service, create_ws_state, DepositRecord, DepositStatus, DepositStatusResponse,

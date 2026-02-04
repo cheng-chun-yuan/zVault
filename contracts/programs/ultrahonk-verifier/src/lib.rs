@@ -56,20 +56,21 @@ pub const ID: Pubkey = [
 
 /// Instruction discriminators
 pub mod instruction {
-    /// Verify an UltraHonk proof
-    /// Data: [proof_bytes...] || [public_inputs_bytes...] || [vk_hash (32 bytes)]
+    /// Verify an UltraHonk proof with VK account
+    /// Accounts: [vk_account]
+    /// Data: [proof_len (4)] || [proof_bytes...] || [public_inputs_count (4)] || [public_inputs (N × 32)] || [vk_hash (32)]
     pub const VERIFY: u8 = 0;
 
-    /// Verify proof with verification key from account
+    /// Verify proof with verification key from account (legacy, same as VERIFY)
     /// Accounts: [vk_account]
-    /// Data: [proof_bytes...] || [public_inputs_bytes...]
+    /// Data: [proof_len (4)] || [proof_bytes...] || [public_inputs_count (4)] || [public_inputs (N × 32)]
     pub const VERIFY_WITH_VK_ACCOUNT: u8 = 1;
 
     /// Initialize verification key account
     pub const INIT_VK: u8 = 2;
 
-    /// Verify proof from buffer (for large proofs > 10KB)
-    /// Accounts: [proof_buffer]
+    /// Verify proof from buffer with VK account (for large proofs > 10KB)
+    /// Accounts: [proof_buffer, vk_account]
     /// Data: [public_inputs_count (4)] || [public_inputs (N × 32)] || [vk_hash (32)]
     pub const VERIFY_FROM_BUFFER: u8 = 3;
 }
@@ -98,17 +99,30 @@ pub fn process_instruction(
 
 /// Process VERIFY instruction
 ///
+/// Accounts: [vk_account]
 /// Instruction data format:
 /// - proof_len (4 bytes, little-endian)
 /// - proof_bytes (proof_len bytes)
 /// - public_inputs_count (4 bytes, little-endian)
 /// - public_inputs (count × 32 bytes)
-/// - vk_hash (32 bytes) - hash of verification key for lookup
+/// - vk_hash (32 bytes) - hash of verification key for integrity check
 fn process_verify(
-    _program_id: &Pubkey,
-    _accounts: &[AccountInfo],
+    program_id: &Pubkey,
+    accounts: &[AccountInfo],
     data: &[u8],
 ) -> ProgramResult {
+    // Require VK account
+    if accounts.is_empty() {
+        return Err(ProgramError::NotEnoughAccountKeys);
+    }
+    let vk_account = &accounts[0];
+
+    // Verify VK account ownership
+    if vk_account.owner() != program_id {
+        pinocchio::msg!("VK account not owned by verifier program");
+        return Err(ProgramError::InvalidAccountOwner);
+    }
+
     // Parse proof length
     if data.len() < 4 {
         return Err(ProgramError::InvalidInstructionData);
@@ -138,7 +152,22 @@ fn process_verify(
     }
 
     let public_inputs_bytes = &data[pi_start..pi_end];
-    let _vk_hash = &data[pi_end..pi_end + 32];
+    let vk_hash = &data[pi_end..pi_end + 32];
+
+    // Load VK from account
+    let vk_data = vk_account.try_borrow_data()?;
+    let vk = VerificationKey::from_bytes_boxed(&vk_data)
+        .map_err(|_| {
+            pinocchio::msg!("Failed to parse VK from account");
+            ProgramError::InvalidAccountData
+        })?;
+
+    // Verify VK hash integrity
+    let computed_hash = compute_vk_hash(&vk_data);
+    if computed_hash != vk_hash {
+        pinocchio::msg!("VK hash mismatch");
+        return Err(UltraHonkError::VkHashMismatch.into());
+    }
 
     // Parse proof (use Box to avoid stack overflow)
     let proof = Box::new(
@@ -156,19 +185,11 @@ fn process_verify(
         })
         .collect();
 
-    // TODO: Load VK from registry using vk_hash
-    // For now, use embedded VK (circuit-specific)
-    // Uses boxed factory to avoid stack overflow
-    let vk = VerificationKey::boxed_with_params(
-        proof.circuit_size_log,
-        public_inputs.len() as u32,
-    );
-
     // Verify proof
     let valid = verify_ultrahonk_proof(&vk, &proof, &public_inputs)
-        .map_err(|_| {
+        .map_err(|e| {
             pinocchio::msg!("Verification error");
-            ProgramError::InvalidArgument
+            ProgramError::from(e)
         })?;
 
     if !valid {
@@ -266,21 +287,36 @@ fn process_verify_with_vk(
 /// ChadBuffer authority offset (first 32 bytes are authority)
 const CHADBUFFER_DATA_OFFSET: usize = 32;
 
+/// Compute VK hash using keccak256
+fn compute_vk_hash(vk_data: &[u8]) -> [u8; 32] {
+    use solana_nostd_keccak::hashv;
+    // Hash the minimum VK size to avoid length extension issues
+    let hash_len = core::cmp::min(vk_data.len(), VerificationKey::MIN_SIZE);
+    hashv(&[&vk_data[..hash_len]])
+}
+
 /// Process VERIFY_FROM_BUFFER instruction
 ///
 /// Reads proof from a ChadBuffer account, avoiding CPI data size limits.
 /// Data format: [public_inputs_count (4)] || [public_inputs (N × 32)] || [vk_hash (32)]
-/// Accounts: [proof_buffer]
+/// Accounts: [proof_buffer, vk_account]
 fn process_verify_from_buffer(
-    _program_id: &Pubkey,
+    program_id: &Pubkey,
     accounts: &[AccountInfo],
     data: &[u8],
 ) -> ProgramResult {
-    if accounts.is_empty() {
+    if accounts.len() < 2 {
         return Err(ProgramError::NotEnoughAccountKeys);
     }
 
     let proof_buffer = &accounts[0];
+    let vk_account = &accounts[1];
+
+    // Verify VK account ownership
+    if vk_account.owner() != program_id {
+        pinocchio::msg!("VK account not owned by verifier program");
+        return Err(ProgramError::InvalidAccountOwner);
+    }
 
     // Parse public inputs count
     if data.len() < 4 {
@@ -294,7 +330,22 @@ fn process_verify_from_buffer(
     }
 
     let public_inputs_bytes = &data[4..pi_end];
-    let _vk_hash = &data[pi_end..pi_end + 32];
+    let vk_hash = &data[pi_end..pi_end + 32];
+
+    // Load VK from account
+    let vk_data = vk_account.try_borrow_data()?;
+    let vk = VerificationKey::from_bytes_boxed(&vk_data)
+        .map_err(|_| {
+            pinocchio::msg!("Failed to parse VK from account");
+            ProgramError::InvalidAccountData
+        })?;
+
+    // Verify VK hash integrity
+    let computed_hash = compute_vk_hash(&vk_data);
+    if computed_hash != vk_hash {
+        pinocchio::msg!("VK hash mismatch");
+        return Err(UltraHonkError::VkHashMismatch.into());
+    }
 
     // Read proof from buffer (skip 32-byte ChadBuffer authority)
     let buffer_data = proof_buffer.try_borrow_data()?;
@@ -324,19 +375,11 @@ fn process_verify_from_buffer(
         })
         .collect();
 
-    // Create VK that matches the proof's circuit parameters
-    // For demo: derive VK from proof's circuit_size_log and actual public inputs count
-    // Uses boxed factory to avoid stack overflow
-    let vk = VerificationKey::boxed_with_params(
-        proof.circuit_size_log,
-        public_inputs.len() as u32,
-    );
-
     // Verify proof
     let valid = verify_ultrahonk_proof(&vk, &proof, &public_inputs)
-        .map_err(|_| {
+        .map_err(|e| {
             pinocchio::msg!("Verification error");
-            ProgramError::InvalidArgument
+            ProgramError::from(e)
         })?;
 
     if !valid {

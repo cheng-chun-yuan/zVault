@@ -170,15 +170,20 @@ export abstract class BaseDepositWatcher {
     // Generate note with random secrets
     const note = generateNote(amount);
 
-    // For taproot derivation, use XOR of nullifier/secret as placeholder commitment
-    // In production, compute actual Poseidon hash via helper circuit or backend
-    const placeholderCommitment = bigintToBytes(
-      (note.nullifier ^ note.secret) % (2n ** 256n)
-    );
+    // Compute real commitment using Poseidon hash
+    // In unified model: commitment = Poseidon(pubKeyX, amount)
+    // where pubKeyX = (privKey * G).x and privKey = nullifier
+    const { computeUnifiedCommitmentSync } = await import("../poseidon");
+    const { pointMul, GRUMPKIN_GENERATOR } = await import("../crypto");
+
+    const privKey = note.nullifier;
+    const pubKey = pointMul(privKey, GRUMPKIN_GENERATOR);
+    const commitment = computeUnifiedCommitmentSync(pubKey.x, amount);
+    const commitmentBytes = bigintToBytes(commitment);
 
     // Derive taproot address from commitment
     const network = this.config.network === "mainnet" ? "mainnet" : "testnet";
-    const { address } = await deriveTaprootAddress(placeholderCommitment, network);
+    const { address } = await deriveTaprootAddress(commitmentBytes, network);
 
     // Create claim link
     const claimLink = createClaimLink(note, baseUrl);
@@ -194,7 +199,7 @@ export abstract class BaseDepositWatcher {
       status: "waiting",
       confirmations: 0,
       requiredConfirmations: this.config.requiredConfirmations,
-      commitment: bytesToHex(placeholderCommitment),
+      commitment: bytesToHex(commitmentBytes),
       createdAt: Date.now(),
     };
 

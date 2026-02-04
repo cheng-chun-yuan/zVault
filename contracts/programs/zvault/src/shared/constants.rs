@@ -1,0 +1,88 @@
+//! Program constants for zVault
+//!
+//! This module contains all configuration constants used throughout the program.
+//! Constants are organized by category for easier maintenance.
+
+// =============================================================================
+// Deposit/Withdrawal Limits
+// =============================================================================
+
+/// Minimum deposit amount in satoshis (0.0001 BTC)
+pub const MIN_DEPOSIT_SATS: u64 = 10_000;
+
+/// Maximum deposit amount in satoshis (1000 BTC)
+pub const MAX_DEPOSIT_SATS: u64 = 100_000_000_000;
+
+// =============================================================================
+// Yield Pool Limits
+// =============================================================================
+
+/// Maximum stakeable amount in yield pool (100 BTC = 10B sats)
+/// This prevents overflow in yield calculations:
+/// max_principal * max_epochs * max_rate < u64::MAX
+/// 10_000_000_000 * 100_000 * 10_000 = 10^19 < 1.8*10^19 (u64::MAX)
+pub const MAX_POOL_PRINCIPAL: u64 = 10_000_000_000;
+
+/// Maximum epochs for yield calculation (prevents overflow)
+pub const MAX_YIELD_EPOCHS: u64 = 100_000;
+
+// =============================================================================
+// Bitcoin Configuration
+// =============================================================================
+
+/// Required Bitcoin confirmations for deposits
+pub const REQUIRED_CONFIRMATIONS: u32 = 2;
+
+/// Maximum BTC address length (bech32m)
+pub const MAX_BTC_ADDRESS_LEN: usize = 62;
+
+/// Maximum Bitcoin txid length (hex string)
+pub const MAX_BTC_TXID_LEN: usize = 64;
+
+// =============================================================================
+// Proof Configuration
+// =============================================================================
+
+/// Maximum UltraHonk proof size in bytes (8-20KB typical)
+pub const MAX_ULTRAHONK_PROOF_SIZE: usize = 20_000;
+
+// =============================================================================
+// Program IDs
+// =============================================================================
+
+/// Token-2022 program ID (TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb)
+pub const TOKEN_2022_PROGRAM_ID: [u8; 32] = [
+    0x06, 0xdd, 0xf6, 0xe1, 0xee, 0x75, 0x8f, 0xde,
+    0x18, 0x42, 0x5d, 0xbc, 0xe4, 0x6c, 0xcd, 0xda,
+    0xb6, 0x1a, 0xfc, 0x4d, 0x83, 0xb9, 0x0d, 0x27,
+    0xfe, 0xbd, 0xf9, 0x28, 0xd8, 0xa1, 0x8b, 0xfc,
+];
+
+/// System program ID (all zeros)
+pub const SYSTEM_PROGRAM_ID: [u8; 32] = [0; 32];
+
+// =============================================================================
+// Account Discriminators
+// =============================================================================
+
+/// Discriminator for closed accounts (prevents revival attacks)
+pub const CLOSED_ACCOUNT_DISCRIMINATOR: u8 = 0xFF;
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_deposit_limits_ordering() {
+        assert!(MIN_DEPOSIT_SATS < MAX_DEPOSIT_SATS);
+    }
+
+    #[test]
+    fn test_yield_overflow_safety() {
+        // Verify that max values don't overflow in yield calculations
+        let max_calculation = (MAX_POOL_PRINCIPAL as u128)
+            * (MAX_YIELD_EPOCHS as u128)
+            * 10_000u128; // max rate in bps
+        assert!(max_calculation < u64::MAX as u128);
+    }
+}

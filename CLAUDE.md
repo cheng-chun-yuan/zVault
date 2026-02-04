@@ -28,8 +28,8 @@ bun run e2e:devnet   # E2E tests on devnet
 
 ### Contracts (Pinocchio) - `/contracts`
 ```bash
-anchor build         # Build programs
-anchor deploy        # Deploy to devnet
+cargo build-sbf      # Build programs
+solana program deploy target/deploy/zvault.so  # Deploy to devnet
 bun run test         # TypeScript tests
 ```
 

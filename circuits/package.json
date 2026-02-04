@@ -1,0 +1,47 @@
+{
+  "name": "@zvault/circuits",
+  "version": "0.1.0",
+  "description": "Noir circuits for zVault - privacy-preserving Bitcoin-to-Solana bridge",
+  "type": "module",
+  "scripts": {
+    "compile": "bun run compile:all",
+    "compile:all": "nargo compile --workspace",
+    "compile:claim": "nargo compile -p zvault_claim",
+    "compile:spend_split": "nargo compile -p zvault_spend_split",
+    "compile:spend_partial_public": "nargo compile -p zvault_spend_partial_public",
+    "compile:pool_deposit": "nargo compile -p zvault_pool_deposit",
+    "compile:pool_withdraw": "nargo compile -p zvault_pool_withdraw",
+    "compile:pool_claim_yield": "nargo compile -p zvault_pool_claim_yield",
+    "compile:proof_of_innocence": "nargo compile -p zvault_proof_of_innocence",
+    "test": "nargo test --workspace",
+    "test:claim": "nargo test -p zvault_claim",
+    "test:spend_split": "nargo test -p zvault_spend_split",
+    "test:spend_partial_public": "nargo test -p zvault_spend_partial_public",
+    "test:pool_deposit": "nargo test -p zvault_pool_deposit",
+    "test:pool_withdraw": "nargo test -p zvault_pool_withdraw",
+    "test:pool_claim_yield": "nargo test -p zvault_pool_claim_yield",
+    "test:proof_of_innocence": "nargo test -p zvault_proof_of_innocence",
+    "prove": "bun run scripts/prove.ts",
+    "clean": "rm -rf target"
+  },
+  "dependencies": {
+    "@aztec/bb.js": "3.0.3",
+    "@msgpack/msgpack": "^3.1.3",
+    "@noir-lang/noir_js": "1.0.0-beta.18"
+  },
+  "devDependencies": {
+    "@types/node": "^20.10.0",
+    "typescript": "^5.3.0"
+  },
+  "keywords": [
+    "noir",
+    "zk",
+    "zero-knowledge",
+    "circuits",
+    "bitcoin",
+    "solana",
+    "privacy"
+  ],
+  "author": "zVault Team",
+  "license": "MIT"
+}

@@ -293,13 +293,16 @@ export async function submitSPVVerification(
     });
 
     // TODO: Build and send actual transaction
-    // For now, return success with the prepared data
+    // Return pending status - data is ready but tx not yet submitted
     console.log("[SPV] Verification data ready for on-chain submission");
+    console.log("[SPV] Header and merkle proof prepared - awaiting transaction builder");
+    console.log("[SPV] Note: Transaction submission not yet implemented");
 
-    // In demo mode, just return success
+    // Return success without signature to indicate data is prepared
+    // but no on-chain transaction was actually submitted
     return {
       success: true,
-      signature: "demo_" + Date.now().toString(16),
+      // signature intentionally omitted - no transaction submitted yet
     };
   } catch (error) {
     console.error("[SPV] Submission failed:", error);
