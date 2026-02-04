@@ -176,3 +176,45 @@ const stealth = createStealthDeposit(recipientPubkey, amount);
 - **Poseidon Hashing**: Done inside Noir circuits (Grumpkin curve)
 - **Token**: zkBTC uses Token-2022 program
 - **Solana SDK**: Uses `@solana/kit` (new framework-kit)
+
+## Testing: Localnet vs Devnet
+
+### Poseidon Syscall Limitation
+
+**Important:** The Solana test validator (`solana-test-validator`) does NOT support the Poseidon syscall (`sol_poseidon`).
+
+| Environment | Merkle Tree Hash | ZK Proof Compatibility |
+|-------------|------------------|------------------------|
+| **Localnet** | SHA256 (fallback) | ❌ Incompatible with Noir circuits |
+| **Devnet/Mainnet** | Poseidon (syscall) | ✅ Compatible with Noir circuits |
+
+### Impact on Testing
+
+- **Localnet**: Unit tests, instruction building, and mock proofs work fine. Real ZK proof tests will **fail** because the Noir circuit uses Poseidon but on-chain tree uses SHA256.
+- **Devnet**: Full E2E testing with real ZK proofs works correctly.
+
+### Recommended Testing Strategy
+
+```bash
+# Fast iteration (no real proofs) - use localnet
+solana-test-validator --reset
+NETWORK=localnet bun test test/e2e/*.test.ts
+
+# Full E2E with real proofs - use devnet
+NETWORK=devnet bun run e2e:devnet
+```
+
+### SDK Localnet Mode
+
+The SDK automatically switches to SHA256 for Merkle tree operations when on localnet to match on-chain behavior:
+
+```typescript
+import { useLocalnetMode, isLocalnetMode } from "@zvault/sdk";
+
+// Check current mode
+if (isLocalnetMode()) {
+  console.log("Using SHA256 (localnet mode)");
+}
+```
+
+See `sdk/docs/E2E_TESTING.md` for detailed testing guide.

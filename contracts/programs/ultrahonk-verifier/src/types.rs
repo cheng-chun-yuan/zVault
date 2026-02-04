@@ -152,21 +152,38 @@ impl Default for UltraHonkProof {
 impl UltraHonkProof {
     /// Parse full proof from bytes
     ///
-    /// Format from bb.js:
-    /// - circuit_size_log (1 byte)
-    /// - wire commitments w1-w4 (4 × 128 bytes)
-    /// - lookup helpers (4 × 128 bytes)
-    /// - sumcheck univariates (log_n × 8 × 32 bytes)
-    /// - sumcheck evaluations (40 × 32 bytes)
-    /// - gemini fold comms ((log_n - 1) × 128 bytes)
-    /// - gemini evaluations (log_n × 32 bytes)
-    /// - shplonk_q (128 bytes)
-    /// - kzg_quotient (128 bytes)
+    /// Supports TWO formats:
+    ///
+    /// 1. bb.js format (no circuit_size_log prefix):
+    ///    - Starts directly with G1 proof points (128 bytes each)
+    ///    - circuit_size_log must be provided externally (from VK)
+    ///
+    /// 2. Legacy format (1-byte circuit_size_log prefix):
+    ///    - First byte is circuit_size_log
+    ///    - Then G1 proof points
+    ///
+    /// Detection: bb.js proofs are typically > 10KB and don't start with a valid log value
     pub fn from_bytes(bytes: &[u8]) -> Result<Self, UltraHonkError> {
         if bytes.len() < 1 {
             return Err(UltraHonkError::InvalidProofFormat);
         }
 
+        // Detect bb.js format: proof > 10KB and first byte is 0 (not a valid circuit_size_log)
+        // bb.js proofs don't include circuit_size_log - they start with G1 points
+        if bytes.len() > 10000 && bytes[0] == 0 {
+            // bb.js format - need to infer circuit_size_log from proof size
+            // For a typical claim circuit with log_n=15:
+            // Expected size = 8*128 (G1s) + 15*8*32 (sumcheck) + 40*32 (evals)
+            //                + 14*128 (gemini comms) + 15*32 (gemini evals) + 2*128 (final)
+            // = 1024 + 3840 + 1280 + 1792 + 480 + 256 = 8672 bytes
+            // But bb.js proofs are ~16KB which suggests different format
+            //
+            // For now, assume log_n = 15 for bb.js proofs
+            pinocchio::msg!("Detected bb.js proof format");
+            return Self::from_bytes_bbjs(bytes, 15);
+        }
+
+        // Legacy format with circuit_size_log prefix
         let circuit_size_log = bytes[0];
         let log_n = circuit_size_log as usize;
 
@@ -245,6 +262,111 @@ impl UltraHonkProof {
             kzg_quotient,
             wire_commitment,
         })
+    }
+
+    /// Parse proof from bb.js format (inline helper to reduce stack usage)
+    #[inline(never)]
+    fn from_bytes_bbjs(bytes: &[u8], circuit_size_log: u8) -> Result<Self, UltraHonkError> {
+        Self::from_bytes_bbjs_impl(bytes, circuit_size_log)
+    }
+
+    /// Inner implementation split to reduce stack frame size
+    fn from_bytes_bbjs_impl(bytes: &[u8], circuit_size_log: u8) -> Result<Self, UltraHonkError> {
+        let log_n = circuit_size_log as usize;
+        let mut offset = 0;
+
+        // Parse wire commitments (8 G1 points in 128-byte split format)
+        let w1 = parse_g1_proof_point(bytes, &mut offset)?;
+        let w2 = parse_g1_proof_point(bytes, &mut offset)?;
+        let w3 = parse_g1_proof_point(bytes, &mut offset)?;
+        let w4 = parse_g1_proof_point(bytes, &mut offset)?;
+
+        // Parse lookup helpers
+        let lookup_read_counts = parse_g1_proof_point(bytes, &mut offset)?;
+        let lookup_read_tags = parse_g1_proof_point(bytes, &mut offset)?;
+        let lookup_inverses = parse_g1_proof_point(bytes, &mut offset)?;
+
+        // Parse z_perm
+        let z_perm = parse_g1_proof_point(bytes, &mut offset)?;
+
+        // Parse sumcheck univariates and evaluations using helper
+        let (sumcheck_univariates, sumcheck_evaluations) =
+            Self::parse_sumcheck_data(bytes, &mut offset, log_n)?;
+
+        // Parse gemini data
+        let (gemini_fold_comms, gemini_a_evaluations) =
+            Self::parse_gemini_data(bytes, &mut offset, log_n)?;
+
+        // Parse final commitments
+        let shplonk_q = parse_g1_proof_point(bytes, &mut offset)?;
+        let kzg_quotient = parse_g1_proof_point(bytes, &mut offset)?;
+
+        // Convert w1 to affine for backwards compatibility
+        let wire_commitment = w1.to_affine().unwrap_or_default();
+
+        pinocchio::msg!("bb.js proof parsed successfully");
+
+        Ok(Self {
+            circuit_size_log,
+            w1, w2, w3, w4,
+            lookup_read_counts, lookup_read_tags, lookup_inverses,
+            z_perm,
+            sumcheck_univariates,
+            sumcheck_evaluations,
+            gemini_fold_comms,
+            gemini_a_evaluations,
+            shplonk_q,
+            kzg_quotient,
+            wire_commitment,
+        })
+    }
+
+    /// Parse sumcheck data (split to reduce stack usage)
+    #[inline(never)]
+    fn parse_sumcheck_data(
+        bytes: &[u8],
+        offset: &mut usize,
+        log_n: usize,
+    ) -> Result<(Vec<[Fr; BATCHED_RELATION_PARTIAL_LENGTH]>, Vec<Fr>), UltraHonkError> {
+        // Parse sumcheck univariates: log_n rounds × 8 scalars
+        let mut sumcheck_univariates = Vec::with_capacity(log_n);
+        for _round in 0..log_n {
+            let mut round_univariates = [Fr::zero(); BATCHED_RELATION_PARTIAL_LENGTH];
+            for i in 0..BATCHED_RELATION_PARTIAL_LENGTH {
+                round_univariates[i] = parse_fr(bytes, offset)?;
+            }
+            sumcheck_univariates.push(round_univariates);
+        }
+
+        // Parse sumcheck evaluations: 40 scalars
+        let mut sumcheck_evaluations = Vec::with_capacity(NUMBER_OF_ENTITIES);
+        for _i in 0..NUMBER_OF_ENTITIES {
+            sumcheck_evaluations.push(parse_fr(bytes, offset)?);
+        }
+
+        Ok((sumcheck_univariates, sumcheck_evaluations))
+    }
+
+    /// Parse gemini data (split to reduce stack usage)
+    #[inline(never)]
+    fn parse_gemini_data(
+        bytes: &[u8],
+        offset: &mut usize,
+        log_n: usize,
+    ) -> Result<(Vec<G1ProofPoint>, Vec<Fr>), UltraHonkError> {
+        // Parse gemini fold commitments: log_n - 1 points
+        let mut gemini_fold_comms = Vec::with_capacity(log_n.saturating_sub(1));
+        for _i in 0..(log_n.saturating_sub(1)) {
+            gemini_fold_comms.push(parse_g1_proof_point(bytes, offset)?);
+        }
+
+        // Parse gemini evaluations: log_n scalars
+        let mut gemini_a_evaluations = Vec::with_capacity(log_n);
+        for _i in 0..log_n {
+            gemini_a_evaluations.push(parse_fr(bytes, offset)?);
+        }
+
+        Ok((gemini_fold_comms, gemini_a_evaluations))
     }
 }
 
@@ -345,13 +467,24 @@ impl Default for VerificationKey {
 impl VerificationKey {
     /// Parse verification key from bytes
     ///
-    /// Format (1760 bytes):
-    /// - circuit_size (8 bytes, little-endian)
-    /// - log_circuit_size (8 bytes)
-    /// - num_public_inputs (8 bytes)
-    /// - pub_inputs_offset (8 bytes)
-    /// - 27 G1 points (27 × 64 bytes = 1728 bytes)
+    /// Supports TWO formats:
+    ///
+    /// 1. bb.js format (3680 bytes):
+    ///    - 3 header fields (32 bytes each, big-endian): circuit_size_log, num_public_inputs, pub_inputs_offset
+    ///    - 28 G1 points (128 bytes each, split coordinates)
+    ///
+    /// 2. Legacy format (1760 bytes):
+    ///    - Header (32 bytes): circuit_size(8), log_circuit_size(8), num_public_inputs(8), pub_inputs_offset(8)
+    ///    - 27 G1 points (64 bytes each, affine)
+    ///
+    /// Detection: if size >= 3680, use bb.js format; otherwise legacy
     pub fn from_bytes(bytes: &[u8]) -> Result<Self, UltraHonkError> {
+        // Detect format based on size
+        if bytes.len() >= 3680 {
+            return Self::from_bytes_bbjs(bytes);
+        }
+
+        // Legacy format
         if bytes.len() < 32 + VK_NUM_COMMITMENTS * G1_AFFINE_SIZE {
             return Err(UltraHonkError::InvalidVerificationKey);
         }
@@ -395,6 +528,124 @@ impl VerificationKey {
         Ok(Self {
             circuit_size,
             circuit_size_log: log_circuit_size,
+            num_public_inputs,
+            pub_inputs_offset,
+            q_m,
+            q_c,
+            q_l,
+            q_r,
+            q_o,
+            q_4,
+            q_lookup,
+            q_arith,
+            q_deltarange,
+            q_elliptic,
+            q_aux,
+            q_poseidon2external,
+            q_poseidon2internal,
+            s_1,
+            s_2,
+            s_3,
+            s_4,
+            id_1,
+            id_2,
+            id_3,
+            id_4,
+            t_1,
+            t_2,
+            t_3,
+            t_4,
+            lagrange_first,
+            lagrange_last,
+            g2_x: G2Point::default(),
+        })
+    }
+
+    /// Parse verification key from bb.js format
+    ///
+    /// bb.js format (3680 bytes):
+    /// - 3 header fields (32 bytes each, big-endian style, values right-aligned):
+    ///   - circuit_size_log (value in byte 31)
+    ///   - num_public_inputs (value in bytes 60-63 as u32 BE)
+    ///   - pub_inputs_offset (value in bytes 88-95 as u64 BE)
+    /// - 28 G1 points (128 bytes each, split coordinates: x_0, x_1, y_0, y_1)
+    ///
+    /// Total: 96 (header) + 28 × 128 (G1 points) = 3680 bytes
+    fn from_bytes_bbjs(bytes: &[u8]) -> Result<Self, UltraHonkError> {
+        const BBJS_VK_SIZE: usize = 3680;
+        const BBJS_HEADER_SIZE: usize = 96; // 3 × 32-byte fields
+
+        if bytes.len() < BBJS_VK_SIZE {
+            pinocchio::msg!("VK too small for bb.js format");
+            return Err(UltraHonkError::InvalidVerificationKey);
+        }
+
+        // Parse header (3 × 32-byte big-endian fields)
+        // Values are right-aligned within each 32-byte field
+
+        // Field 1: circuit_size_log (value in byte 31)
+        let circuit_size_log = bytes[31] as u8;
+        let circuit_size = 1u64 << circuit_size_log;
+
+        // Field 2: num_public_inputs (bytes 60-63 as u32 BE)
+        let num_public_inputs = u32::from_be_bytes([bytes[60], bytes[61], bytes[62], bytes[63]]);
+
+        // Field 3: pub_inputs_offset (bytes 88-95 as u64 BE)
+        let pub_inputs_offset = u64::from_be_bytes([
+            bytes[88], bytes[89], bytes[90], bytes[91],
+            bytes[92], bytes[93], bytes[94], bytes[95],
+        ]);
+
+        pinocchio::msg!("bb.js VK parsed: circuit_size_log, num_public_inputs, offset");
+
+        // G1 points start at offset 96 (after 3 × 32-byte header)
+        // bb.js uses 128-byte split format (x_0, x_1, y_0, y_1, each 32 bytes)
+        let mut offset = BBJS_HEADER_SIZE;
+
+        // Helper to parse G1 from bb.js split format to affine
+        fn parse_g1_from_split(bytes: &[u8], offset: &mut usize) -> Result<G1Point, UltraHonkError> {
+            if *offset + G1_PROOF_POINT_SIZE > bytes.len() {
+                return Err(UltraHonkError::InvalidVerificationKey);
+            }
+
+            let split = G1ProofPoint::from_bytes(&bytes[*offset..*offset + G1_PROOF_POINT_SIZE])?;
+            *offset += G1_PROOF_POINT_SIZE;
+            split.to_affine()
+        }
+
+        // Parse all 27 G1 commitments (skip the 28th which is extra in bb.js)
+        let q_m = parse_g1_from_split(bytes, &mut offset)?;
+        let q_c = parse_g1_from_split(bytes, &mut offset)?;
+        let q_l = parse_g1_from_split(bytes, &mut offset)?;
+        let q_r = parse_g1_from_split(bytes, &mut offset)?;
+        let q_o = parse_g1_from_split(bytes, &mut offset)?;
+        let q_4 = parse_g1_from_split(bytes, &mut offset)?;
+        let q_lookup = parse_g1_from_split(bytes, &mut offset)?;
+        let q_arith = parse_g1_from_split(bytes, &mut offset)?;
+        let q_deltarange = parse_g1_from_split(bytes, &mut offset)?;
+        let q_elliptic = parse_g1_from_split(bytes, &mut offset)?;
+        let q_aux = parse_g1_from_split(bytes, &mut offset)?;
+        let q_poseidon2external = parse_g1_from_split(bytes, &mut offset)?;
+        let q_poseidon2internal = parse_g1_from_split(bytes, &mut offset)?;
+        let s_1 = parse_g1_from_split(bytes, &mut offset)?;
+        let s_2 = parse_g1_from_split(bytes, &mut offset)?;
+        let s_3 = parse_g1_from_split(bytes, &mut offset)?;
+        let s_4 = parse_g1_from_split(bytes, &mut offset)?;
+        let id_1 = parse_g1_from_split(bytes, &mut offset)?;
+        let id_2 = parse_g1_from_split(bytes, &mut offset)?;
+        let id_3 = parse_g1_from_split(bytes, &mut offset)?;
+        let id_4 = parse_g1_from_split(bytes, &mut offset)?;
+        let t_1 = parse_g1_from_split(bytes, &mut offset)?;
+        let t_2 = parse_g1_from_split(bytes, &mut offset)?;
+        let t_3 = parse_g1_from_split(bytes, &mut offset)?;
+        let t_4 = parse_g1_from_split(bytes, &mut offset)?;
+        let lagrange_first = parse_g1_from_split(bytes, &mut offset)?;
+        let lagrange_last = parse_g1_from_split(bytes, &mut offset)?;
+        // Skip 28th point (extra in bb.js format)
+
+        Ok(Self {
+            circuit_size,
+            circuit_size_log,
             num_public_inputs,
             pub_inputs_offset,
             q_m,

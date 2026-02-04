@@ -16,5 +16,8 @@ pub mod prior_verification;
 
 pub use prior_verification::{
     require_prior_zk_verification, verify_prior_buffer_verification,
-    verify_prior_verification_any, verifier_instruction, ULTRAHONK_VERIFIER_PROGRAM_ID,
+    verify_prior_verification_any, verifier_instruction,
 };
+
+#[cfg(not(feature = "localnet"))]
+pub use prior_verification::ULTRAHONK_VERIFIER_PROGRAM_ID;

@@ -32,8 +32,9 @@ import * as path from "path";
 
 import { setConfig, getConfig, createConfig, LOCALNET_CONFIG, DEVNET_CONFIG, type NetworkConfig } from "../../src/config";
 import { address as kitAddress } from "@solana/kit";
-import { initPoseidon } from "../../src/poseidon";
-import { initProver, setCircuitPath, isProverAvailable, circuitExists } from "../../src/prover/web";
+import { initPoseidon, useLocalnetMode } from "../../src/poseidon";
+import { initProver, setCircuitPath, isProverAvailable, circuitExists, getVkHash } from "../../src/prover/web";
+import { initVkHashes, hasRealVkHashes, getVkHashForCircuit } from "./helpers";
 
 // =============================================================================
 // Types
@@ -94,6 +95,12 @@ export interface E2ETestContext {
 /** Detect network from environment variable (default: localnet) */
 export const NETWORK = (process.env.NETWORK || "localnet") as "localnet" | "devnet";
 export const IS_DEVNET = NETWORK === "devnet";
+
+/**
+ * Detect if Poseidon is enabled (either devnet or localnet with --clone-feature-set from devnet)
+ * When POSEIDON_ENABLED=true, the localnet was started with devnet features which includes Poseidon syscall
+ */
+export const POSEIDON_ENABLED = IS_DEVNET || process.env.POSEIDON_ENABLED === "true";
 
 /** RPC URLs based on network */
 export const RPC_URL = IS_DEVNET
@@ -246,6 +253,16 @@ export async function initializeTestEnvironment(): Promise<{
   // Set circuit path for prover
   setCircuitPath("./circuits");
 
+  // Enable localnet mode for Merkle tree hashing (uses SHA256 to match on-chain)
+  // The test validator doesn't have Poseidon syscall, so on-chain uses SHA256
+  // UNLESS: POSEIDON_ENABLED=true (validator started with --clone-feature-set from devnet)
+  if (!POSEIDON_ENABLED) {
+    useLocalnetMode(true);
+    console.log("[Setup] Localnet mode enabled (SHA256 for Merkle hashing)");
+  } else if (!IS_DEVNET) {
+    console.log("[Setup] Poseidon-enabled localnet detected (using Poseidon for Merkle hashing)");
+  }
+
   // Initialize Poseidon hasher
   await initPoseidon();
   const poseidonReady = true;
@@ -266,6 +283,12 @@ export async function initializeTestEnvironment(): Promise<{
       proverInitialized = true;
       proverAvailable = proverReady;
       console.log("[Setup] Prover initialized successfully");
+
+      // Initialize real VK hashes from circuits
+      await initVkHashes();
+      if (hasRealVkHashes()) {
+        console.log("[Setup] Real VK hashes loaded from circuits");
+      }
     } catch (error) {
       console.warn("[Setup] Failed to initialize prover:", error);
     }

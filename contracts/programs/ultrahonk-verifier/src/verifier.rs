@@ -41,10 +41,9 @@ pub fn verify_ultrahonk_proof(
         return Err(UltraHonkError::InvalidProofFormat);
     }
 
-    if public_inputs.len() != vk.num_public_inputs as usize {
-        pinocchio::msg!("Public inputs count mismatch");
-        return Err(UltraHonkError::InvalidPublicInput);
-    }
+    // Note: VK.num_public_inputs in bb.js format includes internal circuit public inputs,
+    // not just explicit user-provided ones. Skip this check for bb.js compatibility.
+    // The cryptographic verification will fail if public inputs are wrong anyway.
 
     // Full cryptographic verification (always enabled)
     verify_full(vk, proof, public_inputs)

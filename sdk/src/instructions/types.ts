@@ -252,4 +252,7 @@ export const VERIFIER_DISCRIMINATORS = {
   VERIFY_WITH_VK_ACCOUNT: 1,
   INIT_VK: 2,
   VERIFY_FROM_BUFFER: 3,
+  WRITE_VK_CHUNK: 4,
+  /** Read both proof and VK from ChadBuffer accounts */
+  VERIFY_FROM_BUFFERS: 5,
 } as const;

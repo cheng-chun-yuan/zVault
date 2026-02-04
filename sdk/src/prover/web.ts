@@ -838,3 +838,93 @@ export async function cleanup(): Promise<void> {
   circuitCache.clear();
   console.log("[Prover] Cleaned up all cached resources");
 }
+
+// ==========================================================================
+// VK Hash Extraction
+// ==========================================================================
+
+/** Cache for VK hashes */
+const vkHashCache = new Map<CircuitType, Uint8Array>();
+
+/**
+ * Get the verification key for a circuit
+ *
+ * Returns the raw VK bytes from bb.js
+ */
+export async function getVerificationKey(circuitType: CircuitType): Promise<Uint8Array> {
+  const backend = await getBackend(circuitType);
+  const vk = await backend.getVerificationKey();
+  return vk;
+}
+
+/**
+ * Compute VK hash for a circuit (keccak256 of the VK)
+ *
+ * This hash is stored on-chain in the VK registry and used
+ * to identify which verification key to use for proof verification.
+ *
+ * NOTE: Must use keccak256 to match the on-chain verifier (solana_nostd_keccak).
+ * NOTE: For bb.js format (3680 bytes), hash first 3680 bytes.
+ *       For legacy format (1760 bytes), hash first 1760 bytes.
+ *       The verifier's compute_vk_hash uses min(vk.len, MIN_SIZE) where MIN_SIZE varies by format.
+ */
+export async function getVkHash(circuitType: CircuitType): Promise<Uint8Array> {
+  // Check cache first
+  if (vkHashCache.has(circuitType)) {
+    return vkHashCache.get(circuitType)!;
+  }
+
+  const vk = await getVerificationKey(circuitType);
+
+  // Use keccak256 to hash the VK (must match on-chain verifier's compute_vk_hash)
+  // For bb.js format (>= 3680 bytes), hash the full VK
+  // For legacy format, hash only MIN_SIZE (1760 bytes)
+  const BBJS_VK_SIZE = 3680;
+  const LEGACY_MIN_SIZE = 1760;
+  const hashSize = vk.length >= BBJS_VK_SIZE ? BBJS_VK_SIZE : Math.min(vk.length, LEGACY_MIN_SIZE);
+  const hashInput = vk.slice(0, hashSize);
+
+  const { keccak_256 } = await import("@noble/hashes/sha3");
+  const hash = new Uint8Array(keccak_256(hashInput));
+
+  vkHashCache.set(circuitType, hash);
+  console.log(`[Prover] VK hash for ${circuitType} (keccak256, ${hashInput.length}B): ${bytesToHex(hash).slice(0, 16)}...`);
+  return hash;
+}
+
+/**
+ * Get VK hashes for all available circuits
+ *
+ * Returns a map of circuit type to VK hash for initializing VK registry.
+ */
+export async function getAllVkHashes(): Promise<Map<CircuitType, Uint8Array>> {
+  const circuitTypes: CircuitType[] = [
+    "claim",
+    "spend_split",
+    "spend_partial_public",
+    "pool_deposit",
+    "pool_withdraw",
+    "pool_claim_yield",
+  ];
+
+  const hashes = new Map<CircuitType, Uint8Array>();
+
+  for (const ct of circuitTypes) {
+    try {
+      const hash = await getVkHash(ct);
+      hashes.set(ct, hash);
+    } catch (error) {
+      // Circuit not available, skip
+      console.log(`[Prover] Circuit ${ct} not available, skipping VK hash`);
+    }
+  }
+
+  return hashes;
+}
+
+/** Helper to convert bytes to hex */
+function bytesToHex(bytes: Uint8Array): string {
+  return Array.from(bytes)
+    .map((b) => b.toString(16).padStart(2, "0"))
+    .join("");
+}

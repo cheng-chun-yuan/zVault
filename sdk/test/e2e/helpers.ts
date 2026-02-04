@@ -2,13 +2,21 @@
  * E2E Test Helpers
  *
  * Common test utilities for E2E tests.
- * Provides mock data generation, note creation, and assertion helpers.
+ * Provides real proof generation, note creation, and assertion helpers.
  *
  * NOTE: For full stealth flow with real proofs, use stealth-helpers.ts:
  * - generateTestKeys() - Deterministic key generation
  * - createAndSubmitStealthDeposit() - Full stealth deposit flow
  * - scanAndPrepareClaim() - Scan + prepare claim inputs
  * - checkNullifierExists() - Verify nullifier spent
+ *
+ * REAL PROOF GENERATION:
+ * - generateRealClaimProof() - Generate UltraHonk claim proof
+ * - generateRealSpendSplitProof() - Generate UltraHonk split proof
+ * - generateRealSpendPartialPublicProof() - Generate UltraHonk partial public proof
+ *
+ * MERKLE TREE:
+ * - createRealMerkleProof() - Create Merkle proof using real commitment tree
  */
 
 import { Connection, PublicKey, Keypair, Transaction, sendAndConfirmTransaction } from "@solana/web3.js";
@@ -20,6 +28,7 @@ import {
   hashNullifierSync,
   poseidonHashSync,
   initPoseidon,
+  merkleHashSync,
 } from "../../src/poseidon";
 import { randomFieldElement, bigintToBytes, bytesToBigint } from "../../src/crypto";
 import { derivePoolStatePDA, deriveCommitmentTreePDA, deriveNullifierRecordPDA } from "../../src/pda";
@@ -28,9 +37,11 @@ import {
   generateGrumpkinKeyPair,
   pointToCompressedBytes,
 } from "../../src/crypto";
-import { REAL_PROOF_SIZE } from "./setup";
 
-/** @deprecated Use REAL_PROOF_SIZE from setup.ts */
+/** Real proof size in bytes (~10KB for UltraHonk) */
+export const REAL_PROOF_SIZE = 10 * 1024;
+
+/** @deprecated Use REAL_PROOF_SIZE */
 export const MOCK_PROOF_SIZE = REAL_PROOF_SIZE;
 
 // =============================================================================
@@ -143,32 +154,108 @@ export function createTestNotes(
 }
 
 // =============================================================================
-// Mock Data Generation
+// Real Proof Generation
 // =============================================================================
 
 /**
- * Create mock UltraHonk proof bytes
+ * Generate real UltraHonk claim proof
  *
- * Generates deterministic pseudo-random bytes for testing.
- *
- * @deprecated For real proof tests, use the prover:
- * ```typescript
- * import { generateClaimProof, generateSpendSplitProof } from "../../src/prover/web";
- * const proof = await generateClaimProof(inputs);
- * ```
+ * Uses the Noir circuit and bb.js to generate a real proof.
  */
-export function generateMockProof(size: number = REAL_PROOF_SIZE): Uint8Array {
-  const proof = new Uint8Array(size);
-  for (let i = 0; i < size; i++) {
-    proof[i] = (i * 17 + 31) % 256;
-  }
-  return proof;
+export async function generateRealClaimProof(
+  note: TestNote,
+  merkleProof: MerkleProof,
+  recipient: bigint
+): Promise<Uint8Array> {
+  const { generateClaimProof } = await import("../../src/prover/web");
+
+  const proofData = await generateClaimProof({
+    privKey: note.privKey,
+    pubKeyX: note.pubKeyX,
+    amount: note.amount,
+    leafIndex: note.leafIndex,
+    merkleRoot: merkleProof.root,
+    merkleProof: {
+      siblings: merkleProof.siblings,
+      indices: merkleProof.indices,
+    },
+    recipient,
+  });
+
+  return proofData.proof;
 }
 
 /**
- * Create mock 32-byte hash value
+ * Generate real UltraHonk spend split proof
  */
-export function createMock32Bytes(seed: number): Uint8Array {
+export async function generateRealSpendSplitProof(
+  note: TestNote,
+  merkleProof: MerkleProof,
+  output1: { pubKeyX: bigint; amount: bigint; ephemeralPubX: bigint; encryptedAmountWithSign: bigint },
+  output2: { pubKeyX: bigint; amount: bigint; ephemeralPubX: bigint; encryptedAmountWithSign: bigint }
+): Promise<Uint8Array> {
+  const { generateSpendSplitProof } = await import("../../src/prover/web");
+
+  const proofData = await generateSpendSplitProof({
+    privKey: note.privKey,
+    pubKeyX: note.pubKeyX,
+    amount: note.amount,
+    leafIndex: note.leafIndex,
+    merkleRoot: merkleProof.root,
+    merkleProof: {
+      siblings: merkleProof.siblings,
+      indices: merkleProof.indices,
+    },
+    output1PubKeyX: output1.pubKeyX,
+    output1Amount: output1.amount,
+    output2PubKeyX: output2.pubKeyX,
+    output2Amount: output2.amount,
+    output1EphemeralPubX: output1.ephemeralPubX,
+    output1EncryptedAmountWithSign: output1.encryptedAmountWithSign,
+    output2EphemeralPubX: output2.ephemeralPubX,
+    output2EncryptedAmountWithSign: output2.encryptedAmountWithSign,
+  });
+
+  return proofData.proof;
+}
+
+/**
+ * Generate real UltraHonk spend partial public proof
+ */
+export async function generateRealSpendPartialPublicProof(
+  note: TestNote,
+  merkleProof: MerkleProof,
+  publicAmount: bigint,
+  change: { pubKeyX: bigint; amount: bigint; ephemeralPubX: bigint; encryptedAmountWithSign: bigint },
+  recipient: bigint
+): Promise<Uint8Array> {
+  const { generateSpendPartialPublicProof } = await import("../../src/prover/web");
+
+  const proofData = await generateSpendPartialPublicProof({
+    privKey: note.privKey,
+    pubKeyX: note.pubKeyX,
+    amount: note.amount,
+    leafIndex: note.leafIndex,
+    merkleRoot: merkleProof.root,
+    merkleProof: {
+      siblings: merkleProof.siblings,
+      indices: merkleProof.indices,
+    },
+    publicAmount,
+    changePubKeyX: change.pubKeyX,
+    changeAmount: change.amount,
+    recipient,
+    changeEphemeralPubX: change.ephemeralPubX,
+    changeEncryptedAmountWithSign: change.encryptedAmountWithSign,
+  });
+
+  return proofData.proof;
+}
+
+/**
+ * Create deterministic 32-byte value for testing (not a real hash)
+ */
+export function createTest32Bytes(seed: number): Uint8Array {
   const bytes = new Uint8Array(32);
   for (let i = 0; i < 32; i++) {
     bytes[i] = (seed + i * 7) % 256;
@@ -187,11 +274,56 @@ export function randomBytes(length: number): Uint8Array {
   return bytes;
 }
 
+/** Cached VK hashes from real circuits */
+const cachedVkHashes: Map<string, Uint8Array> = new Map();
+let vkHashesInitialized = false;
+
 /**
- * Generate mock VK hash
+ * Initialize VK hashes from compiled circuits
+ *
+ * Call this during test setup to preload real VK hashes.
+ * Throws if circuits aren't compiled.
  */
-export function generateMockVkHash(): Uint8Array {
-  return createMock32Bytes(99);
+export async function initVkHashes(): Promise<void> {
+  if (vkHashesInitialized) return;
+
+  const { getVkHash, circuitExists } = await import("../../src/prover/web");
+
+  const circuits = ["claim", "spend_split", "spend_partial_public"] as const;
+
+  for (const circuit of circuits) {
+    if (await circuitExists(circuit)) {
+      const hash = await getVkHash(circuit);
+      cachedVkHashes.set(circuit, hash);
+      console.log(`[VkHash] Loaded real VK hash for ${circuit}`);
+    } else {
+      throw new Error(`Circuit ${circuit} not found. Run: cd noir-circuits && bun run compile:all && bun run copy-to-sdk`);
+    }
+  }
+
+  vkHashesInitialized = true;
+}
+
+/**
+ * Get real VK hash for a circuit type
+ *
+ * @throws Error if VK hashes haven't been initialized
+ */
+export function getVkHashForCircuit(
+  circuitType: "claim" | "spend_split" | "spend_partial_public"
+): Uint8Array {
+  const cached = cachedVkHashes.get(circuitType);
+  if (!cached) {
+    throw new Error(`VK hash for ${circuitType} not loaded. Call initVkHashes() first.`);
+  }
+  return cached;
+}
+
+/**
+ * Check if real VK hashes are available
+ */
+export function hasRealVkHashes(): boolean {
+  return cachedVkHashes.size > 0;
 }
 
 // =============================================================================
@@ -216,19 +348,63 @@ export function computeMerkleRootFromCommitment(
 }
 
 /**
- * Create a mock Merkle proof for a commitment at index 0
+ * Create a Merkle proof for a commitment using a real commitment tree
  *
- * Uses all-zero siblings (simulating a tree with one leaf).
+ * Inserts the commitment at index 0 and returns the real proof.
  */
-export function createMockMerkleProof(
+export function createRealMerkleProof(
   commitment: bigint,
   depth: number = TREE_DEPTH
 ): MerkleProof {
-  const siblings: bigint[] = Array(depth).fill(0n);
-  const indices: number[] = Array(depth).fill(0);
-  const root = computeMerkleRootFromCommitment(commitment, depth);
+  // Import and use real commitment tree
+  const { CommitmentTreeIndex } = require("../../src/commitment-tree");
+  const tree = new CommitmentTreeIndex();
 
-  return { siblings, indices, root };
+  // Add the commitment to tree
+  tree.addCommitment(commitment, 0n); // amount doesn't affect merkle tree
+
+  // Get the real merkle proof
+  const proof = tree.getMerkleProof(commitment);
+  if (!proof) {
+    throw new Error("Failed to get merkle proof for commitment");
+  }
+
+  return {
+    siblings: proof.siblings,
+    indices: proof.indices,
+    root: proof.root,
+  };
+}
+
+/**
+ * Create a Merkle proof for multiple commitments
+ *
+ * Inserts all commitments and returns proof for the specified one.
+ */
+export function createRealMerkleProofWithMultiple(
+  commitments: { commitment: bigint; amount: bigint }[],
+  targetCommitment: bigint,
+  depth: number = TREE_DEPTH
+): MerkleProof {
+  const { CommitmentTreeIndex } = require("../../src/commitment-tree");
+  const tree = new CommitmentTreeIndex();
+
+  // Add all commitments to tree
+  for (const { commitment, amount } of commitments) {
+    tree.addCommitment(commitment, amount);
+  }
+
+  // Get the real merkle proof
+  const proof = tree.getMerkleProof(targetCommitment);
+  if (!proof) {
+    throw new Error("Failed to get merkle proof for commitment");
+  }
+
+  return {
+    siblings: proof.siblings,
+    indices: proof.indices,
+    root: proof.root,
+  };
 }
 
 /**
@@ -259,31 +435,46 @@ export function verifyMerkleProof(
 // =============================================================================
 
 /**
- * Create a mock stealth deposit announcement
+ * Create a stealth deposit announcement for testing
  *
  * Generates ephemeral key, commitment, and encrypted amount
  * as would be created during a real stealth deposit.
  */
-export function createMockStealthAnnouncement(
+export function createStealthAnnouncement(
   amount: bigint
 ): {
   ephemeralPub: Uint8Array;
   commitment: Uint8Array;
   encryptedAmount: Uint8Array;
+  ephemeralPubX: bigint;
+  encryptedAmountWithSign: bigint;
 } {
   // Generate ephemeral key
   const ephemeralKey = generateGrumpkinKeyPair();
   const ephemeralPub = pointToCompressedBytes(ephemeralKey.pubKey);
 
-  // Create commitment (mock)
+  // Create commitment
   const commitment = randomBytes(32);
 
-  // Encrypt amount (mock - just use amount bytes for testing)
+  // Encrypt amount (use amount bytes for testing)
   const encryptedAmount = new Uint8Array(8);
   const view = new DataView(encryptedAmount.buffer);
   view.setBigUint64(0, amount, true); // little-endian
 
-  return { ephemeralPub, commitment, encryptedAmount };
+  // Extract ephemeral pub x-coordinate for circuit input
+  const ephemeralPubX = bytesToBigint(ephemeralPub.slice(0, 32));
+
+  // Pack encrypted amount with y-sign bit (bit 64 = sign bit from compressed key)
+  const ySign = ephemeralPub[32] & 1; // Sign bit is LSB of last byte for compressed format
+  const encryptedAmountWithSign = amount | (BigInt(ySign) << 64n);
+
+  return {
+    ephemeralPub,
+    commitment,
+    encryptedAmount,
+    ephemeralPubX,
+    encryptedAmountWithSign,
+  };
 }
 
 // =============================================================================
@@ -442,11 +633,15 @@ export function createDemoDeposit(amount: bigint): {
   note: TestNote;
   instructionData: Uint8Array;
   ephemeralPub: Uint8Array;
+  stealthData: {
+    ephemeralPubX: bigint;
+    encryptedAmountWithSign: bigint;
+  };
 } {
   const note = createTestNote(amount, 0n);
 
-  // Create mock stealth announcement
-  const { ephemeralPub, encryptedAmount } = createMockStealthAnnouncement(amount);
+  // Create stealth announcement
+  const { ephemeralPub, encryptedAmount, ephemeralPubX, encryptedAmountWithSign } = createStealthAnnouncement(amount);
 
   // Build instruction data
   const instructionData = buildDemoStealthInstructionData(
@@ -455,5 +650,13 @@ export function createDemoDeposit(amount: bigint): {
     encryptedAmount
   );
 
-  return { note, instructionData, ephemeralPub };
+  return {
+    note,
+    instructionData,
+    ephemeralPub,
+    stealthData: {
+      ephemeralPubX,
+      encryptedAmountWithSign,
+    },
+  };
 }

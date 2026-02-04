@@ -63,6 +63,8 @@ export { buildRedemptionRequestInstructionData } from "./redemption";
 // Verifier
 export {
   buildVerifyFromBufferInstruction,
+  buildVerifyFromBuffersInstruction,
+  buildClaimVerifierInputs,
   buildPartialPublicVerifierInputs,
   buildSplitVerifierInputs,
 } from "./verifier";
@@ -115,6 +117,15 @@ export function buildClaimInstruction(options: ClaimInstructionOptions): Instruc
     vkHash: options.vkHash,
   });
 
+  // Buffer mode is required for UltraHonk proofs (too large for inline)
+  if (options.proofSource === "buffer" && !options.bufferAddress) {
+    throw new Error("bufferAddress required for buffer mode");
+  }
+
+  // Program expects 12 accounts in this order:
+  // 0. pool_state, 1. commitment_tree, 2. nullifier_record, 3. zbtc_mint,
+  // 4. pool_vault, 5. recipient_ata, 6. user, 7. token_program,
+  // 8. system_program, 9. ultrahonk_verifier, 10. proof_buffer, 11. instructions_sysvar
   const accounts: Instruction["accounts"] = [
     { address: options.accounts.poolState, role: AccountRole.WRITABLE },
     { address: options.accounts.commitmentTree, role: AccountRole.READONLY },
@@ -126,14 +137,9 @@ export function buildClaimInstruction(options: ClaimInstructionOptions): Instruc
     { address: TOKEN_2022_PROGRAM_ID, role: AccountRole.READONLY },
     { address: SYSTEM_PROGRAM, role: AccountRole.READONLY },
     { address: config.ultrahonkVerifierProgramId, role: AccountRole.READONLY },
+    { address: options.bufferAddress!, role: AccountRole.READONLY },
+    { address: INSTRUCTIONS, role: AccountRole.READONLY },
   ];
-
-  if (options.proofSource === "buffer") {
-    if (!options.bufferAddress) {
-      throw new Error("bufferAddress required for buffer mode");
-    }
-    accounts.push({ address: options.bufferAddress, role: AccountRole.READONLY });
-  }
 
   return {
     programAddress: config.zvaultProgramId,

@@ -10,12 +10,36 @@
  * - Nullifier = Poseidon(priv_key, leaf_index)
  * - Nullifier Hash = Poseidon(nullifier)
  * - Pool Commitment = Poseidon(pub_key_x, principal, deposit_epoch)
+ *
+ * LOCALNET MODE:
+ * When useLocalnetMode(true) is called, the SDK uses SHA256 for Merkle tree hashing
+ * to match the on-chain program which uses SHA256 on localnet (test validator lacks Poseidon syscall).
  */
 
 import { buildPoseidon, type Poseidon } from "circomlibjs";
+import { createHash } from "crypto";
 
 // Singleton poseidon instance
 let poseidonInstance: Poseidon | null = null;
+
+// Localnet mode flag - when true, uses SHA256 for Merkle tree hashing
+let localnetMode = false;
+
+/**
+ * Enable/disable localnet mode
+ * When enabled, Merkle tree hashing uses SHA256 to match on-chain behavior on localnet
+ * (the test validator lacks the Poseidon syscall)
+ */
+export function useLocalnetMode(enabled: boolean): void {
+  localnetMode = enabled;
+}
+
+/**
+ * Check if localnet mode is enabled
+ */
+export function isLocalnetMode(): boolean {
+  return localnetMode;
+}
 
 /**
  * Initialize poseidon (must be called before using hash functions)
@@ -56,6 +80,67 @@ export function poseidonHashSync(inputs: bigint[]): bigint {
   }
   const hash = poseidonInstance(inputs);
   return poseidonInstance.F.toObject(hash) as bigint;
+}
+
+/**
+ * SHA256-based Merkle tree hash for localnet compatibility
+ * Matches the on-chain sha256_hash_for_localnet function
+ *
+ * Note: The result is NOT reduced modulo BN254 field here because the on-chain
+ * program stores the raw SHA256 output. The SDK must use the raw value to match
+ * the on-chain tree root. When passing to Noir circuits, values must be reduced
+ * separately using reduceToBN254Field().
+ */
+export function sha256MerkleHash(left: bigint, right: bigint): bigint {
+  // Convert bigints to 32-byte big-endian arrays
+  const leftBytes = bigintTo32BytesBE(left);
+  const rightBytes = bigintTo32BytesBE(right);
+
+  // Concatenate and hash
+  const input = new Uint8Array(64);
+  input.set(leftBytes, 0);
+  input.set(rightBytes, 32);
+
+  const hash = createHash("sha256").update(input).digest();
+  return bytes32ToBigintBE(hash);
+}
+
+/**
+ * Reduce a value modulo BN254 scalar field
+ * Use this when passing SHA256 values to Noir circuits
+ */
+export function reduceToBN254Field(value: bigint): bigint {
+  return value % BN254_SCALAR_FIELD;
+}
+
+/**
+ * Merkle tree hash - uses Poseidon or SHA256 depending on localnet mode
+ * This is specifically for Merkle tree operations to match on-chain behavior
+ */
+export function merkleHashSync(left: bigint, right: bigint): bigint {
+  if (localnetMode) {
+    return sha256MerkleHash(left, right);
+  }
+  return poseidonHashSync([left, right]);
+}
+
+// Helper: bigint to 32-byte big-endian array
+function bigintTo32BytesBE(n: bigint): Uint8Array {
+  const hex = n.toString(16).padStart(64, "0");
+  const bytes = new Uint8Array(32);
+  for (let i = 0; i < 32; i++) {
+    bytes[i] = parseInt(hex.slice(i * 2, i * 2 + 2), 16);
+  }
+  return bytes;
+}
+
+// Helper: 32-byte big-endian array to bigint
+function bytes32ToBigintBE(bytes: Uint8Array | Buffer): bigint {
+  let hex = "0x";
+  for (const b of bytes) {
+    hex += b.toString(16).padStart(2, "0");
+  }
+  return BigInt(hex);
 }
 
 // BN254 scalar field prime
