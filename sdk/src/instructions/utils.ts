@@ -124,30 +124,6 @@ export function bytes32ToBigint(bytes: Uint8Array): bigint {
 }
 
 // =============================================================================
-// Groth16 Compatibility (always inline)
-// =============================================================================
-
-/**
- * Check if a proof needs buffer mode
- * @deprecated Always returns false for Groth16 (388 bytes)
- */
-export function needsBuffer(_proofBytes: Uint8Array, _availableSpace: number = 900): boolean {
-  return false; // Groth16 proofs always fit inline
-}
-
-/**
- * Calculate available space for inline proof
- * @deprecated Groth16 proofs always fit (388 bytes)
- */
-export function calculateAvailableProofSpace(_options?: {
-  numSigners?: number;
-  numAccounts?: number;
-  fixedDataSize?: number;
-}): number {
-  return 1000; // More than enough for 388 byte Groth16 proofs
-}
-
-// =============================================================================
 // Common Addresses
 // =============================================================================
 

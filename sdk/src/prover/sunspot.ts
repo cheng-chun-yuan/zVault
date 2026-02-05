@@ -201,19 +201,27 @@ export async function generateGroth16Proof(
     throw new Error("Sunspot proof generation failed");
   }
 
+  // Read raw proof (gnark format: A(64) + B(128) + C(64) + nb_commitments(4,BE) + commitments(N×64) + commitment_pok(64))
+  // Pass through unchanged — the on-chain verifier expects the full gnark proof format
   const proof = fs.readFileSync(proofPath);
   const publicWitness = fs.readFileSync(pwPath);
 
-  // Extract public inputs (32-byte field elements)
+  // Extract public inputs from the public witness file
+  // gnark witness format: header(12 bytes) + NR_INPUTS × 32-byte field elements (big-endian)
+  // Header: nbPublic(u32 BE) + nbSecret(u32 BE) + vectorLen(u32 BE)
+  const PW_HEADER_SIZE = 12;
   const publicInputs: string[] = [];
-  for (let i = 0; i < publicWitness.length; i += 32) {
-    const chunk = publicWitness.slice(i, i + 32);
-    publicInputs.push("0x" + chunk.toString("hex"));
+  if (publicWitness.length > PW_HEADER_SIZE) {
+    for (let i = PW_HEADER_SIZE; i < publicWitness.length; i += 32) {
+      const chunk = publicWitness.slice(i, i + 32);
+      publicInputs.push("0x" + chunk.toString("hex"));
+    }
   }
+  console.log(`[Sunspot] Proof: ${proof.length} bytes, Public inputs: ${publicInputs.length}`);
 
   const elapsed = Date.now() - startTime;
   console.log(`[Sunspot] Proof generated in ${elapsed}ms`);
-  console.log(`[Sunspot] Proof size: ${proof.length} bytes (vs 16KB for UltraHonk)`);
+  console.log(`[Sunspot] Proof size: ${proof.length} bytes`);
 
   return {
     proof: new Uint8Array(proof),
@@ -302,7 +310,7 @@ export function getSunspotVerifierProgramId(): string {
 }
 
 // ==========================================================================
-// High-Level Proof Generation API (matches UltraHonk interface)
+// High-Level Proof Generation API
 // ==========================================================================
 
 import {

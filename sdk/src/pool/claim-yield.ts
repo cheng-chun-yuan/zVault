@@ -163,7 +163,7 @@ export function preparePoolClaimYieldInputs(
 }
 
 /**
- * Build instruction data for CLAIM_POOL_YIELD (UltraHonk - variable-length proof)
+ * Build instruction data for CLAIM_POOL_YIELD (Groth16 - inline proof)
  *
  * Format: discriminator(1) + proof_len(4) + proof(N) + nullifier(32) + new_commitment(32) +
  *         yield_commitment(32) + merkle_root(32) + principal(8) + deposit_epoch(8) + vk_hash(32)

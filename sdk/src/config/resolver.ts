@@ -51,6 +51,7 @@ export function resolveConfig(config: ZVaultSDKConfig): ResolvedConfig {
     token2022ProgramId: TOKEN_2022_PROGRAM_ID,
     ataProgramId: ATA_PROGRAM_ID,
     sunspotVerifierProgramId: config.sunspotVerifierProgramId ?? basePreset.sunspotVerifierProgramId,
+    sunspotVerifiers: basePreset.sunspotVerifiers,
 
     // Deployed Accounts - these are program-specific PDAs
     // For custom program IDs, these may need to be re-derived

@@ -45,8 +45,6 @@ export {
   buildPoolWithdrawInstruction,
   buildPoolClaimYieldInstructionData,
   buildPoolClaimYieldInstruction,
-  needsBuffer,
-  calculateAvailableProofSpace,
   bigintTo32Bytes,
   bytes32ToBigint,
   type Instruction,
@@ -75,7 +73,7 @@ export {
   type NetworkType,
 } from "../config";
 
-// ChadBuffer utilities (for large proof uploads)
+// ChadBuffer utilities (for SPV data uploads)
 export {
   uploadTransactionToBuffer,
   uploadProofToBuffer,

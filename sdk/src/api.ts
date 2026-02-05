@@ -906,7 +906,7 @@ export async function claimPublic(
     note.nullifierHashBytes
   );
 
-  // Build instruction (v2 format with UltraHonk verifier)
+  // Build instruction (v2 format with Sunspot verifier)
   const ix: Instruction = {
     programAddress: config.programId,
     accounts: [
@@ -1040,7 +1040,7 @@ export async function claimPublicStealth(
     nullifierHashBytes
   );
 
-  // Build instruction (v2 format with UltraHonk verifier)
+  // Build instruction (v2 format with Sunspot verifier)
   const ix: Instruction = {
     programAddress: config.programId,
     accounts: [
@@ -1237,12 +1237,12 @@ function buildClaimData(proof: NoirProof, amount: bigint): Uint8Array {
 }
 
 /**
- * Build claim instruction data (UltraHonk - variable-length proof)
+ * Build claim instruction data (Groth16 - inline proof)
  *
  * Format:
  * - discriminator: 1 byte (9 = CLAIM)
  * - proof_len: 4 bytes (little-endian)
- * - proof: N bytes (UltraHonk)
+ * - proof: N bytes (Groth16)
  * - root: 32 bytes (Merkle tree root)
  * - nullifier_hash: 32 bytes
  * - amount_sats: 8 bytes (little-endian)

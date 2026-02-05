@@ -220,7 +220,7 @@ const PROOF_SOURCE_BUFFER = 1;
 
 /** Parameters for spend_partial_public relay */
 export interface RelaySpendPartialPublicParams {
-  /** UltraHonk proof bytes */
+  /** Groth16 proof bytes */
   proof: Uint8Array;
   /** Merkle root (32 bytes) */
   root: Uint8Array;
@@ -238,7 +238,7 @@ export interface RelaySpendPartialPublicParams {
 
 /** Parameters for spend_split relay */
 export interface RelaySpendSplitParams {
-  /** UltraHonk proof bytes */
+  /** Groth16 proof bytes */
   proof: Uint8Array;
   /** Merkle root (32 bytes) */
   root: Uint8Array;
@@ -478,7 +478,7 @@ export async function relaySpendPartialPublic(
 ): Promise<RelayResult> {
   const config = getConfig();
   const zvaultProgram = address(config.zvaultProgramId);
-  const ultrahonkVerifier = address(config.sunspotVerifierProgramId);
+  const sunspotVerifier = address(config.sunspotVerifierProgramId);
 
   onProgress?.("Creating buffer...");
 
@@ -561,7 +561,7 @@ export async function relaySpendPartialPublic(
       { address: relayer.address, role: AccountRole.WRITABLE_SIGNER, signer: relayer },
       { address: TOKEN_2022_PROGRAM, role: AccountRole.READONLY },
       { address: SYSTEM_PROGRAM, role: AccountRole.READONLY },
-      { address: ultrahonkVerifier, role: AccountRole.READONLY },
+      { address: sunspotVerifier, role: AccountRole.READONLY },
       { address: bufferKeypair.address, role: AccountRole.READONLY },
     ],
     data: ixData,
@@ -615,7 +615,7 @@ export async function relaySpendSplit(
 ): Promise<RelayResult> {
   const config = getConfig();
   const zvaultProgram = address(config.zvaultProgramId);
-  const ultrahonkVerifier = address(config.sunspotVerifierProgramId);
+  const sunspotVerifier = address(config.sunspotVerifierProgramId);
 
   onProgress?.("Creating buffer...");
 
@@ -670,7 +670,7 @@ export async function relaySpendSplit(
       { address: nullifierPDA, role: AccountRole.WRITABLE },
       { address: relayer.address, role: AccountRole.WRITABLE_SIGNER, signer: relayer },
       { address: SYSTEM_PROGRAM, role: AccountRole.READONLY },
-      { address: ultrahonkVerifier, role: AccountRole.READONLY },
+      { address: sunspotVerifier, role: AccountRole.READONLY },
       { address: bufferKeypair.address, role: AccountRole.READONLY },
     ],
     data: ixData,

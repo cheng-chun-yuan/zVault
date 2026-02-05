@@ -31,8 +31,7 @@ use crate::utils::{
     create_pda_account, parse_u32_le, read_bytes32,
     validate_account_writable, validate_program_owner, verify_and_create_nullifier,
 };
-use crate::shared::crypto::groth16::parse_sunspot_proof;
-use crate::shared::cpi::verify_groth16_proof_components;
+use crate::shared::cpi::verify_groth16_proof_full;
 
 /// Split commitment instruction data (Groth16 proof inline)
 ///
@@ -276,44 +275,30 @@ pub fn process_spend_split(
         }
     }
 
-    // Parse and verify Groth16 proof
-    pinocchio::msg!("Verifying Groth16 proof...");
-    let (proof_a, proof_b, proof_c, public_inputs) = parse_sunspot_proof(ix_data.proof_bytes)?;
+    // Verify Groth16 proof via CPI to Sunspot verifier
+    // The proof_bytes contains the full gnark proof (with commitments).
+    // Public inputs are constructed from instruction data fields.
+    pinocchio::msg!("Verifying Groth16 proof via Sunspot verifier CPI...");
 
-    // Verify public inputs count
-    // SpendSplit circuit public inputs: [root, nullifier_hash, output_commitment_1, output_commitment_2]
-    if public_inputs.len() < 4 {
-        pinocchio::msg!("Insufficient public inputs");
-        return Err(ZVaultError::PublicInputsMismatch.into());
-    }
-
-    // Verify public inputs match expected values
-    if public_inputs[0] != ix_data.root {
-        pinocchio::msg!("Merkle root mismatch in public inputs");
-        return Err(ZVaultError::PublicInputsMismatch.into());
-    }
-
-    if public_inputs[1] != ix_data.nullifier_hash {
-        pinocchio::msg!("Nullifier hash mismatch in public inputs");
-        return Err(ZVaultError::PublicInputsMismatch.into());
-    }
-
-    // Build public inputs array for verification
-    let pi_array: [[u8; 32]; 4] = [
-        public_inputs[0],
-        public_inputs[1],
-        public_inputs[2],
-        public_inputs[3],
+    // SpendSplit circuit has 8 public inputs (matching Noir circuit declaration order):
+    // [merkle_root, nullifier_hash, output_commitment_1, output_commitment_2,
+    //  output1_ephemeral_pub_x, output1_encrypted_amount_with_sign,
+    //  output2_ephemeral_pub_x, output2_encrypted_amount_with_sign]
+    let public_inputs: [[u8; 32]; 8] = [
+        ix_data.root,
+        ix_data.nullifier_hash,
+        ix_data.output_commitment_1,
+        ix_data.output_commitment_2,
+        ix_data.output1_ephemeral_pub_x,
+        ix_data.output1_encrypted_amount_with_sign,
+        ix_data.output2_ephemeral_pub_x,
+        ix_data.output2_encrypted_amount_with_sign,
     ];
 
-    // Verify Groth16 proof via CPI to Sunspot verifier
-    pinocchio::msg!("Verifying Groth16 proof via Sunspot verifier CPI...");
-    verify_groth16_proof_components(
+    verify_groth16_proof_full(
         accounts.sunspot_verifier,
-        &proof_a,
-        &proof_b,
-        &proof_c,
-        &pi_array,
+        ix_data.proof_bytes,
+        &public_inputs,
     ).map_err(|e| {
         pinocchio::msg!("Groth16 proof verification failed");
         e

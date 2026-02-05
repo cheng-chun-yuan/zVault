@@ -42,7 +42,7 @@ export function buildCreateYieldPoolData(
 }
 
 /**
- * Build instruction data for DEPOSIT_TO_POOL (UltraHonk - variable-length proof)
+ * Build instruction data for DEPOSIT_TO_POOL (Groth16 - inline proof)
  *
  * Format: discriminator(1) + proof_len(4) + proof(N) + nullifier(32) + commitment(32) +
  *         ephemeral(33) + principal(8) + merkle_root(32) + vk_hash(32)
@@ -103,7 +103,7 @@ export function buildDepositToPoolData(
 }
 
 /**
- * Build instruction data for COMPOUND_YIELD (UltraHonk - variable-length proof)
+ * Build instruction data for COMPOUND_YIELD (Groth16 - inline proof)
  *
  * Format: discriminator(1) + proof_len(4) + proof(N) + nullifier(32) + new_commitment(32) +
  *         merkle_root(32) + old_principal(8) + deposit_epoch(8) + vk_hash(32)

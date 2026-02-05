@@ -62,6 +62,7 @@ export interface ClaimInstructionOptions {
     poolVault: Address;
     recipientAta: Address;
     user: Address;
+    vkRegistry: Address;
   };
 }
 
@@ -69,8 +70,8 @@ export interface ClaimInstructionOptions {
  * Split instruction options
  */
 export interface SplitInstructionOptions {
-  /** ChadBuffer account address containing the proof */
-  bufferAddress: Address;
+  /** Proof bytes (inline Groth16 proof) */
+  proofBytes: Uint8Array;
   /** Merkle root */
   root: Uint8Array;
   /** Nullifier hash */
@@ -106,8 +107,8 @@ export interface SplitInstructionOptions {
  * SpendPartialPublic instruction options
  */
 export interface SpendPartialPublicInstructionOptions {
-  /** ChadBuffer account address containing the proof */
-  bufferAddress: Address;
+  /** Proof bytes (inline Groth16 proof) */
+  proofBytes: Uint8Array;
   /** Merkle root */
   root: Uint8Array;
   /** Nullifier hash */
@@ -270,7 +271,7 @@ export const INSTRUCTION_DISCRIMINATORS = {
 } as const;
 
 /**
- * UltraHonk verifier instruction discriminators
+ * Sunspot Groth16 verifier instruction discriminators
  */
 export const VERIFIER_DISCRIMINATORS = {
   VERIFY: 0,

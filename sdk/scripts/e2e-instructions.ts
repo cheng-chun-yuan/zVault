@@ -29,45 +29,20 @@ import * as path from "path";
 import {
   address,
   createSolanaRpc,
-  createSolanaRpcSubscriptions,
   createKeyPairSignerFromBytes,
   generateKeyPairSigner,
-  pipe,
-  createTransactionMessage,
-  setTransactionMessageFeePayer,
-  setTransactionMessageLifetimeUsingBlockhash,
-  appendTransactionMessageInstruction,
-  signTransactionMessageWithSigners,
-  sendAndConfirmTransactionFactory,
-  getSignatureFromTransaction,
   getProgramDerivedAddress,
-  AccountRole,
   type Address,
   type KeyPairSigner,
-  type Rpc,
-  type RpcSubscriptions,
-  type SolanaRpcApi,
-  type SolanaRpcSubscriptionsApi,
 } from "@solana/kit";
 
 // Import from SDK modules directly to avoid circular dependency issues
 import {
-  uploadProofToBuffer,
-  closeBuffer,
-  needsBuffer as bufferNeedsBuffer,
-  MAX_DATA_PER_WRITE,
-  CHADBUFFER_PROGRAM_ID,
-  SOLANA_TX_SIZE_LIMIT,
-} from "../src/chadbuffer";
-
-import {
   buildClaimInstruction,
   buildSplitInstruction,
-  buildSpendPartialPublicInstruction,
   buildPoolDepositInstruction,
   buildPoolWithdrawInstruction,
   buildPoolClaimYieldInstruction,
-  needsBuffer,
   bytesToHex,
   hexToBytes,
 } from "../src/instructions";
@@ -102,9 +77,22 @@ import {
 } from "../src/crypto";
 
 import {
-  computeUnifiedCommitment,
-  computeNullifier,
+  initPoseidon,
+  poseidonHashSync,
+  computeNullifierSync,
+  hashNullifierSync,
+  BN254_SCALAR_FIELD,
 } from "../src/poseidon";
+
+import {
+  generateClaimProofGroth16,
+  generateSplitProofGroth16,
+  configureSunspot,
+  isSunspotAvailable,
+  GROTH16_PROOF_SIZE,
+} from "../src/prover/sunspot";
+
+import { ZERO_HASHES, TREE_DEPTH } from "../src/commitment-tree";
 
 // =============================================================================
 // Configuration
@@ -133,9 +121,6 @@ const DEFAULT_KEYPAIR_PATH = path.join(
   ".config/solana/id.json"
 );
 
-// Mock proof size for UltraHonk
-const MOCK_PROOF_SIZE = 16 * 1024; // 16KB typical UltraHonk proof
-
 // Pool ID for yield pool
 const DEFAULT_POOL_ID = new Uint8Array(32);
 new TextEncoder().encode("default_pool").forEach((b, i) => {
@@ -150,14 +135,6 @@ function loadKeypair(keypairPath: string): Uint8Array {
   const keyFile = fs.readFileSync(keypairPath, "utf-8");
   const secretKey = JSON.parse(keyFile);
   return new Uint8Array(secretKey);
-}
-
-function createMockProof(size: number): Uint8Array {
-  const proof = new Uint8Array(size);
-  for (let i = 0; i < size; i++) {
-    proof[i] = (i * 17 + 31) % 256;
-  }
-  return proof;
 }
 
 function createMock32Bytes(seed: number): Uint8Array {
@@ -253,10 +230,53 @@ const log = {
 };
 
 // =============================================================================
+// Helpers for real proof generation
+// =============================================================================
+
+/**
+ * Create a valid BN254 field element for testing
+ */
+function createFieldElement(seed: number): bigint {
+  const bytes = new Uint8Array(32);
+  for (let i = 0; i < 32; i++) {
+    bytes[i] = (seed + i * 7) % 256;
+  }
+  bytes[0] &= 0x1f; // Clear top 3 bits to ensure < 2^253
+  let num = 0n;
+  for (let i = 0; i < 32; i++) {
+    num = (num << 8n) | BigInt(bytes[i]);
+  }
+  return num % BN254_SCALAR_FIELD;
+}
+
+/**
+ * Create a test merkle proof for a single leaf at index 0
+ */
+function createTestMerkleProof(leafCommitment: bigint): {
+  siblings: bigint[];
+  indices: number[];
+  root: bigint;
+} {
+  const siblings: bigint[] = [];
+  const indices: number[] = [];
+
+  let currentHash = leafCommitment;
+  for (let level = 0; level < TREE_DEPTH; level++) {
+    siblings.push(ZERO_HASHES[level]);
+    indices.push(0);
+    currentHash = poseidonHashSync([currentHash, ZERO_HASHES[level]]);
+  }
+
+  return { siblings, indices, root: currentHash };
+}
+
+// =============================================================================
 // Test State
 // =============================================================================
 
 interface UserNote {
+  privKey: bigint;
+  pubKeyX: bigint;
   nullifier: bigint;
   secret: bigint;
   amount: bigint;
@@ -299,30 +319,35 @@ async function testDemoDeposit(
 ): Promise<UserNote> {
   log.step(1, "Demo Deposit - Building stealth commitment instruction");
 
-  // Generate recipient keys
-  const spendingKey = generateGrumpkinKeyPair();
-  const viewingKey = generateGrumpkinKeyPair();
+  // Generate deterministic keys as valid BN254 field elements
+  const privKey = createFieldElement(0x01);
+  const pubKeyX = createFieldElement(0xab);
 
-  log.info("Generated recipient keys:");
-  log.data("Spending Pub X", spendingKey.pubKey.x.toString(16).slice(0, 20) + "...");
-  log.data("Viewing Pub", `(${viewingKey.pubKey.x.toString(16).slice(0, 16)}..., ${viewingKey.pubKey.y.toString(16).slice(0, 16)}...)`);
+  log.info("Generated deterministic keys (BN254 field elements):");
+  log.data("privKey", privKey.toString(16).slice(0, 20) + "...");
+  log.data("pubKeyX", pubKeyX.toString(16).slice(0, 20) + "...");
 
-  // Create mock stealth deposit data
+  // Compute real Poseidon commitment: Poseidon(pubKeyX, amount)
   const amount = 100_000n; // 0.001 BTC
-  const ephemeralKey = generateGrumpkinKeyPair();
-  const ephemeralPub = pointToCompressedBytes(ephemeralKey.pubKey);
-  const commitment = randomBytes(32);
-  const encryptedAmount = randomBytes(8);
+  const commitmentBigint = poseidonHashSync([pubKeyX, amount]);
+  const commitmentBytes = bigintToBytes32(commitmentBigint);
 
-  log.info("Created stealth deposit:");
+  log.info("Computed real Poseidon commitment:");
   log.data("Amount", formatSats(amount));
-  log.data("Ephemeral Pub", bytesToHex(ephemeralPub).slice(0, 20) + "...");
-  log.data("Commitment", bytesToHex(commitment).slice(0, 20) + "...");
+  log.data("Commitment", commitmentBigint.toString(16).slice(0, 20) + "...");
+
+  // Build merkle proof for this commitment (single leaf at index 0)
+  const merkleProof = createTestMerkleProof(commitmentBigint);
+  log.data("Merkle Root", merkleProof.root.toString(16).slice(0, 20) + "...");
 
   // Build demo stealth instruction using SDK
+  const ephemeralKey = generateGrumpkinKeyPair();
+  const ephemeralPub = pointToCompressedBytes(ephemeralKey.pubKey);
+  const encryptedAmount = randomBytes(8);
+
   const instructionData = buildAddDemoStealthData(
     ephemeralPub,
-    commitment,
+    commitmentBytes,
     encryptedAmount
   );
 
@@ -342,7 +367,7 @@ async function testDemoDeposit(
   const [poolState] = await derivePoolStatePDA(config.zvaultProgramId);
   const [commitmentTree] = await deriveCommitmentTreePDA(config.zvaultProgramId);
   const [stealthAnnouncement] = await deriveStealthAnnouncementPDA(
-    commitment,
+    commitmentBytes,
     config.zvaultProgramId
   );
 
@@ -352,22 +377,23 @@ async function testDemoDeposit(
 
   log.success("Demo deposit instruction built successfully");
 
-  // Create user note
-  const nullifier = BigInt("0x" + bytesToHex(randomBytes(32)));
+  // Create user note with real keys for proof generation
+  const nullifier = computeNullifierSync(privKey, 0n);
   const secret = BigInt("0x" + bytesToHex(randomBytes(32)));
-  const commitmentBigint = BigInt("0x" + bytesToHex(commitment));
 
   const userNote: UserNote = {
+    privKey,
+    pubKeyX,
     nullifier,
     secret,
     amount,
     commitment: commitmentBigint,
-    commitmentBytes: commitment,
+    commitmentBytes,
     leafIndex: state.nextLeafIndex,
   };
 
-  state.commitments.push(commitment);
-  state.currentRoot = commitment;
+  state.commitments.push(commitmentBytes);
+  state.currentRoot = bigintToBytes32(merkleProof.root);
   state.nextLeafIndex++;
   state.notes.push(userNote);
 
@@ -375,59 +401,53 @@ async function testDemoDeposit(
 }
 
 /**
- * Test 2: Claim zkBTC - Build claim instruction with buffer mode
+ * Test 2: Claim zkBTC - Build claim instruction with real Groth16 proof
  */
 async function testClaimZkBTC(
-  rpc: Rpc<SolanaRpcApi> | null,
-  rpcSubscriptions: RpcSubscriptions<SolanaRpcSubscriptionsApi> | null,
   payer: KeyPairSigner,
   config: NetworkConfig,
   note: UserNote
 ): Promise<void> {
-  log.step(2, "Claim zkBTC - Building claim instruction with buffer mode");
+  log.step(2, "Claim zkBTC - Building claim instruction (real Groth16)");
 
-  // Generate mock UltraHonk proof
-  const proofBytes = createMockProof(MOCK_PROOF_SIZE);
-  log.info("Generated mock UltraHonk proof:");
-  log.data("Proof size", `${proofBytes.length} bytes (${(proofBytes.length / 1024).toFixed(1)} KB)`);
-  log.data("Needs buffer (SDK)", needsBuffer(proofBytes).toString());
-  log.data("MAX_DATA_PER_WRITE", `${MAX_DATA_PER_WRITE} bytes`);
+  // Build merkle proof for this note's commitment
+  const merkleProof = createTestMerkleProof(note.commitment);
 
-  // Test buffer upload if RPC available
-  let bufferAddress: Address | undefined;
-  if (rpc && rpcSubscriptions && SUBMIT_TX) {
-    log.info("Uploading proof to ChadBuffer...");
-    try {
-      const result = await uploadProofToBuffer(rpc, rpcSubscriptions, payer, proofBytes);
-      if (result.usedBuffer) {
-        bufferAddress = result.bufferAddress;
-        log.success(`Proof uploaded to buffer`);
-        log.data("Buffer address", bufferAddress.toString());
-        log.data("Chunks uploaded", result.chunksUploaded.toString());
-      }
-    } catch (error: any) {
-      log.warn(`Buffer upload skipped: ${error.message}`);
-    }
-  } else {
-    log.info("Skipping buffer upload (RPC not available or SUBMIT_TX=false)");
-  }
+  // Convert recipient address to bigint for the circuit
+  const recipientBigint = BigInt("0x" + bytesToHex(bs58Decode(payer.address.toString())));
+  // Reduce to BN254 field to keep within circuit field range
+  const recipientField = recipientBigint % BN254_SCALAR_FIELD;
+
+  log.info("Generating real Groth16 claim proof via Sunspot...");
+  const startTime = Date.now();
+
+  const proofResult = await generateClaimProofGroth16({
+    privKey: note.privKey,
+    pubKeyX: note.pubKeyX,
+    amount: note.amount,
+    leafIndex: BigInt(note.leafIndex),
+    merkleRoot: merkleProof.root,
+    merkleProof: { siblings: merkleProof.siblings, indices: merkleProof.indices },
+    recipient: recipientField,
+  });
+
+  const elapsed = Date.now() - startTime;
+  const proofBytes = proofResult.proof;
+  log.success(`Generated real Groth16 proof (${proofBytes.length} bytes) in ${elapsed}ms`);
 
   // Derive PDAs
   const [poolState] = await derivePoolStatePDA(config.zvaultProgramId);
   const [commitmentTree] = await deriveCommitmentTreePDA(config.zvaultProgramId);
-  const nullifierHash = bigintToBytes32(computeNullifier(note.nullifier, BigInt(note.leafIndex)));
+  const nullifierHash = bigintToBytes32(hashNullifierSync(note.nullifier));
   const [nullifierRecord] = await deriveNullifierRecordPDA(nullifierHash, config.zvaultProgramId);
   const recipientAta = await deriveATA(payer.address, config.zbtcMint);
 
   log.info("Building claim instruction:");
   log.data("Amount", formatSats(note.amount));
-  log.data("Proof source", bufferAddress ? "buffer" : "inline");
 
-  // Build claim instruction using SDK
+  // Build claim instruction using SDK (inline Groth16 proof)
   const claimIx = buildClaimInstruction({
-    proofSource: bufferAddress ? "buffer" : "inline",
-    proofBytes: bufferAddress ? undefined : proofBytes,
-    bufferAddress,
+    proofBytes,
     root: state.currentRoot,
     nullifierHash,
     amountSats: note.amount,
@@ -453,28 +473,18 @@ async function testClaimZkBTC(
     throw new Error(`Invalid discriminator: ${claimIx.data[0]}, expected 9`);
   }
 
-  log.success("Claim instruction built successfully");
-
-  // Clean up buffer
-  if (bufferAddress && rpc && rpcSubscriptions) {
-    try {
-      await closeBuffer(rpc, rpcSubscriptions, payer, bufferAddress);
-      log.success("Buffer closed");
-    } catch (error: any) {
-      log.warn(`Buffer close failed: ${error.message}`);
-    }
-  }
+  log.success("Claim instruction built successfully (real proof)");
 }
 
 /**
- * Test 3: Split Note - Build split instruction
+ * Test 3: Split Note - Build split instruction with real Groth16 proof
  */
 async function testSplitNote(
   payer: KeyPairSigner,
   config: NetworkConfig,
   note: UserNote
 ): Promise<{ output1: UserNote; output2: UserNote }> {
-  log.step(3, "Split Note - Building split instruction");
+  log.step(3, "Split Note - Building split instruction (real Groth16)");
 
   const amount1 = note.amount / 2n;
   const amount2 = note.amount - amount1;
@@ -484,50 +494,72 @@ async function testSplitNote(
   log.data("Output 1", formatSats(amount1));
   log.data("Output 2", formatSats(amount2));
 
-  // Generate new notes for outputs using SDK functions
-  const output1Nullifier = BigInt("0x" + bytesToHex(randomBytes(32)));
-  const output1Secret = BigInt("0x" + bytesToHex(randomBytes(32)));
-  const output1Commitment = computeUnifiedCommitment(output1Nullifier, output1Secret, amount1);
+  // Generate output keys as valid BN254 field elements
+  const output1PubKeyX = createFieldElement(0x11);
+  const output2PubKeyX = createFieldElement(0x22);
 
-  const output2Nullifier = BigInt("0x" + bytesToHex(randomBytes(32)));
-  const output2Secret = BigInt("0x" + bytesToHex(randomBytes(32)));
-  const output2Commitment = computeUnifiedCommitment(output2Nullifier, output2Secret, amount2);
+  // Build merkle proof for the input note
+  const merkleProof = createTestMerkleProof(note.commitment);
+
+  log.info("Generating real Groth16 split proof via Sunspot...");
+  const startTime = Date.now();
+
+  const proofResult = await generateSplitProofGroth16({
+    privKey: note.privKey,
+    pubKeyX: note.pubKeyX,
+    amount: note.amount,
+    leafIndex: BigInt(note.leafIndex),
+    merkleRoot: merkleProof.root,
+    merkleProof: { siblings: merkleProof.siblings, indices: merkleProof.indices },
+    output1PubKeyX,
+    output1Amount: amount1,
+    output2PubKeyX,
+    output2Amount: amount2,
+    output1EphemeralPubX: output1PubKeyX,
+    output1EncryptedAmountWithSign: 0n,
+    output2EphemeralPubX: output2PubKeyX,
+    output2EncryptedAmountWithSign: 0n,
+  });
+
+  const elapsed = Date.now() - startTime;
+  const proofBytes = proofResult.proof;
+  log.success(`Generated real Groth16 proof (${proofBytes.length} bytes) in ${elapsed}ms`);
+
+  // Compute output commitments (same as what the prover computed internally)
+  const output1Commitment = poseidonHashSync([output1PubKeyX, amount1]);
+  const output2Commitment = poseidonHashSync([output2PubKeyX, amount2]);
 
   log.data("Output 1 commitment", output1Commitment.toString(16).slice(0, 20) + "...");
   log.data("Output 2 commitment", output2Commitment.toString(16).slice(0, 20) + "...");
 
-  // Generate mock proof
-  const proofBytes = createMockProof(MOCK_PROOF_SIZE);
-
   // Derive PDAs
   const [poolState] = await derivePoolStatePDA(config.zvaultProgramId);
   const [commitmentTree] = await deriveCommitmentTreePDA(config.zvaultProgramId);
-  const nullifierHash = bigintToBytes32(computeNullifier(note.nullifier, BigInt(note.leafIndex)));
+  const nullifierHash = bigintToBytes32(hashNullifierSync(note.nullifier));
   const [nullifierRecord] = await deriveNullifierRecordPDA(nullifierHash, config.zvaultProgramId);
 
-  // Generate mock stealth output data (32-byte fields for circuit public inputs)
-  const output1EphemeralPubX = randomBytes(32);
-  const output1EncryptedAmountWithSign = randomBytes(32);
-  const output2EphemeralPubX = randomBytes(32);
-  const output2EncryptedAmountWithSign = randomBytes(32);
+  // Stealth output metadata as 32-byte fields
+  const output1EphemeralPubXBytes = bigintToBytes32(output1PubKeyX);
+  const output1EncryptedAmountWithSignBytes = bigintToBytes32(0n);
+  const output2EphemeralPubXBytes = bigintToBytes32(output2PubKeyX);
+  const output2EncryptedAmountWithSignBytes = bigintToBytes32(0n);
 
-  // Derive stealth announcement PDAs from ephemeral pubkey x-coordinates
-  const [stealthAnnouncement1] = await deriveStealthAnnouncementPDA(output1EphemeralPubX, config.zvaultProgramId);
-  const [stealthAnnouncement2] = await deriveStealthAnnouncementPDA(output2EphemeralPubX, config.zvaultProgramId);
+  // Derive stealth announcement PDAs
+  const [stealthAnnouncement1] = await deriveStealthAnnouncementPDA(output1EphemeralPubXBytes, config.zvaultProgramId);
+  const [stealthAnnouncement2] = await deriveStealthAnnouncementPDA(output2EphemeralPubXBytes, config.zvaultProgramId);
 
-  // Build split instruction using SDK (buffer mode)
+  // Build split instruction using SDK (inline Groth16 proof)
   const splitIx = buildSplitInstruction({
-    proofSource: "buffer",
-    bufferAddress: address("11111111111111111111111111111111"), // Mock buffer
+    proofBytes,
     root: state.currentRoot,
     nullifierHash,
     outputCommitment1: bigintToBytes32(output1Commitment),
     outputCommitment2: bigintToBytes32(output2Commitment),
     vkHash: hexToBytes(config.vkHashes.split),
-    output1EphemeralPubX,
-    output1EncryptedAmountWithSign,
-    output2EphemeralPubX,
-    output2EncryptedAmountWithSign,
+    output1EphemeralPubX: output1EphemeralPubXBytes,
+    output1EncryptedAmountWithSign: output1EncryptedAmountWithSignBytes,
+    output2EphemeralPubX: output2EphemeralPubXBytes,
+    output2EncryptedAmountWithSign: output2EncryptedAmountWithSignBytes,
     accounts: {
       poolState,
       commitmentTree,
@@ -547,12 +579,17 @@ async function testSplitNote(
     throw new Error(`Invalid discriminator: ${splitIx.data[0]}, expected 4`);
   }
 
-  log.success("Split instruction built successfully");
+  log.success("Split instruction built successfully (real proof)");
 
-  // Create output notes
+  // Create output notes with proper keys for future operations
+  const output1PrivKey = createFieldElement(0x31);
+  const output2PrivKey = createFieldElement(0x32);
+
   const output1: UserNote = {
-    nullifier: output1Nullifier,
-    secret: output1Secret,
+    privKey: output1PrivKey,
+    pubKeyX: output1PubKeyX,
+    nullifier: computeNullifierSync(output1PrivKey, BigInt(state.nextLeafIndex)),
+    secret: BigInt("0x" + bytesToHex(randomBytes(32))),
     amount: amount1,
     commitment: output1Commitment,
     commitmentBytes: bigintToBytes32(output1Commitment),
@@ -560,8 +597,10 @@ async function testSplitNote(
   };
 
   const output2: UserNote = {
-    nullifier: output2Nullifier,
-    secret: output2Secret,
+    privKey: output2PrivKey,
+    pubKeyX: output2PubKeyX,
+    nullifier: computeNullifierSync(output2PrivKey, BigInt(state.nextLeafIndex + 1)),
+    secret: BigInt("0x" + bytesToHex(randomBytes(32))),
     amount: amount2,
     commitment: output2Commitment,
     commitmentBytes: bigintToBytes32(output2Commitment),
@@ -595,13 +634,14 @@ async function testPoolDeposit(
 
   log.data("Deposit Epoch", depositEpoch.toString());
 
-  // Generate mock proof
-  const proofBytes = createMockProof(MOCK_PROOF_SIZE);
+  // Generate mock proof (pool circuits have no proving keys compiled)
+  const proofBytes = new Uint8Array(GROTH16_PROOF_SIZE);
+  log.info("Using mock Groth16 proof (pool circuits not compiled for Sunspot)");
 
   // Derive PDAs using SDK
   const [poolState] = await derivePoolStatePDA(config.zvaultProgramId);
   const [commitmentTree] = await deriveCommitmentTreePDA(config.zvaultProgramId);
-  const nullifierHash = bigintToBytes32(computeNullifier(note.nullifier, BigInt(note.leafIndex)));
+  const nullifierHash = bigintToBytes32(hashNullifierSync(note.nullifier));
   const [nullifierRecord] = await deriveNullifierRecordPDA(nullifierHash, config.zvaultProgramId);
   const [yieldPool] = await deriveYieldPoolPDA(DEFAULT_POOL_ID, config.zvaultProgramId);
   const [poolCommitmentTree] = await derivePoolCommitmentTreePDA(DEFAULT_POOL_ID, config.zvaultProgramId);
@@ -609,10 +649,9 @@ async function testPoolDeposit(
   log.data("Yield Pool PDA", yieldPool.toString());
   log.data("Pool Commitment Tree PDA", poolCommitmentTree.toString());
 
-  // Build pool deposit instruction using SDK
+  // Build pool deposit instruction using SDK (inline Groth16 proof)
   const poolDepositIx = buildPoolDepositInstruction({
-    proofSource: "buffer",
-    bufferAddress: address("11111111111111111111111111111111"),
+    proofBytes,
     root: state.currentRoot,
     nullifierHash,
     poolCommitment,
@@ -674,7 +713,7 @@ async function testPoolWithdraw(
   log.data("Yield Earned", formatSats(yieldAmount));
 
   const outputCommitment = createMock32Bytes(60);
-  const proofBytes = createMockProof(MOCK_PROOF_SIZE);
+  const proofBytes = new Uint8Array(GROTH16_PROOF_SIZE);
 
   // Derive PDAs
   const [poolState] = await derivePoolStatePDA(config.zvaultProgramId);
@@ -684,10 +723,9 @@ async function testPoolWithdraw(
   const poolNullifierHash = createMock32Bytes(100);
   const [poolNullifierRecord] = await derivePoolNullifierPDA(DEFAULT_POOL_ID, poolNullifierHash, config.zvaultProgramId);
 
-  // Build pool withdraw instruction using SDK
+  // Build pool withdraw instruction using SDK (inline Groth16 proof)
   const poolWithdrawIx = buildPoolWithdrawInstruction({
-    proofSource: "buffer",
-    bufferAddress: address("11111111111111111111111111111111"),
+    proofBytes,
     poolRoot: position.commitment,
     poolNullifierHash,
     amountSats: withdrawAmount + yieldAmount,
@@ -739,7 +777,7 @@ async function testPoolClaimYield(
   log.data("Yield to claim", formatSats(yieldAmount));
 
   const newPoolCommitment = createMock32Bytes(70);
-  const proofBytes = createMockProof(MOCK_PROOF_SIZE);
+  const proofBytes = new Uint8Array(GROTH16_PROOF_SIZE);
 
   // Derive PDAs
   const [poolState] = await derivePoolStatePDA(config.zvaultProgramId);
@@ -749,10 +787,9 @@ async function testPoolClaimYield(
   const [poolNullifierRecord] = await derivePoolNullifierPDA(DEFAULT_POOL_ID, poolNullifierHash, config.zvaultProgramId);
   const recipientAta = await deriveATA(payer.address, config.zbtcMint);
 
-  // Build pool claim yield instruction using SDK
+  // Build pool claim yield instruction using SDK (inline Groth16 proof)
   const claimYieldIx = buildPoolClaimYieldInstruction({
-    proofSource: "buffer",
-    bufferAddress: address("11111111111111111111111111111111"),
+    proofBytes,
     poolRoot: position.commitment,
     poolNullifierHash,
     newPoolCommitment,
@@ -782,46 +819,26 @@ async function testPoolClaimYield(
   log.success("Pool claim yield instruction built successfully");
 }
 
-/**
- * Test 7: ChadBuffer utilities
- */
-function testChadBufferUtilities(): void {
-  log.step(7, "ChadBuffer Utilities - Testing constants and functions");
-
-  log.info("Testing SDK exports:");
-  log.data("CHADBUFFER_PROGRAM_ID", CHADBUFFER_PROGRAM_ID.toString());
-  log.data("SOLANA_TX_SIZE_LIMIT", `${SOLANA_TX_SIZE_LIMIT} bytes`);
-  log.data("MAX_DATA_PER_WRITE", `${MAX_DATA_PER_WRITE} bytes`);
-
-  // Test needsBuffer function
-  const smallProof = new Uint8Array(500);
-  const largeProof = new Uint8Array(16000);
-
-  log.info("Testing needsBuffer():");
-  log.data("500 bytes proof", needsBuffer(smallProof).toString());
-  log.data("16KB proof", needsBuffer(largeProof).toString());
-
-  if (needsBuffer(smallProof) !== false) {
-    throw new Error("needsBuffer should return false for 500 bytes");
-  }
-  if (needsBuffer(largeProof) !== true) {
-    throw new Error("needsBuffer should return true for 16KB");
-  }
-
-  // Test bufferNeedsBuffer (alias)
-  if (bufferNeedsBuffer(smallProof) !== false) {
-    throw new Error("bufferNeedsBuffer should return false for 500 bytes");
-  }
-
-  log.success("ChadBuffer utilities work correctly");
-}
-
 // =============================================================================
 // Main
 // =============================================================================
 
 async function main() {
   log.section(`zVault SDK E2E Test - ${NETWORK.toUpperCase()}`);
+
+  // Initialize Poseidon for sync hash operations
+  await initPoseidon();
+  log.info("Poseidon initialized");
+
+  // Configure Sunspot prover
+  configureSunspot({ circuitsBasePath: path.resolve(__dirname, "../circuits") });
+  const sunspotReady = await isSunspotAvailable();
+  log.data("Sunspot Available", sunspotReady.toString());
+
+  if (!sunspotReady) {
+    log.warn("Sunspot CLI not found — claim and split tests will fail!");
+    log.warn("Expected at: ~/sunspot/go/sunspot");
+  }
 
   // Configure network
   setConfig(NETWORK);
@@ -832,8 +849,7 @@ async function main() {
   log.data("RPC URL", RPC_URL);
   log.data("Submit TX", SUBMIT_TX.toString());
   log.data("zVault Program", config.zvaultProgramId.toString());
-  log.data("ChadBuffer Program", CHADBUFFER_PROGRAM_ID.toString());
-  log.data("UltraHonk Verifier", config.sunspotVerifierProgramId.toString());
+  log.data("Sunspot Verifier", config.sunspotVerifierProgramId.toString());
 
   // Load or generate keypair
   const keypairPath = process.env.KEYPAIR_PATH || DEFAULT_KEYPAIR_PATH;
@@ -850,22 +866,14 @@ async function main() {
     log.data("Generated Payer", payer.address.toString());
   }
 
-  // Try to create RPC clients
-  let rpc: Rpc<SolanaRpcApi> | null = null;
-  let rpcSubscriptions: RpcSubscriptions<SolanaRpcSubscriptionsApi> | null = null;
-
+  // Check balance via RPC
   try {
-    rpc = createSolanaRpc(RPC_URL);
-    rpcSubscriptions = createSolanaRpcSubscriptions(WS_URL);
-
+    const rpc = createSolanaRpc(RPC_URL);
     const balanceResult = await rpc.getBalance(payer.address).send();
     const balance = Number(balanceResult.value) / 1e9;
     log.data("Balance", `${balance.toFixed(4)} SOL`);
   } catch (error) {
     log.warn(`RPC not available: ${error}`);
-    log.info("Continuing with offline tests only");
-    rpc = null;
-    rpcSubscriptions = null;
   }
 
   // Run tests
@@ -876,7 +884,7 @@ async function main() {
     const depositedNote = await testDemoDeposit(payer, config);
 
     // Test 2: Claim zkBTC
-    await testClaimZkBTC(rpc, rpcSubscriptions, payer, config, depositedNote);
+    await testClaimZkBTC(payer, config, depositedNote);
 
     // Test 3: Split Note
     const { output1, output2 } = await testSplitNote(payer, config, depositedNote);
@@ -890,9 +898,6 @@ async function main() {
     // Test 6: Pool Claim Yield
     await testPoolClaimYield(payer, config);
 
-    // Test 7: ChadBuffer utilities
-    testChadBufferUtilities();
-
   } catch (error: any) {
     log.error(`Test failed: ${error.message || error}`);
     console.error(error);
@@ -903,23 +908,17 @@ async function main() {
   log.section("Test Summary");
 
   console.log("\nAll SDK functions validated:");
-  log.success("buildAddDemoStealthData - Demo deposit instruction");
-  log.success("buildClaimInstruction - Claim with buffer mode");
-  log.success("buildSplitInstruction - Split note");
-  log.success("buildPoolDepositInstruction - Pool deposit");
-  log.success("buildPoolWithdrawInstruction - Pool withdraw");
-  log.success("buildPoolClaimYieldInstruction - Pool claim yield");
-  log.success("needsBuffer / bufferNeedsBuffer - Buffer utilities");
-  log.success("computeUnifiedCommitment - Poseidon2 commitment");
-  log.success("computeNullifier - Nullifier derivation");
-  log.success("generateGrumpkinKeyPair - Grumpkin keypair");
-  log.success("pointToCompressedBytes - Point compression");
+  log.success("buildAddDemoStealthData - Demo deposit (real Poseidon commitment)");
+  log.success("buildClaimInstruction - Claim (real Groth16 via Sunspot)");
+  log.success("buildSplitInstruction - Split note (real Groth16 via Sunspot)");
+  log.success("buildPoolDepositInstruction - Pool deposit (mock proof)");
+  log.success("buildPoolWithdrawInstruction - Pool withdraw (mock proof)");
+  log.success("buildPoolClaimYieldInstruction - Pool claim yield (mock proof)");
+  log.success("poseidonHashSync - Real Poseidon commitment");
+  log.success("computeNullifierSync / hashNullifierSync - Nullifier derivation");
+  log.success("generateClaimProofGroth16 - Sunspot Groth16 prover");
+  log.success("generateSplitProofGroth16 - Sunspot Groth16 prover");
   log.success("All PDA derivation functions");
-
-  console.log("\nConstants validated:");
-  log.success(`MAX_DATA_PER_WRITE = ${MAX_DATA_PER_WRITE}`);
-  log.success(`SOLANA_TX_SIZE_LIMIT = ${SOLANA_TX_SIZE_LIMIT}`);
-  log.success(`CHADBUFFER_PROGRAM_ID = ${CHADBUFFER_PROGRAM_ID}`);
 
   console.log("\nInstruction discriminators:");
   log.success("DEMO_INSTRUCTION.ADD_DEMO_STEALTH = 22");

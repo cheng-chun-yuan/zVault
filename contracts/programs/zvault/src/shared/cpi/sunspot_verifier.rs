@@ -48,18 +48,10 @@ pub fn verify_groth16_proof_cpi(
     Ok(())
 }
 
-/// Verify a Groth16 proof with parsed components
+/// Verify a Groth16 proof with parsed components (legacy — 256-byte proof core only)
 ///
-/// # Arguments
-/// * `verifier_program` - The Sunspot verifier program account
-/// * `proof_a` - G1 point (64 bytes)
-/// * `proof_b` - G2 point (128 bytes)
-/// * `proof_c` - G1 point (64 bytes)
-/// * `public_inputs` - Array of 32-byte field elements
-///
-/// # Returns
-/// * `Ok(())` if the proof is valid
-/// * `Err(ProgramError)` if verification fails
+/// NOTE: This sends only the 256-byte proof core without gnark commitments.
+/// Use `verify_groth16_proof_full` for circuits that require commitment verification.
 pub fn verify_groth16_proof_components<const N: usize>(
     verifier_program: &AccountInfo,
     proof_a: &[u8; 64],
@@ -80,6 +72,41 @@ pub fn verify_groth16_proof_components<const N: usize>(
     }
 
     verify_groth16_proof_cpi(verifier_program, &proof, &public_witness)
+}
+
+/// Verify a Groth16 proof using the full gnark proof format (with commitments).
+///
+/// The Sunspot verifier expects: proof_raw || gnark_public_witness
+///
+/// Where:
+/// - proof_raw: Full gnark proof (A(64) + B(128) + C(64) + nb_commitments(4,BE)
+///              + commitments(N×64) + commitment_pok(64))
+/// - gnark_public_witness: 12-byte header + NR_INPUTS × 32-byte field elements
+///
+/// The 12-byte header is: nbPublic(u32 BE) + nbSecret(u32 BE, always 0) + vecLen(u32 BE)
+pub fn verify_groth16_proof_full<const N: usize>(
+    verifier_program: &AccountInfo,
+    proof_raw: &[u8],
+    public_inputs: &[[u8; 32]; N],
+) -> Result<(), ProgramError> {
+    // Build gnark public witness with 12-byte header
+    let nr_inputs = N as u32;
+    let nr_be = nr_inputs.to_be_bytes();
+    let witness_len = 12 + N * 32;
+    let mut public_witness = vec![0u8; witness_len];
+
+    // Header: nbPublic(4, BE) + nbSecret(4, BE=0) + vectorLen(4, BE)
+    public_witness[0..4].copy_from_slice(&nr_be);
+    // bytes 4..8 = 0 (nbSecret) - already zero
+    public_witness[8..12].copy_from_slice(&nr_be);
+
+    // Field elements (32 bytes each, big-endian)
+    for (i, input) in public_inputs.iter().enumerate() {
+        let start = 12 + i * 32;
+        public_witness[start..start + 32].copy_from_slice(input);
+    }
+
+    verify_groth16_proof_cpi(verifier_program, proof_raw, &public_witness)
 }
 
 #[cfg(test)]

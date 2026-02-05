@@ -188,24 +188,37 @@ pub fn compute_pool_commitment(pub_key_x: Field, principal: Field, deposit_epoch
 ### Proof Generation Pipeline
 
 ```
-Noir Circuit ─► nargo compile ─► Sunspot CLI ─► Groth16 Proof (~388 bytes) ─► Solana
+Noir Circuit ─► nargo compile ─► Sunspot CLI ─► Groth16 Proof (~388 bytes) ─► Solana CPI
 ```
 
 **Sunspot Flow:**
 1. `nargo compile` - Compile Noir circuit to ACIR
 2. `sunspot compile` - Convert ACIR to CCS (gnark constraint system)
-3. `sunspot setup` - Generate proving/verification keys
-4. `sunspot prove` - Generate Groth16 proof
+3. `sunspot setup` - Generate proving/verification keys (one-time per circuit)
+4. `sunspot prove` - Generate Groth16 proof (~1s per proof)
 
 ### Inline Proofs (No Buffer Needed)
 
 **Problem Solved:** Groth16 proofs are ~388 bytes, fitting easily within Solana's 1232 byte tx limit.
 
 ```
-Proof Data ──► Include inline in instruction data ──► Verify via BN254 precompiles
+Proof Data (388B) + Public Witness ──► Inline in IX data ──► CPI to Sunspot Verifier ──► BN254 precompiles
 ```
 
 **No ChadBuffer required for ZK proofs** (only for large BTC transactions).
+
+### Verified End-to-End on Devnet
+
+The full privacy flow has been verified on Solana devnet with real Groth16 proofs:
+
+| Step | Operation | Transaction |
+|------|-----------|-------------|
+| 1 | Demo Deposit (10,000 sats) | `5QzSqKy...` |
+| 2 | Split (10,000 → 5,000 + 5,000) | `24xAMPH...` |
+| 3 | Claim (5,000 sats → public zkBTC) | `5wpzusB...` |
+| 4 | Spend Partial Public (3,000 + 2,000 change) | `5PrdM6s...` |
+
+Run it yourself: `cd sdk && NETWORK=devnet bun run scripts/e2e-integration.ts`
 
 ### Why Grumpkin Curve?
 
@@ -337,37 +350,58 @@ const name = await reverseLookupZkeyName(connection, spendingPubKey);
 
 ## On-Chain Verification
 
-### Groth16 via BN254 Precompiles
+### Groth16 via Sunspot CPI
 
-zVault uses the `groth16-solana` crate with Solana's native `alt_bn128` syscalls:
+zVault verifies Groth16 proofs by CPI to per-circuit Sunspot verifier programs. Each circuit has its own deployed verifier (compiled with circuit-specific `NR_INPUTS`):
 
-```rust
-use groth16_solana::groth16::{Groth16Verifier, Groth16Verifyingkey};
-use solana_bn254::prelude::{alt_bn128_addition, alt_bn128_multiplication, alt_bn128_pairing};
+| Circuit | NR_INPUTS | Verifier Program (Devnet) |
+|---------|-----------|---------------------------|
+| **Claim** | 4 | `GfF1RnXivZ9ibg1K2QbwAuJ7ayoc1X9aqVU8P97DY1Qr` |
+| **Split** | 8 | `EnpfJTd734e99otMN4pvhDvsT6BBgrYhqWtRLLqGbbdc` |
+| **Spend Partial Public** | 7 | `3K9sDVgLW2rvVvRyg2QT7yF8caaSbVHgJQfUuXiXbHdd` |
+
+### gnark Proof Format
+
+Sunspot uses gnark's Groth16 backend. The proof format is:
+
+```
+proof_raw (388 bytes):
+├── A:              64 bytes  (G1 point, uncompressed)
+├── B:             128 bytes  (G2 point, uncompressed)
+├── C:              64 bytes  (G1 point, uncompressed)
+├── nb_commitments:  4 bytes  (uint32 big-endian, Pedersen commitments count)
+├── commitments:  N×64 bytes  (G1 points, 1 commitment for Noir circuits)
+└── commitment_pok: 64 bytes  (proof of knowledge)
+
+public_witness (12 + NR_INPUTS×32 bytes):
+├── nbPublic:    4 bytes  (uint32 big-endian)
+├── nbSecret:    4 bytes  (uint32 big-endian, always 0)
+├── vectorLen:   4 bytes  (uint32 big-endian, = nbPublic)
+└── inputs:   N×32 bytes  (field elements, big-endian)
 ```
 
-### Embedded Verification Keys
+CPI instruction data: `proof_raw || public_witness`
 
-VKs are compiled into the program for efficient verification:
+### VK Registry
 
-```rust
-// VKs embedded at compile time
-pub static CLAIM_VK_BYTES: &[u8] = include_bytes!("../../../circuits_vk/claim.vk");
+Verification keys are stored on-chain in VK Registry PDAs (one per circuit type):
 
-// Parse and verify
-let vk = get_claim_vk()?;
-verify_groth16_proof_with_vk(&proof_a, &proof_b, &proof_c, &public_inputs, &vk)?;
 ```
+PDA seeds: ["vk_registry", [circuit_type_u8]]
+Data: discriminator(8) + circuit_type(1) + vk_hash(32) + ...
+```
+
+The on-chain program validates the VK hash before forwarding the proof to the Sunspot verifier via CPI.
 
 ### Compute Unit Budget
 
 | Operation | Compute Units |
 |-----------|---------------|
-| Groth16 Verification | ~200,000 CU |
+| Groth16 Verification (Sunspot CPI) | ~500,000 CU |
 | Merkle Update | ~5,000 CU |
 | State Updates | ~5,000 CU |
-| **Total (Claim)** | **~210,000 CU** |
-| **Total (Split)** | **~215,000 CU** |
+| **Total (Claim)** | **~510,000 CU** |
+| **Total (Split)** | **~515,000 CU** |
 
 ---
 
@@ -440,11 +474,13 @@ verify_groth16_proof_with_vk(&proof_a, &proof_b, &proof_c, &public_inputs, &vk)?
 
 | Program | Network | Address |
 |---------|---------|---------|
-| zVault | Devnet | `zKeyrLmpT8W9o8iRvhizuSihLAFLhfAGBvfM638Pbw8` |
+| zVault | Devnet | `3B98dVdvQCLGVavcSz35igiby3ZqVv1SNUBCvDkVGMbq` |
 | BTC Light Client | Devnet | `S6rgPjCeBhkYBejWyDR1zzU3sYCMob36LAf8tjwj8pn` |
-| ChadBuffer | Devnet | `C5RpjtTMFXKVZCtXSzKXD4CDNTaWBg3dVeMfYvjZYHDF` |
+| Sunspot Verifier (Claim, NR_INPUTS=4) | Devnet | `GfF1RnXivZ9ibg1K2QbwAuJ7ayoc1X9aqVU8P97DY1Qr` |
+| Sunspot Verifier (Split, NR_INPUTS=8) | Devnet | `EnpfJTd734e99otMN4pvhDvsT6BBgrYhqWtRLLqGbbdc` |
+| Sunspot Verifier (Partial, NR_INPUTS=7) | Devnet | `3K9sDVgLW2rvVvRyg2QT7yF8caaSbVHgJQfUuXiXbHdd` |
 
-**Note:** Groth16 verification is done inline using embedded VKs and BN254 precompiles - no separate verifier program needed.
+**Verification Flow:** zVault program validates public inputs, then forwards proof + witness via CPI to the per-circuit Sunspot verifier program.
 
 ---
 
@@ -454,11 +490,12 @@ verify_groth16_proof_with_vk(&proof_a, &proof_b, &proof_c, &public_inputs, &vk)?
 
 | Circuit | Constraints | Prove Time* | Proof Size |
 |---------|-------------|-------------|------------|
-| claim | ~15,000 | ~2s | ~388 bytes |
-| spend_split | ~25,000 | ~3s | ~388 bytes |
-| pool_deposit | ~20,000 | ~2.5s | ~388 bytes |
-| pool_withdraw | ~22,000 | ~2.5s | ~388 bytes |
-| pool_claim_yield | ~28,000 | ~3.5s | ~388 bytes |
+| claim | ~15,000 | ~1s | ~388 bytes |
+| spend_split | ~25,000 | ~1s | ~388 bytes |
+| spend_partial_public | ~20,000 | ~1s | ~388 bytes |
+| pool_deposit | ~20,000 | ~1s | ~388 bytes |
+| pool_withdraw | ~22,000 | ~1s | ~388 bytes |
+| pool_claim_yield | ~28,000 | ~1.5s | ~388 bytes |
 
 *Approximate times with Sunspot CLI (gnark backend)
 

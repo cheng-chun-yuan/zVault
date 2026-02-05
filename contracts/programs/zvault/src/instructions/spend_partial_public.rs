@@ -35,8 +35,7 @@ use crate::utils::{
     validate_account_writable, validate_program_owner, validate_token_2022_owner,
     validate_token_program_key,
 };
-use crate::shared::crypto::groth16::parse_sunspot_proof;
-use crate::shared::cpi::verify_groth16_proof_components;
+use crate::shared::cpi::verify_groth16_proof_full;
 
 /// Spend partial public instruction data (Groth16 proof inline)
 ///
@@ -279,45 +278,30 @@ pub fn process_spend_partial_public(
         }
     }
 
-    // Parse and verify Groth16 proof
-    pinocchio::msg!("Verifying Groth16 proof...");
-    let (proof_a, proof_b, proof_c, public_inputs) = parse_sunspot_proof(ix_data.proof_bytes)?;
-
-    // Verify public inputs count
-    // SpendPartialPublic circuit public inputs: [root, nullifier_hash, public_amount, change_commitment, recipient]
-    if public_inputs.len() < 5 {
-        pinocchio::msg!("Insufficient public inputs");
-        return Err(ZVaultError::PublicInputsMismatch.into());
-    }
-
-    // Verify public inputs match expected values
-    if public_inputs[0] != ix_data.root {
-        pinocchio::msg!("Merkle root mismatch in public inputs");
-        return Err(ZVaultError::PublicInputsMismatch.into());
-    }
-
-    if public_inputs[1] != ix_data.nullifier_hash {
-        pinocchio::msg!("Nullifier hash mismatch in public inputs");
-        return Err(ZVaultError::PublicInputsMismatch.into());
-    }
-
-    // Build public inputs array for verification
-    let pi_array: [[u8; 32]; 5] = [
-        public_inputs[0],
-        public_inputs[1],
-        public_inputs[2],
-        public_inputs[3],
-        public_inputs[4],
-    ];
-
     // Verify Groth16 proof via CPI to Sunspot verifier
     pinocchio::msg!("Verifying Groth16 proof via Sunspot verifier CPI...");
-    verify_groth16_proof_components(
+
+    // SpendPartialPublic circuit has 7 public inputs (matching Noir circuit declaration order):
+    // [merkle_root, nullifier_hash, public_amount, change_commitment, recipient,
+    //  change_ephemeral_pub_x, change_encrypted_amount_with_sign]
+    // public_amount (u64) must be zero-padded to 32-byte big-endian field element
+    let mut amount_bytes = [0u8; 32];
+    amount_bytes[24..32].copy_from_slice(&ix_data.public_amount.to_be_bytes());
+
+    let public_inputs: [[u8; 32]; 7] = [
+        ix_data.root,
+        ix_data.nullifier_hash,
+        amount_bytes,
+        ix_data.change_commitment,
+        ix_data.recipient,
+        ix_data.change_ephemeral_pub_x,
+        ix_data.change_encrypted_amount_with_sign,
+    ];
+
+    verify_groth16_proof_full(
         accounts.sunspot_verifier,
-        &proof_a,
-        &proof_b,
-        &proof_c,
-        &pi_array,
+        ix_data.proof_bytes,
+        &public_inputs,
     ).map_err(|e| {
         pinocchio::msg!("Groth16 proof verification failed");
         e

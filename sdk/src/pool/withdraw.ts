@@ -113,7 +113,7 @@ export function preparePoolWithdrawInputs(
 }
 
 /**
- * Build instruction data for WITHDRAW_FROM_POOL (UltraHonk - variable-length proof)
+ * Build instruction data for WITHDRAW_FROM_POOL (Groth16 - inline proof)
  *
  * Format: discriminator(1) + proof_len(4) + proof(N) + nullifier(32) + commitment(32) +
  *         merkle_root(32) + principal(8) + deposit_epoch(8) + vk_hash(32)

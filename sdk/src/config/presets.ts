@@ -8,7 +8,7 @@
  */
 
 import { address, type Address } from "@solana/kit";
-import type { ResolvedConfig, VKHashes } from "../types/config";
+import type { ResolvedConfig, VKHashes, SunspotVerifiers } from "../types/config";
 
 // =============================================================================
 // Program ID Constants
@@ -89,8 +89,18 @@ export const DEVNET_PRESET: ResolvedConfig = {
   // Circuit CDN (Sunspot Groth16 artifacts)
   circuitCdnUrl: "https://circuits.amidoggy.xyz",
 
-  // Sunspot Groth16 Verifier
-  sunspotVerifierProgramId: address("3Sd1FJPA64zrUrbNQPFcsP7BXp2nu4ow3D1qaeZiwS1Y"),
+  // Sunspot Groth16 Verifier (legacy single ID, kept for backward compat)
+  sunspotVerifierProgramId: address("GfF1RnXivZ9ibg1K2QbwAuJ7ayoc1X9aqVU8P97DY1Qr"),
+
+  // Per-circuit Sunspot Groth16 Verifiers (each compiled with circuit-specific NR_INPUTS)
+  sunspotVerifiers: {
+    claim: address("GfF1RnXivZ9ibg1K2QbwAuJ7ayoc1X9aqVU8P97DY1Qr"),           // NR_INPUTS=4
+    split: address("EnpfJTd734e99otMN4pvhDvsT6BBgrYhqWtRLLqGbbdc"),           // NR_INPUTS=8
+    spendPartialPublic: address("3K9sDVgLW2rvVvRyg2QT7yF8caaSbVHgJQfUuXiXbHdd"), // NR_INPUTS=7
+    poolDeposit: address("11111111111111111111111111111111"),                    // Not yet deployed
+    poolWithdraw: address("11111111111111111111111111111111"),                   // Not yet deployed
+    poolClaimYield: address("11111111111111111111111111111111"),                 // Not yet deployed
+  },
 
   // VK Hashes (SHA256 of compiled circuit verification keys)
   // Generated from noir-circuits/target/*.vk files
@@ -137,6 +147,14 @@ export const MAINNET_PRESET: ResolvedConfig = {
 
   // Sunspot Verifier (placeholder - update when deployed)
   sunspotVerifierProgramId: address("11111111111111111111111111111111"),
+  sunspotVerifiers: {
+    claim: address("11111111111111111111111111111111"),
+    split: address("11111111111111111111111111111111"),
+    spendPartialPublic: address("11111111111111111111111111111111"),
+    poolDeposit: address("11111111111111111111111111111111"),
+    poolWithdraw: address("11111111111111111111111111111111"),
+    poolClaimYield: address("11111111111111111111111111111111"),
+  },
 
   // VK Hashes (placeholder - update when deployed)
   vkHashes: EMPTY_VK_HASHES,
@@ -175,6 +193,14 @@ export const LOCALNET_PRESET: ResolvedConfig = {
 
   // Sunspot Groth16 Verifier (deployed to localnet)
   sunspotVerifierProgramId: address("3Sd1FJPA64zrUrbNQPFcsP7BXp2nu4ow3D1qaeZiwS1Y"),
+  sunspotVerifiers: {
+    claim: address("3Sd1FJPA64zrUrbNQPFcsP7BXp2nu4ow3D1qaeZiwS1Y"),
+    split: address("3Sd1FJPA64zrUrbNQPFcsP7BXp2nu4ow3D1qaeZiwS1Y"),
+    spendPartialPublic: address("3Sd1FJPA64zrUrbNQPFcsP7BXp2nu4ow3D1qaeZiwS1Y"),
+    poolDeposit: address("3Sd1FJPA64zrUrbNQPFcsP7BXp2nu4ow3D1qaeZiwS1Y"),
+    poolWithdraw: address("3Sd1FJPA64zrUrbNQPFcsP7BXp2nu4ow3D1qaeZiwS1Y"),
+    poolClaimYield: address("3Sd1FJPA64zrUrbNQPFcsP7BXp2nu4ow3D1qaeZiwS1Y"),
+  },
 
   // VK Hashes (use devnet hashes for local testing)
   vkHashes: EMPTY_VK_HASHES,

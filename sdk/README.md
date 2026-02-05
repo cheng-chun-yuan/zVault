@@ -314,6 +314,76 @@ interface ConnectionAdapter {
 }
 ```
 
+## Groth16 Proof Generation (Sunspot)
+
+Generate compact ~388-byte Groth16 proofs client-side via Sunspot CLI:
+
+```typescript
+import {
+  generateClaimProofGroth16,
+  generateSplitProofGroth16,
+  generatePartialPublicProofGroth16,
+  configureSunspot,
+} from '@zvault/sdk';
+
+// Configure Sunspot prover (circuits directory)
+await configureSunspot({ circuitsDir: './circuits' });
+
+// Generate claim proof (~1s)
+const claimResult = await generateClaimProofGroth16({
+  privKey, pubKeyX, amount: 5_000n,
+  leafIndex: BigInt(proof.leafIndex),
+  merkleRoot: proof.root,
+  merkleProof: { siblings: proof.siblings, indices: proof.indices },
+  recipient: recipientAddress,
+});
+// claimResult.proof is ~388 bytes - fits inline in a single Solana TX
+
+// Generate split proof (~1s)
+const splitResult = await generateSplitProofGroth16({
+  privKey, pubKeyX, amount: 10_000n,
+  leafIndex, merkleRoot, merkleProof,
+  output1PubKeyX, output1Amount: 5_000n,
+  output2PubKeyX, output2Amount: 5_000n,
+});
+
+// Generate partial public spend proof (~1s)
+const partialResult = await generatePartialPublicProofGroth16({
+  privKey, pubKeyX, amount: 5_000n,
+  leafIndex, merkleRoot, merkleProof,
+  publicAmount: 3_000n,
+  changePubKeyX, changeAmount: 2_000n,
+  recipient: recipientAddress,
+});
+```
+
+### Per-Circuit Sunspot Verifiers
+
+Each circuit has its own deployed verifier program on Solana (different `NR_INPUTS`):
+
+| Circuit | NR_INPUTS | Verifier Program (Devnet) |
+|---------|-----------|---------------------------|
+| `claim` | 4 | `GfF1RnXivZ9ibg1K2QbwAuJ7ayoc1X9aqVU8P97DY1Qr` |
+| `spend_split` | 8 | `EnpfJTd734e99otMN4pvhDvsT6BBgrYhqWtRLLqGbbdc` |
+| `spend_partial_public` | 7 | `3K9sDVgLW2rvVvRyg2QT7yF8caaSbVHgJQfUuXiXbHdd` |
+
+## End-to-End Integration Test
+
+Run the full privacy flow on devnet (deposit → split → claim → spend partial public):
+
+```bash
+cd sdk
+NETWORK=devnet bun run scripts/e2e-integration.ts
+```
+
+This generates real Groth16 proofs and submits them on-chain. Expected output:
+```
+[1/4] Demo Stealth Deposit (10,000 sats) — TX confirmed
+[2/4] Split (10,000 → 5,000 + 5,000)   — Groth16 proof ~388 bytes, TX confirmed
+[3/4] Claim (5,000 sats → public zkBTC)  — Groth16 proof ~388 bytes, TX confirmed
+[4/4] Spend Partial Public (3,000 + 2,000 change) — Groth16 proof ~388 bytes, TX confirmed
+```
+
 ## Security Considerations
 
 1. **Never expose spending private key** - Only needed for claiming

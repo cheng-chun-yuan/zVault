@@ -32,8 +32,6 @@ export {
   bytesToHex,
   bigintTo32Bytes,
   bytes32ToBigint,
-  needsBuffer,
-  calculateAvailableProofSpace,
   SYSTEM_PROGRAM_ADDRESS,
   INSTRUCTIONS_SYSVAR,
 } from "./utils";
@@ -132,7 +130,7 @@ export function buildClaimInstruction(options: ClaimInstructionOptions): Instruc
     { address: TOKEN_2022_PROGRAM_ID, role: AccountRole.READONLY },
     { address: SYSTEM_PROGRAM, role: AccountRole.READONLY },
     { address: options.accounts.vkRegistry, role: AccountRole.READONLY },
-    { address: config.sunspotVerifierProgramId, role: AccountRole.READONLY },
+    { address: config.sunspotVerifiers.claim, role: AccountRole.READONLY },
     { address: INSTRUCTIONS, role: AccountRole.READONLY },
   ];
 
@@ -173,7 +171,7 @@ export function buildSplitInstruction(options: SplitInstructionOptions): Instruc
     { address: SYSTEM_PROGRAM, role: AccountRole.READONLY },
     { address: options.accounts.stealthAnnouncement1, role: AccountRole.WRITABLE },
     { address: options.accounts.stealthAnnouncement2, role: AccountRole.WRITABLE },
-    { address: config.sunspotVerifierProgramId, role: AccountRole.READONLY },
+    { address: config.sunspotVerifiers.split, role: AccountRole.READONLY },
   ];
 
   return {
@@ -215,7 +213,7 @@ export function buildSpendPartialPublicInstruction(options: SpendPartialPublicIn
     { address: TOKEN_2022_PROGRAM_ID, role: AccountRole.READONLY },
     { address: SYSTEM_PROGRAM, role: AccountRole.READONLY },
     { address: options.accounts.stealthAnnouncementChange, role: AccountRole.WRITABLE },
-    { address: config.sunspotVerifierProgramId, role: AccountRole.READONLY },
+    { address: config.sunspotVerifiers.spendPartialPublic, role: AccountRole.READONLY },
   ];
 
   return {
@@ -249,7 +247,7 @@ export function buildPoolDepositInstruction(options: PoolDepositInstructionOptio
     { address: options.accounts.poolCommitmentTree, role: AccountRole.WRITABLE },
     { address: options.accounts.user, role: AccountRole.WRITABLE_SIGNER },
     { address: SYSTEM_PROGRAM, role: AccountRole.READONLY },
-    { address: config.sunspotVerifierProgramId, role: AccountRole.READONLY },
+    { address: config.sunspotVerifiers.poolDeposit, role: AccountRole.READONLY },
   ];
 
   return {
@@ -283,7 +281,7 @@ export function buildPoolWithdrawInstruction(options: PoolWithdrawInstructionOpt
     { address: options.accounts.poolNullifierRecord, role: AccountRole.WRITABLE },
     { address: options.accounts.user, role: AccountRole.WRITABLE_SIGNER },
     { address: SYSTEM_PROGRAM, role: AccountRole.READONLY },
-    { address: config.sunspotVerifierProgramId, role: AccountRole.READONLY },
+    { address: config.sunspotVerifiers.poolWithdraw, role: AccountRole.READONLY },
   ];
 
   return {
@@ -321,7 +319,7 @@ export function buildPoolClaimYieldInstruction(options: PoolClaimYieldInstructio
     { address: options.accounts.user, role: AccountRole.WRITABLE_SIGNER },
     { address: TOKEN_2022_PROGRAM_ID, role: AccountRole.READONLY },
     { address: SYSTEM_PROGRAM, role: AccountRole.READONLY },
-    { address: config.sunspotVerifierProgramId, role: AccountRole.READONLY },
+    { address: config.sunspotVerifiers.poolClaimYield, role: AccountRole.READONLY },
   ];
 
   return {

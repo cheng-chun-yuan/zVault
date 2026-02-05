@@ -83,6 +83,19 @@ export interface ZVaultSDKConfig {
 // =============================================================================
 
 /**
+ * Per-circuit Sunspot verifier program IDs.
+ * Each circuit type needs its own verifier program (compiled with NR_INPUTS matching the circuit).
+ */
+export interface SunspotVerifiers {
+  claim: Address;
+  split: Address;
+  spendPartialPublic: Address;
+  poolDeposit: Address;
+  poolWithdraw: Address;
+  poolClaimYield: Address;
+}
+
+/**
  * VK (Verification Key) hashes for each circuit type.
  * These are SHA256 hashes of the compiled circuit verification keys.
  */
@@ -125,8 +138,11 @@ export interface ResolvedConfig {
   /** Associated Token Account program ID */
   ataProgramId: Address;
 
-  /** Sunspot Groth16 verifier program ID */
+  /** Sunspot Groth16 verifier program ID (legacy single verifier, use sunspotVerifiers for per-circuit) */
   sunspotVerifierProgramId: Address;
+
+  /** Per-circuit Sunspot verifier program IDs */
+  sunspotVerifiers: SunspotVerifiers;
 
   // -------------------------------------------------------------------------
   // Deployed Accounts (PDAs and Mints)

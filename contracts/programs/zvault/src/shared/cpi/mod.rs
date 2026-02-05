@@ -20,6 +20,6 @@ pub use chadbuffer::{
     BUFFER_HEADER_SIZE, CHADBUFFER_PROGRAM_ID,
 };
 
-pub use sunspot_verifier::{verify_groth16_proof_cpi, verify_groth16_proof_components};
+pub use sunspot_verifier::{verify_groth16_proof_cpi, verify_groth16_proof_components, verify_groth16_proof_full};
 
 pub use token_2022::{burn_zbtc, burn_zbtc_signed, mint_zbtc, transfer_zbtc};

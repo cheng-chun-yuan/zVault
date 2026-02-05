@@ -31,6 +31,7 @@ export type {
   ZVaultSDKConfig,
   VKHashes,
   BitcoinNetwork,
+  SunspotVerifiers,
 } from "./types/config";
 
 // Import presets for use in this module
@@ -134,7 +135,7 @@ export const DEPLOYMENT_INFO = {
     "name-registry",
     "stealth-addresses",
     "reverse-lookup",
-    "ultrahonk-browser-proving",
+    "groth16-sunspot-proving",
   ],
-  notes: "Instance-based SDK with namespaced methods. Client-side UltraHonk proof generation via bb.js",
+  notes: "Instance-based SDK with namespaced methods. Client-side Groth16 proof generation via Sunspot",
 };

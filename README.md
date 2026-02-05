@@ -242,12 +242,13 @@ bun run build        # Compile TypeScript
 bun test             # Run tests
 ```
 
-### Contracts
+### Contracts (Pinocchio)
 
 ```bash
 cd contracts
-anchor build         # Build programs
-anchor deploy        # Deploy to devnet
+cargo build-sbf                      # Build programs
+cargo build-sbf --features devnet    # Build with demo instructions
+solana program deploy target/deploy/zvault.so  # Deploy to devnet
 ```
 
 ### Noir Circuits
@@ -260,22 +261,75 @@ bun run test         # Run circuit tests
 
 ---
 
-## Program IDs
+## Live on Devnet
 
-| Program | Network | Address |
-|---------|---------|---------|
-| zVault | Devnet | `zKeyrLmpT8W9o8iRvhizuSihLAFLhfAGBvfM638Pbw8` |
-| BTC Light Client | Devnet | `S6rgPjCeBhkYBejWyDR1zzU3sYCMob36LAf8tjwj8pn` |
-| ChadBuffer | Devnet | `C5RpjtTMFXKVZCtXSzKXD4CDNTaWBg3dVeMfYvjZYHDF` |
+The full privacy flow is verified end-to-end on Solana devnet with real Groth16 proof verification.
+
+### Example Transactions
+
+View these on [Helius XRAY Explorer](https://xray.helius.dev/?network=devnet):
+
+| Step | Operation | Transaction |
+|------|-----------|-------------|
+| 1 | **Demo Deposit** (10,000 sats) | [`5QzSqKy...`](https://xray.helius.dev/tx/5QzSqKyXEMJFPTjP9qzYQGALVr4avT9KZXgThRJPEekMzYx4UvzqhznKZ7dP1qGpFz4yoGTRLbuD2dePaJuz8tJU?network=devnet) |
+| 2 | **Split** (10,000 → 5,000 + 5,000) | [`24xAMPH...`](https://xray.helius.dev/tx/24xAMPHY1Ebfmj1KmUj4hN9JpmAn62xwB3SacnbfH5Tc3Puo79NC36w6AhhdjG26PJaWYbaRzTp5Nus9jXXXDwo9?network=devnet) |
+| 3 | **Claim** (5,000 sats → public zkBTC) | [`5wpzusB...`](https://xray.helius.dev/tx/5wpzusBS9H5uvxEt7je3Ex48EjaAr6xr8y1YY79ngSUSH4G1Kg7XiBsAkcbgEeUj4hAkpkamTXdBaKoYaEUpZYPT?network=devnet) |
+| 4 | **Spend Partial Public** (3,000 public + 2,000 change) | [`5PrdM6s...`](https://xray.helius.dev/tx/5PrdM6s4ub1jNQG92jk3UJZbjFwtrLfSoqLinHwTzHGSV5UkFRRCXcBG5F9eKarM1wfiomzGCY2ZXNDQTun1UdMK?network=devnet) |
+
+**Results**: 10,000 sats deposited → 8,000 sats withdrawn (5,000 claim + 3,000 partial) → 2,000 sats remain as private change in the commitment tree.
+
+### Privacy Flow
+
+```
+Demo Deposit (10,000 sats)
+    └→ Commitment A added to on-chain Merkle tree
+    └→ 10,000 sats minted to pool vault
+         │
+    Split (Groth16 proof, ~500k CU, ~1s proving)
+    └→ Nullifies A, creates B1 (5,000) + B2 (5,000) in tree
+         │
+         ├─ Claim B1 (Groth16 proof → 5,000 sats to public ATA)
+         │  └→ Transfers zkBTC from vault → user wallet
+         │
+         └─ Spend Partial Public B2 (Groth16 proof → 3,000 public + 2,000 change)
+            └→ 3,000 sats to ATA, 2,000 change commitment C stays in tree
+```
+
+### Run It Yourself
+
+```bash
+cd sdk
+NETWORK=devnet bun run scripts/e2e-integration.ts
+```
+
+---
+
+## Program IDs (Devnet)
+
+| Program | Address |
+|---------|---------|
+| **zVault** | [`3B98dVdvQCLGVavcSz35igiby3ZqVv1SNUBCvDkVGMbq`](https://xray.helius.dev/account/3B98dVdvQCLGVavcSz35igiby3ZqVv1SNUBCvDkVGMbq?network=devnet) |
+| **BTC Light Client** | [`S6rgPjCeBhkYBejWyDR1zzU3sYCMob36LAf8tjwj8pn`](https://xray.helius.dev/account/S6rgPjCeBhkYBejWyDR1zzU3sYCMob36LAf8tjwj8pn?network=devnet) |
+
+### Sunspot Groth16 Verifiers (Per-Circuit)
+
+Each Noir circuit has its own deployed verifier program (compiled with circuit-specific public input count):
+
+| Circuit | NR_INPUTS | Verifier Program |
+|---------|-----------|------------------|
+| **Claim** | 4 | [`GfF1RnXivZ9ibg1K2QbwAuJ7ayoc1X9aqVU8P97DY1Qr`](https://xray.helius.dev/account/GfF1RnXivZ9ibg1K2QbwAuJ7ayoc1X9aqVU8P97DY1Qr?network=devnet) |
+| **Split** | 8 | [`EnpfJTd734e99otMN4pvhDvsT6BBgrYhqWtRLLqGbbdc`](https://xray.helius.dev/account/EnpfJTd734e99otMN4pvhDvsT6BBgrYhqWtRLLqGbbdc?network=devnet) |
+| **Spend Partial Public** | 7 | [`3K9sDVgLW2rvVvRyg2QT7yF8caaSbVHgJQfUuXiXbHdd`](https://xray.helius.dev/account/3K9sDVgLW2rvVvRyg2QT7yF8caaSbVHgJQfUuXiXbHdd?network=devnet) |
 
 ### Deployed Accounts (Devnet)
 
 | Account | Address | Purpose |
 |---------|---------|---------|
-| Pool State | `Bq8FTMnpyspkygAr3yN6tU8dzDhD5Ag19oVN3xXwy3gg` | Shielded pool state |
-| Commitment Tree | `M4hjajsFJU98xdx6ZtLuzgVPUKP6TTKXjfFpBiNE272` | Merkle tree storage |
-| zkBTC Mint | `AUuocP2KQVkUnt8pFtBx5CHpDargEPQNeq29hwtQoxFY` | Token-2022 mint |
-| Pool Vault | `5VCCporx5wvF2y8W97o55r1FiEb4pxp6RLRJMm3wQ1Ck` | Token vault |
+| Pool State | `HoSZ1ywBeAEWSNSSzxLNmAs6CodCM4b1Y3rzLGNarffm` | Shielded pool state PDA |
+| Commitment Tree | `Exd9HHYjm5MsMpxxCFSKwCUuWBM77BJMA1pnkwHUXBZo` | Merkle tree storage (depth 20) |
+| zkBTC Mint | `FPXFZ2eMuLJXnBq1JkppggWvaMCPtENiqT7foodeabgy` | Token-2022 mint |
+| Pool Vault | `7GJruCrMQs97M6exQ8KyPcwqRyndQjSq8tk8HsQY1aoP` | Token vault (pool ATA) |
+| VK Registry (Claim) | `5yNcv1LFK11VguSkEdRCsCCLB4fMNwAuHden6guknjuA` | Verification key registry |
 
 ---
 

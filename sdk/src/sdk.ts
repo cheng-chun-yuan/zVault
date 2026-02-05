@@ -80,8 +80,6 @@ import {
   buildVerifyFromBufferInstruction as _buildVerifyFromBufferInstruction,
   buildPartialPublicVerifierInputs,
   buildSplitVerifierInputs,
-  needsBuffer,
-  calculateAvailableProofSpace,
   INSTRUCTION_DISCRIMINATORS,
 } from "./instructions";
 
@@ -476,16 +474,6 @@ export class InstructionBuilders {
    * Build public inputs for split verifier
    */
   buildSplitVerifierInputs = buildSplitVerifierInputs;
-
-  /**
-   * Check if proof needs buffer mode
-   */
-  needsBuffer = needsBuffer;
-
-  /**
-   * Calculate available proof space in transaction
-   */
-  calculateAvailableProofSpace = calculateAvailableProofSpace;
 
   /**
    * Instruction discriminators

@@ -29,8 +29,7 @@ use crate::utils::{
     validate_account_writable, validate_program_owner, validate_token_2022_owner,
     validate_token_program_key, verify_and_create_nullifier,
 };
-use crate::shared::crypto::groth16::parse_sunspot_proof;
-use crate::shared::cpi::verify_groth16_proof_components;
+use crate::shared::cpi::verify_groth16_proof_full;
 
 /// Claim instruction data (Groth16 proof inline)
 ///
@@ -206,7 +205,7 @@ pub fn process_claim(
     }
 
     // Load and validate pool state
-    let (pool_bump, min_deposit, total_shielded) = {
+    let (pool_bump, total_shielded) = {
         let pool_data = accounts.pool_state.try_borrow_data()?;
         let pool = PoolState::from_bytes(&pool_data)?;
 
@@ -214,13 +213,10 @@ pub fn process_claim(
             return Err(ZVaultError::PoolPaused.into());
         }
 
-        (pool.bump, pool.min_deposit(), pool.total_shielded())
+        (pool.bump, pool.total_shielded())
     };
 
-    // Validate amount bounds
-    if ix_data.amount_sats < min_deposit {
-        return Err(ZVaultError::AmountTooSmall.into());
-    }
+    // Validate amount bounds (no min_deposit check — claims are withdrawals, not deposits)
     if ix_data.amount_sats > total_shielded {
         return Err(ZVaultError::InsufficientFunds.into());
     }
@@ -255,47 +251,26 @@ pub fn process_claim(
         return Err(ZVaultError::InvalidVkHash.into());
     }
 
-    // Parse Groth16 proof
-    pinocchio::msg!("Parsing Groth16 proof...");
-    let (proof_a, proof_b, proof_c, public_inputs) = parse_sunspot_proof(ix_data.proof_bytes)?;
-
-    // Verify public inputs match expected values
-    // Claim circuit public inputs: [merkle_root, nullifier_hash, amount, recipient]
-    if public_inputs.len() < 4 {
-        pinocchio::msg!("Insufficient public inputs");
-        return Err(ZVaultError::PublicInputsMismatch.into());
-    }
-
-    // Check merkle root
-    if public_inputs[0] != ix_data.root {
-        pinocchio::msg!("Merkle root mismatch in public inputs");
-        return Err(ZVaultError::PublicInputsMismatch.into());
-    }
-
-    // Check nullifier hash
-    if public_inputs[1] != ix_data.nullifier_hash {
-        pinocchio::msg!("Nullifier hash mismatch in public inputs");
-        return Err(ZVaultError::PublicInputsMismatch.into());
-    }
-
     // Verify Groth16 proof via CPI to Sunspot verifier
     pinocchio::msg!("Verifying Groth16 proof via Sunspot verifier CPI...");
 
-    // Build public inputs array for verification
-    let pi_array: [[u8; 32]; 4] = [
-        public_inputs[0],
-        public_inputs[1],
-        public_inputs[2],
-        public_inputs[3],
+    // Claim circuit has 4 public inputs (matching Noir circuit declaration order):
+    // [merkle_root, nullifier_hash, amount_pub, recipient]
+    // amount_sats (u64) must be zero-padded to 32-byte big-endian field element
+    let mut amount_bytes = [0u8; 32];
+    amount_bytes[24..32].copy_from_slice(&ix_data.amount_sats.to_be_bytes());
+
+    let public_inputs: [[u8; 32]; 4] = [
+        ix_data.root,
+        ix_data.nullifier_hash,
+        amount_bytes,
+        ix_data.recipient,
     ];
 
-    // Call Sunspot verifier via CPI
-    verify_groth16_proof_components(
+    verify_groth16_proof_full(
         accounts.sunspot_verifier,
-        &proof_a,
-        &proof_b,
-        &proof_c,
-        &pi_array,
+        ix_data.proof_bytes,
+        &public_inputs,
     ).map_err(|e| {
         pinocchio::msg!("Groth16 proof verification failed");
         e

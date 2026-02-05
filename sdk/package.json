@@ -97,7 +97,8 @@
     "e2e:localnet": "NETWORK=localnet bun run scripts/e2e-instructions.ts",
     "e2e:devnet": "NETWORK=devnet bun run scripts/e2e-instructions.ts",
     "e2e:localnet-poseidon": "NETWORK=localnet POSEIDON_ENABLED=true bun run scripts/e2e-instructions.ts",
-    "test:e2e:localnet-poseidon": "NETWORK=localnet POSEIDON_ENABLED=true bun test test/e2e/"
+    "test:e2e:localnet-poseidon": "NETWORK=localnet POSEIDON_ENABLED=true bun test test/e2e/",
+    "e2e:integration": "NETWORK=devnet bun run scripts/e2e-integration.ts"
   },
   "dependencies": {
     "@noble/hashes": "^1.8.0",
