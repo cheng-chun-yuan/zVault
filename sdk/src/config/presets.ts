@@ -86,11 +86,11 @@ export const DEVNET_PRESET: ResolvedConfig = {
   bitcoinNetwork: "testnet",
   esploraUrl: "https://blockstream.info/testnet/api",
 
-  // Circuit CDN (UltraHonk artifacts: .json, .vk files)
+  // Circuit CDN (Sunspot Groth16 artifacts)
   circuitCdnUrl: "https://circuits.amidoggy.xyz",
 
-  // UltraHonk Verifier (browser proof generation via bb.js)
-  ultrahonkVerifierProgramId: address("5uAoTLSexeKKLU3ZXniWFE2CsCWGPzMiYPpKiywCGqsd"),
+  // Sunspot Groth16 Verifier
+  sunspotVerifierProgramId: address("3Sd1FJPA64zrUrbNQPFcsP7BXp2nu4ow3D1qaeZiwS1Y"),
 
   // VK Hashes (SHA256 of compiled circuit verification keys)
   // Generated from noir-circuits/target/*.vk files
@@ -135,8 +135,8 @@ export const MAINNET_PRESET: ResolvedConfig = {
   // Circuit CDN
   circuitCdnUrl: "https://cdn.jsdelivr.net/npm/@zvault/sdk@latest/circuits",
 
-  // UltraHonk Verifier (placeholder)
-  ultrahonkVerifierProgramId: address("11111111111111111111111111111111"),
+  // Sunspot Verifier (placeholder - update when deployed)
+  sunspotVerifierProgramId: address("11111111111111111111111111111111"),
 
   // VK Hashes (placeholder - update when deployed)
   vkHashes: EMPTY_VK_HASHES,
@@ -173,8 +173,8 @@ export const LOCALNET_PRESET: ResolvedConfig = {
   // Circuit CDN (use local files for development)
   circuitCdnUrl: "/circuits",
 
-  // UltraHonk Verifier (use devnet for local testing)
-  ultrahonkVerifierProgramId: address("5uAoTLSexeKKLU3ZXniWFE2CsCWGPzMiYPpKiywCGqsd"),
+  // Sunspot Groth16 Verifier (deployed to localnet)
+  sunspotVerifierProgramId: address("3Sd1FJPA64zrUrbNQPFcsP7BXp2nu4ow3D1qaeZiwS1Y"),
 
   // VK Hashes (use devnet hashes for local testing)
   vkHashes: EMPTY_VK_HASHES,

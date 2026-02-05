@@ -124,49 +124,27 @@ export function bytes32ToBigint(bytes: Uint8Array): bigint {
 }
 
 // =============================================================================
-// Buffer Size Calculations
+// Groth16 Compatibility (always inline)
 // =============================================================================
 
 /**
- * Check if a proof is too large for inline mode (needs buffer)
- *
- * UltraHonk proofs are typically 8-16KB, but Solana transactions
- * are limited to ~1232 bytes. The caller should calculate available
- * space based on their specific transaction structure.
- *
- * @param proofBytes - Proof data
- * @param availableSpace - Max bytes available for proof in transaction
+ * Check if a proof needs buffer mode
+ * @deprecated Always returns false for Groth16 (388 bytes)
  */
-export function needsBuffer(proofBytes: Uint8Array, availableSpace: number = 900): boolean {
-  return proofBytes.length > availableSpace;
+export function needsBuffer(_proofBytes: Uint8Array, _availableSpace: number = 900): boolean {
+  return false; // Groth16 proofs always fit inline
 }
 
 /**
- * Calculate available space for inline proof given transaction overhead
- *
- * Solana TX limit is 1232 bytes. Overhead includes:
- * - Signatures: 64 bytes each
- * - Message header: ~3 bytes
- * - Accounts: ~32 bytes each
- * - Instruction data header: ~4 bytes
- * - Fixed instruction data (discriminator, proof_source, hashes, etc.)
+ * Calculate available space for inline proof
+ * @deprecated Groth16 proofs always fit (388 bytes)
  */
-export function calculateAvailableProofSpace(options: {
+export function calculateAvailableProofSpace(_options?: {
   numSigners?: number;
   numAccounts?: number;
   fixedDataSize?: number;
 }): number {
-  const TX_LIMIT = 1232;
-  const { numSigners = 1, numAccounts = 10, fixedDataSize = 150 } = options;
-
-  // Approximate overhead
-  const signaturesSize = numSigners * 64;
-  const messageHeader = 3;
-  const accountsSize = numAccounts * 32;
-  const instructionHeader = 4;
-
-  const overhead = signaturesSize + messageHeader + accountsSize + instructionHeader + fixedDataSize;
-  return Math.max(0, TX_LIMIT - overhead);
+  return 1000; // More than enough for 388 byte Groth16 proofs
 }
 
 // =============================================================================

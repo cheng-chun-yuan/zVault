@@ -50,7 +50,6 @@ export {
   bigintTo32Bytes,
   bytes32ToBigint,
   type Instruction,
-  type ProofSource,
   type ClaimInstructionOptions,
   type SplitInstructionOptions,
   type SpendPartialPublicInstructionOptions,

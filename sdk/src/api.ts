@@ -919,7 +919,7 @@ export async function claimPublic(
       { address: config.payer.address, role: AccountRole.WRITABLE_SIGNER },
       { address: networkConfig.token2022ProgramId, role: AccountRole.READONLY },
       { address: SYSTEM_PROGRAM_ADDRESS, role: AccountRole.READONLY },
-      { address: networkConfig.ultrahonkVerifierProgramId, role: AccountRole.READONLY },
+      { address: networkConfig.sunspotVerifierProgramId, role: AccountRole.READONLY },
     ],
     data: new Uint8Array(data),
   };
@@ -1053,7 +1053,7 @@ export async function claimPublicStealth(
       { address: config.payer.address, role: AccountRole.WRITABLE_SIGNER },
       { address: networkConfig.token2022ProgramId, role: AccountRole.READONLY },
       { address: SYSTEM_PROGRAM_ADDRESS, role: AccountRole.READONLY },
-      { address: networkConfig.ultrahonkVerifierProgramId, role: AccountRole.READONLY },
+      { address: networkConfig.sunspotVerifierProgramId, role: AccountRole.READONLY },
     ],
     data: new Uint8Array(data),
   };

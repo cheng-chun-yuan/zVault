@@ -2,7 +2,7 @@
  * ZVault Instruction Builders
  *
  * Low-level instruction building for ZVault operations.
- * Uses instruction introspection - verifier IX must precede zVault IX in same TX.
+ * All proofs use inline mode (Groth16 proofs are only 388 bytes).
  *
  * @module instructions
  */
@@ -10,7 +10,6 @@
 // Types
 export type {
   Instruction,
-  ProofSource,
   ClaimInstructionOptions,
   SplitInstructionOptions,
   SpendPartialPublicInstructionOptions,
@@ -60,22 +59,25 @@ export { buildPoolClaimYieldInstructionData } from "./pool-claim-yield";
 // Redemption
 export { buildRedemptionRequestInstructionData } from "./redemption";
 
-// Verifier
+// Verifier (inline mode only - Groth16 proofs are 388 bytes)
 export {
-  buildVerifyFromBufferInstruction,
-  buildVerifyFromBuffersInstruction,
+  GROTH16_PROOF_SIZE,
+  buildVerifyInstruction,
   buildClaimVerifierInputs,
   buildPartialPublicVerifierInputs,
   buildSplitVerifierInputs,
 } from "./verifier";
 
+// Legacy alias for backwards compatibility
+import { buildVerifyInstruction } from "./verifier";
+export const buildVerifyFromBufferInstruction = buildVerifyInstruction;
+
 // =============================================================================
 // Legacy Exports (for backwards compatibility)
 // =============================================================================
 
-import { address, AccountRole, type Address } from "@solana/kit";
+import { address, AccountRole } from "@solana/kit";
 import { getConfig, TOKEN_2022_PROGRAM_ID } from "../config";
-import { CHADBUFFER_PROGRAM_ID } from "../chadbuffer";
 
 import type {
   Instruction,
@@ -108,7 +110,6 @@ export function buildClaimInstruction(options: ClaimInstructionOptions): Instruc
   const config = getConfig();
 
   const data = buildClaimInstructionData({
-    proofSource: options.proofSource,
     proofBytes: options.proofBytes,
     root: options.root,
     nullifierHash: options.nullifierHash,
@@ -117,15 +118,9 @@ export function buildClaimInstruction(options: ClaimInstructionOptions): Instruc
     vkHash: options.vkHash,
   });
 
-  // Buffer mode is required for UltraHonk proofs (too large for inline)
-  if (options.proofSource === "buffer" && !options.bufferAddress) {
-    throw new Error("bufferAddress required for buffer mode");
-  }
-
-  // Program expects 12 accounts in this order:
-  // 0. pool_state, 1. commitment_tree, 2. nullifier_record, 3. zbtc_mint,
-  // 4. pool_vault, 5. recipient_ata, 6. user, 7. token_program,
-  // 8. system_program, 9. ultrahonk_verifier, 10. proof_buffer, 11. instructions_sysvar
+  // Contract expects: 0=pool_state, 1=commitment_tree, 2=nullifier_record, 3=zbtc_mint,
+  // 4=pool_vault, 5=recipient_ata, 6=user, 7=token_program, 8=system_program,
+  // 9=vk_registry, 10=sunspot_verifier, 11=instructions_sysvar
   const accounts: Instruction["accounts"] = [
     { address: options.accounts.poolState, role: AccountRole.WRITABLE },
     { address: options.accounts.commitmentTree, role: AccountRole.READONLY },
@@ -136,8 +131,8 @@ export function buildClaimInstruction(options: ClaimInstructionOptions): Instruc
     { address: options.accounts.user, role: AccountRole.WRITABLE_SIGNER },
     { address: TOKEN_2022_PROGRAM_ID, role: AccountRole.READONLY },
     { address: SYSTEM_PROGRAM, role: AccountRole.READONLY },
-    { address: config.ultrahonkVerifierProgramId, role: AccountRole.READONLY },
-    { address: options.bufferAddress!, role: AccountRole.READONLY },
+    { address: options.accounts.vkRegistry, role: AccountRole.READONLY },
+    { address: config.sunspotVerifierProgramId, role: AccountRole.READONLY },
     { address: INSTRUCTIONS, role: AccountRole.READONLY },
   ];
 
@@ -156,6 +151,7 @@ export function buildSplitInstruction(options: SplitInstructionOptions): Instruc
   const config = getConfig();
 
   const data = buildSplitInstructionData({
+    proofBytes: options.proofBytes,
     root: options.root,
     nullifierHash: options.nullifierHash,
     outputCommitment1: options.outputCommitment1,
@@ -167,17 +163,17 @@ export function buildSplitInstruction(options: SplitInstructionOptions): Instruc
     output2EncryptedAmountWithSign: options.output2EncryptedAmountWithSign,
   });
 
+  // Contract expects: 0=pool_state, 1=commitment_tree, 2=nullifier_record, 3=user,
+  // 4=system_program, 5=stealth_announcement_1, 6=stealth_announcement_2, 7=sunspot_verifier
   const accounts: Instruction["accounts"] = [
     { address: options.accounts.poolState, role: AccountRole.WRITABLE },
     { address: options.accounts.commitmentTree, role: AccountRole.WRITABLE },
     { address: options.accounts.nullifierRecord, role: AccountRole.WRITABLE },
     { address: options.accounts.user, role: AccountRole.WRITABLE_SIGNER },
     { address: SYSTEM_PROGRAM, role: AccountRole.READONLY },
-    { address: config.ultrahonkVerifierProgramId, role: AccountRole.READONLY },
     { address: options.accounts.stealthAnnouncement1, role: AccountRole.WRITABLE },
     { address: options.accounts.stealthAnnouncement2, role: AccountRole.WRITABLE },
-    { address: options.bufferAddress, role: AccountRole.READONLY },
-    { address: INSTRUCTIONS, role: AccountRole.READONLY },
+    { address: config.sunspotVerifierProgramId, role: AccountRole.READONLY },
   ];
 
   return {
@@ -195,6 +191,7 @@ export function buildSpendPartialPublicInstruction(options: SpendPartialPublicIn
   const config = getConfig();
 
   const data = buildSpendPartialPublicInstructionData({
+    proofBytes: options.proofBytes,
     root: options.root,
     nullifierHash: options.nullifierHash,
     publicAmountSats: options.publicAmountSats,
@@ -205,6 +202,8 @@ export function buildSpendPartialPublicInstruction(options: SpendPartialPublicIn
     changeEncryptedAmountWithSign: options.changeEncryptedAmountWithSign,
   });
 
+  // Contract expects: 0-6=pool_state..user, 7=token_program, 8=system_program,
+  // 9=stealth_announcement_change, 10=sunspot_verifier
   const accounts: Instruction["accounts"] = [
     { address: options.accounts.poolState, role: AccountRole.WRITABLE },
     { address: options.accounts.commitmentTree, role: AccountRole.WRITABLE },
@@ -215,10 +214,8 @@ export function buildSpendPartialPublicInstruction(options: SpendPartialPublicIn
     { address: options.accounts.user, role: AccountRole.WRITABLE_SIGNER },
     { address: TOKEN_2022_PROGRAM_ID, role: AccountRole.READONLY },
     { address: SYSTEM_PROGRAM, role: AccountRole.READONLY },
-    { address: config.ultrahonkVerifierProgramId, role: AccountRole.READONLY },
     { address: options.accounts.stealthAnnouncementChange, role: AccountRole.WRITABLE },
-    { address: options.bufferAddress, role: AccountRole.READONLY },
-    { address: INSTRUCTIONS, role: AccountRole.READONLY },
+    { address: config.sunspotVerifierProgramId, role: AccountRole.READONLY },
   ];
 
   return {
@@ -236,7 +233,6 @@ export function buildPoolDepositInstruction(options: PoolDepositInstructionOptio
   const config = getConfig();
 
   const data = buildPoolDepositInstructionData({
-    proofSource: options.proofSource,
     proofBytes: options.proofBytes,
     root: options.root,
     nullifierHash: options.nullifierHash,
@@ -253,15 +249,8 @@ export function buildPoolDepositInstruction(options: PoolDepositInstructionOptio
     { address: options.accounts.poolCommitmentTree, role: AccountRole.WRITABLE },
     { address: options.accounts.user, role: AccountRole.WRITABLE_SIGNER },
     { address: SYSTEM_PROGRAM, role: AccountRole.READONLY },
-    { address: config.ultrahonkVerifierProgramId, role: AccountRole.READONLY },
+    { address: config.sunspotVerifierProgramId, role: AccountRole.READONLY },
   ];
-
-  if (options.proofSource === "buffer") {
-    if (!options.bufferAddress) {
-      throw new Error("bufferAddress required for buffer mode");
-    }
-    accounts.push({ address: options.bufferAddress, role: AccountRole.READONLY });
-  }
 
   return {
     programAddress: config.zvaultProgramId,
@@ -278,7 +267,6 @@ export function buildPoolWithdrawInstruction(options: PoolWithdrawInstructionOpt
   const config = getConfig();
 
   const data = buildPoolWithdrawInstructionData({
-    proofSource: options.proofSource,
     proofBytes: options.proofBytes,
     poolRoot: options.poolRoot,
     poolNullifierHash: options.poolNullifierHash,
@@ -295,15 +283,8 @@ export function buildPoolWithdrawInstruction(options: PoolWithdrawInstructionOpt
     { address: options.accounts.poolNullifierRecord, role: AccountRole.WRITABLE },
     { address: options.accounts.user, role: AccountRole.WRITABLE_SIGNER },
     { address: SYSTEM_PROGRAM, role: AccountRole.READONLY },
-    { address: config.ultrahonkVerifierProgramId, role: AccountRole.READONLY },
+    { address: config.sunspotVerifierProgramId, role: AccountRole.READONLY },
   ];
-
-  if (options.proofSource === "buffer") {
-    if (!options.bufferAddress) {
-      throw new Error("bufferAddress required for buffer mode");
-    }
-    accounts.push({ address: options.bufferAddress, role: AccountRole.READONLY });
-  }
 
   return {
     programAddress: config.zvaultProgramId,
@@ -320,7 +301,6 @@ export function buildPoolClaimYieldInstruction(options: PoolClaimYieldInstructio
   const config = getConfig();
 
   const data = buildPoolClaimYieldInstructionData({
-    proofSource: options.proofSource,
     proofBytes: options.proofBytes,
     poolRoot: options.poolRoot,
     poolNullifierHash: options.poolNullifierHash,
@@ -341,15 +321,8 @@ export function buildPoolClaimYieldInstruction(options: PoolClaimYieldInstructio
     { address: options.accounts.user, role: AccountRole.WRITABLE_SIGNER },
     { address: TOKEN_2022_PROGRAM_ID, role: AccountRole.READONLY },
     { address: SYSTEM_PROGRAM, role: AccountRole.READONLY },
-    { address: config.ultrahonkVerifierProgramId, role: AccountRole.READONLY },
+    { address: config.sunspotVerifierProgramId, role: AccountRole.READONLY },
   ];
-
-  if (options.proofSource === "buffer") {
-    if (!options.bufferAddress) {
-      throw new Error("bufferAddress required for buffer mode");
-    }
-    accounts.push({ address: options.bufferAddress, role: AccountRole.READONLY });
-  }
 
   return {
     programAddress: config.zvaultProgramId,

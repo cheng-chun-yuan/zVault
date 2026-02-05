@@ -11,13 +11,18 @@
 //!
 //! The Instructions sysvar is transaction-scoped, so this check cannot be
 //! bypassed across transactions.
+//!
+//! # Groth16 Verification (Sunspot)
+//!
+//! For Groth16 proofs, verification is done inline in the instruction data.
+//! The introspection utilities are kept for optional prior-verification patterns.
 
 pub mod prior_verification;
 
 pub use prior_verification::{
-    require_prior_zk_verification, verify_prior_buffer_verification,
-    verify_prior_verification_any, verifier_instruction,
+    require_prior_groth16_verification, verify_prior_groth16_verification,
+    verifier_instruction,
 };
 
 #[cfg(not(feature = "localnet"))]
-pub use prior_verification::ULTRAHONK_VERIFIER_PROGRAM_ID;
+pub use prior_verification::SUNSPOT_VERIFIER_PROGRAM_ID;

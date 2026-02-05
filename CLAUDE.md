@@ -4,9 +4,9 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-zVault is a privacy-preserving Bitcoin-to-Solana bridge using Zero-Knowledge Proofs. Users deposit BTC to receive private zkBTC tokens that can be transferred using stealth addresses and ZK proofs (UltraHonk via Noir).
+zVault is a privacy-preserving Bitcoin-to-Solana bridge using Zero-Knowledge Proofs. Users deposit BTC to receive private zkBTC tokens that can be transferred using stealth addresses and ZK proofs (Groth16 via Sunspot).
 
-**Key Technologies**: Pinocchio (Solana), Noir circuits (UltraHonk proofs), Taproot (BTC deposits), Grumpkin ECDH (stealth addresses), FROST (threshold signing)
+**Key Technologies**: Pinocchio (Solana), Noir circuits (Groth16 proofs via Sunspot), Taproot (BTC deposits), Grumpkin ECDH (stealth addresses), FROST (threshold signing)
 
 ## Commands
 
@@ -73,7 +73,7 @@ bun run start        # Start header relay service
 ```
 BTC Deposit → Taproot Address (commitment-derived) → SPV Verification → On-chain Commitment
                                                                               ↓
-Claim: Provide nullifier+secret → Generate UltraHonk ZK Proof → Verify → Mint zkBTC
+Claim: Provide nullifier+secret → Generate Groth16 ZK Proof (Sunspot) → Verify → Mint zkBTC
                                                                               ↓
 Redeem: Burn zkBTC → FROST threshold signature → Return BTC to user
 ```
@@ -84,7 +84,7 @@ Redeem: Burn zkBTC → FROST threshold signature → Return BTC to user
 |-----------|---------|----------|
 | `contracts/programs/zvault` | Main Solana program | Rust (Pinocchio) |
 | `contracts/programs/btc-light-client` | Bitcoin header tracking | Rust |
-| `contracts/programs/ultrahonk-verifier` | UltraHonk proof verification | Rust |
+| `contracts/programs/sunspot-verifier` | Groth16 proof verification (Sunspot) | Rust |
 | `sdk` | TypeScript SDK (@zvault/sdk) | TypeScript |
 | `frost_server` | FROST threshold signing for BTC | Rust |
 | `backend` | API server + header relayer | Rust + Node.js |
@@ -107,8 +107,9 @@ Redeem: Burn zkBTC → FROST threshold signature → Return BTC to user
 
 | Feature | Description |
 |---------|-------------|
-| **Client-Side Proving** | All ZK proofs generated in browser/app - no trusted backend required |
-| **UltraHonk (No Trusted Setup)** | Unlike Groth16, UltraHonk requires no ceremony - fully trustless |
+| **Client-Side Proving** | ZK proofs generated via Sunspot CLI - no trusted backend required |
+| **Groth16 via Sunspot** | Compact ~388 byte proofs fit inline in transactions |
+| **BN254 Precompiles** | On-chain verification via Solana alt_bn128 syscalls (~200k CU) |
 | **Viewing/Spending Key Separation** | Share viewing key for audits without compromising spend ability |
 | **Stealth Addresses** | Unlinkable one-time addresses via DKSAP (EIP-5564) |
 | **.zkey Names** | Human-readable stealth addresses (SNS-style registry) |
@@ -128,21 +129,20 @@ Spending Key (private) ─► Can spend funds, must keep secret
 ### Cryptography
 
 1. **Commitment**: Poseidon hash (in-circuit) bound to Taproot address
-2. **ZK Proof**: UltraHonk via Noir circuits (client-side, no trusted setup)
+2. **ZK Proof**: Groth16 via Sunspot (Noir circuits compiled to gnark)
 3. **Stealth**: Grumpkin ECDH (~2k constraints vs ~300k for X25519)
 4. **Redemption**: FROST threshold signatures (secp256k1-tr)
 
-### Why UltraHonk over Groth16
+### Why Groth16 via Sunspot
 
-| Aspect | UltraHonk | Groth16 |
-|--------|-----------|---------|
-| Trusted Setup | None (transparent) | Required (ceremony) |
-| Proof Size | ~2-4 KB | ~200 bytes |
-| Prover Time | Fast (client-side viable) | Slower |
-| Verifier Cost | Higher on-chain | Lower on-chain |
-| Security Model | Transparent | Trusted setup assumption |
+| Aspect | Groth16 (Sunspot) | UltraHonk |
+|--------|-------------------|-----------|
+| Proof Size | ~388 bytes (inline) | ~2-4 KB (needs buffer) |
+| Verifier Cost | ~200k CU (BN254 precompiles) | Higher on-chain |
+| TX Complexity | Single transaction | Multi-TX with ChadBuffer |
+| Prover | Sunspot CLI (gnark) | bb.js WASM |
 
-We chose UltraHonk for trustlessness and client-side proving capability.
+We chose Groth16 for compact proof sizes that fit inline in Solana transactions.
 
 ## Key Program IDs
 
@@ -152,13 +152,21 @@ We chose UltraHonk for trustlessness and client-side proving capability.
 ## SDK Usage (@zvault/sdk)
 
 ```typescript
-import { generateNote, createClaimProof, createStealthDeposit } from '@zvault/sdk';
+import { generateNote, generateClaimProofGroth16, createStealthDeposit } from '@zvault/sdk';
 
 // Create note with nullifier/secret
 const note = generateNote(amount);
 
-// Generate UltraHonk proof for claim
-const proof = await createClaimProof(note, merkleProof);
+// Generate Groth16 proof for claim (via Sunspot)
+const proof = await generateClaimProofGroth16({
+  privKey: note.privKey,
+  pubKeyX: note.pubKeyX,
+  amount: note.amount,
+  leafIndex: note.leafIndex,
+  merkleRoot,
+  merkleProof,
+  recipient,
+});
 
 // ECDH-based stealth sends
 const stealth = createStealthDeposit(recipientPubkey, amount);

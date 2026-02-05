@@ -50,7 +50,7 @@ export function resolveConfig(config: ZVaultSDKConfig): ResolvedConfig {
     chadbufferProgramId: config.chadbufferProgramId ?? basePreset.chadbufferProgramId,
     token2022ProgramId: TOKEN_2022_PROGRAM_ID,
     ataProgramId: ATA_PROGRAM_ID,
-    ultrahonkVerifierProgramId: config.ultrahonkVerifierProgramId ?? basePreset.ultrahonkVerifierProgramId,
+    sunspotVerifierProgramId: config.sunspotVerifierProgramId ?? basePreset.sunspotVerifierProgramId,
 
     // Deployed Accounts - these are program-specific PDAs
     // For custom program IDs, these may need to be re-derived

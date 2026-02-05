@@ -1,13 +1,18 @@
-//! Spend Split instruction (UltraHonk - Client-Side ZK)
+//! Spend Split instruction (Groth16 - Client-Side ZK)
 //!
 //! Splits one unified commitment into two new commitments.
 //! Input:  Commitment = Poseidon2(pub_key_x, amount)
 //! Output: Commitment1 + Commitment2 (amount conservation enforced by ZK proof)
 //!
-//! ZK Proof: UltraHonk (generated in browser via bb.js or mobile via mopro)
+//! ZK Proof: Groth16 via Sunspot (generated in browser via nargo + sunspot)
+//! Proof size: ~388 bytes (fits inline in transaction data)
 //!
-//! The UltraHonk verifier must be called in an earlier instruction of the same transaction.
-//! This instruction uses instruction introspection to verify the verifier was called.
+//! Flow:
+//! 1. User generates Groth16 proof client-side (no backend)
+//! 2. Proof is included inline in instruction data
+//! 3. On-chain Groth16 verification via BN254 precompiles (~200k CU)
+//! 4. Nullifier is recorded (prevents double-spend)
+//! 5. Two new commitments are added to the Merkle tree
 
 use pinocchio::{
     account_info::AccountInfo,
@@ -23,14 +28,17 @@ use crate::state::{
     StealthAnnouncement, STEALTH_ANNOUNCEMENT_DISCRIMINATOR,
 };
 use crate::utils::{
-    create_pda_account, read_bytes32, require_prior_zk_verification,
+    create_pda_account, parse_u32_le, read_bytes32,
     validate_account_writable, validate_program_owner, verify_and_create_nullifier,
 };
+use crate::shared::crypto::groth16::parse_sunspot_proof;
+use crate::shared::cpi::verify_groth16_proof_components;
 
-
-/// Split commitment instruction data
+/// Split commitment instruction data (Groth16 proof inline)
 ///
 /// Layout:
+/// - proof_len: u32 LE (4 bytes) - Length of proof data
+/// - proof: [u8; N] - Groth16 proof (~388 bytes including public inputs)
 /// - root: [u8; 32]
 /// - nullifier_hash: [u8; 32]
 /// - output_commitment_1: [u8; 32]
@@ -41,8 +49,10 @@ use crate::utils::{
 /// - output2_ephemeral_pub_x: [u8; 32]
 /// - output2_encrypted_amount_with_sign: [u8; 32]
 ///
-/// Proof is in ChadBuffer account, verified by earlier verifier instruction in same TX.
-pub struct SpendSplitData {
+/// Minimum size: 4 + 260 + 32*9 = 552 bytes
+pub struct SpendSplitData<'a> {
+    /// Raw proof bytes (includes public inputs)
+    pub proof_bytes: &'a [u8],
     pub root: [u8; 32],
     pub nullifier_hash: [u8; 32],
     pub output_commitment_1: [u8; 32],
@@ -54,12 +64,34 @@ pub struct SpendSplitData {
     pub output2_encrypted_amount_with_sign: [u8; 32],
 }
 
-impl SpendSplitData {
-    /// Size: root(32) + nullifier(32) + out1(32) + out2(32) + vk_hash(32) + eph1_x(32) + enc1(32) + eph2_x(32) + enc2(32) = 288 bytes
-    pub const SIZE: usize = 32 * 9;
+impl<'a> SpendSplitData<'a> {
+    /// Minimum data size (proof_len + min_proof + 9 * 32-byte fields)
+    pub const MIN_SIZE: usize = 4 + 260 + 32 * 9;
 
-    pub fn from_bytes(data: &[u8]) -> Result<Self, ProgramError> {
+    pub fn from_bytes(data: &'a [u8]) -> Result<Self, ProgramError> {
+        if data.len() < Self::MIN_SIZE {
+            return Err(ProgramError::InvalidInstructionData);
+        }
+
         let mut offset = 0;
+
+        // Parse proof length
+        let proof_len = parse_u32_le(data, &mut offset)? as usize;
+
+        // Validate proof length
+        if proof_len < 260 || proof_len > 1024 {
+            return Err(ZVaultError::InvalidProofSize.into());
+        }
+
+        // Validate total data size
+        let expected_size = 4 + proof_len + 32 * 9;
+        if data.len() < expected_size {
+            return Err(ProgramError::InvalidInstructionData);
+        }
+
+        // Extract proof bytes
+        let proof_bytes = &data[offset..offset + proof_len];
+        offset += proof_len;
 
         let root = read_bytes32(data, &mut offset)?;
         let nullifier_hash = read_bytes32(data, &mut offset)?;
@@ -72,6 +104,7 @@ impl SpendSplitData {
         let output2_encrypted_amount_with_sign = read_bytes32(data, &mut offset)?;
 
         Ok(Self {
+            proof_bytes,
             root,
             nullifier_hash,
             output_commitment_1,
@@ -125,33 +158,29 @@ impl SpendSplitData {
     }
 }
 
-/// Split commitment accounts (10 accounts)
+/// Split commitment accounts (8 accounts for Groth16 CPI verification)
 ///
 /// 0. pool_state (writable)
 /// 1. commitment_tree (writable)
 /// 2. nullifier_record (writable)
 /// 3. user (signer)
 /// 4. system_program
-/// 5. ultrahonk_verifier - UltraHonk verifier program
-/// 6. stealth_announcement_1 (writable) - StealthAnnouncement PDA for first output
-/// 7. stealth_announcement_2 (writable) - StealthAnnouncement PDA for second output
-/// 8. proof_buffer (readonly) - ChadBuffer account containing proof data
-/// 9. instructions_sysvar (readonly) - For verifying prior verification instruction
+/// 5. stealth_announcement_1 (writable) - StealthAnnouncement PDA for first output
+/// 6. stealth_announcement_2 (writable) - StealthAnnouncement PDA for second output
+/// 7. sunspot_verifier - Sunspot verifier program for Groth16 proof verification
 pub struct SpendSplitAccounts<'a> {
     pub pool_state: &'a AccountInfo,
     pub commitment_tree: &'a AccountInfo,
     pub nullifier_record: &'a AccountInfo,
     pub user: &'a AccountInfo,
     pub system_program: &'a AccountInfo,
-    pub ultrahonk_verifier: &'a AccountInfo,
     pub stealth_announcement_1: &'a AccountInfo,
     pub stealth_announcement_2: &'a AccountInfo,
-    pub proof_buffer: &'a AccountInfo,
-    pub instructions_sysvar: &'a AccountInfo,
+    pub sunspot_verifier: &'a AccountInfo,
 }
 
 impl<'a> SpendSplitAccounts<'a> {
-    pub const ACCOUNT_COUNT: usize = 10;
+    pub const ACCOUNT_COUNT: usize = 8;
 
     pub fn from_accounts(accounts: &'a [AccountInfo]) -> Result<Self, ProgramError> {
         if accounts.len() < Self::ACCOUNT_COUNT {
@@ -163,11 +192,9 @@ impl<'a> SpendSplitAccounts<'a> {
         let nullifier_record = &accounts[2];
         let user = &accounts[3];
         let system_program = &accounts[4];
-        let ultrahonk_verifier = &accounts[5];
-        let stealth_announcement_1 = &accounts[6];
-        let stealth_announcement_2 = &accounts[7];
-        let proof_buffer = &accounts[8];
-        let instructions_sysvar = &accounts[9];
+        let stealth_announcement_1 = &accounts[5];
+        let stealth_announcement_2 = &accounts[6];
+        let sunspot_verifier = &accounts[7];
 
         // Validate user is signer
         if !user.is_signer() {
@@ -180,18 +207,16 @@ impl<'a> SpendSplitAccounts<'a> {
             nullifier_record,
             user,
             system_program,
-            ultrahonk_verifier,
             stealth_announcement_1,
             stealth_announcement_2,
-            proof_buffer,
-            instructions_sysvar,
+            sunspot_verifier,
         })
     }
 }
 
-/// Process split commitment (1-in-2-out) with UltraHonk proof
+/// Process split commitment (1-in-2-out) with Groth16 proof
 ///
-/// The UltraHonk verifier must be called in an earlier instruction of the same transaction.
+/// Groth16 proof is verified inline using BN254 precompiles.
 pub fn process_spend_split(
     program_id: &Pubkey,
     accounts: &[AccountInfo],
@@ -216,7 +241,6 @@ pub fn process_spend_split(
     let ephemeral_pub_2_compressed = ix_data.get_output2_ephemeral_pub_compressed();
 
     // Verify stealth announcement PDA for first output
-    // Use bytes 1-32 of ephemeral_pub (skip prefix byte) - max seed length is 32 bytes
     let stealth_seeds_1: &[&[u8]] = &[StealthAnnouncement::SEED, &ephemeral_pub_1_compressed[1..33]];
     let (expected_stealth_pda_1, stealth_bump_1) = find_program_address(stealth_seeds_1, program_id);
     if accounts.stealth_announcement_1.key() != &expected_stealth_pda_1 {
@@ -252,12 +276,56 @@ pub fn process_spend_split(
         }
     }
 
+    // Parse and verify Groth16 proof
+    pinocchio::msg!("Verifying Groth16 proof...");
+    let (proof_a, proof_b, proof_c, public_inputs) = parse_sunspot_proof(ix_data.proof_bytes)?;
+
+    // Verify public inputs count
+    // SpendSplit circuit public inputs: [root, nullifier_hash, output_commitment_1, output_commitment_2]
+    if public_inputs.len() < 4 {
+        pinocchio::msg!("Insufficient public inputs");
+        return Err(ZVaultError::PublicInputsMismatch.into());
+    }
+
+    // Verify public inputs match expected values
+    if public_inputs[0] != ix_data.root {
+        pinocchio::msg!("Merkle root mismatch in public inputs");
+        return Err(ZVaultError::PublicInputsMismatch.into());
+    }
+
+    if public_inputs[1] != ix_data.nullifier_hash {
+        pinocchio::msg!("Nullifier hash mismatch in public inputs");
+        return Err(ZVaultError::PublicInputsMismatch.into());
+    }
+
+    // Build public inputs array for verification
+    let pi_array: [[u8; 32]; 4] = [
+        public_inputs[0],
+        public_inputs[1],
+        public_inputs[2],
+        public_inputs[3],
+    ];
+
+    // Verify Groth16 proof via CPI to Sunspot verifier
+    pinocchio::msg!("Verifying Groth16 proof via Sunspot verifier CPI...");
+    verify_groth16_proof_components(
+        accounts.sunspot_verifier,
+        &proof_a,
+        &proof_b,
+        &proof_c,
+        &pi_array,
+    ).map_err(|e| {
+        pinocchio::msg!("Groth16 proof verification failed");
+        e
+    })?;
+
+    pinocchio::msg!("Groth16 proof verified successfully");
+
     // Get clock and rent for account creation
     let clock = Clock::get()?;
     let rent = Rent::get()?;
 
     // SECURITY: Create nullifier PDA FIRST to prevent race conditions
-    // Verifies PDA, checks double-spend, creates and initializes in one call
     let user_key: &[u8; 32] = accounts.user.key();
     verify_and_create_nullifier(
         accounts.nullifier_record,
@@ -267,13 +335,6 @@ pub fn process_spend_split(
         NullifierOperationType::Split,
         clock.unix_timestamp,
         &user_key,
-    )?;
-
-    // Verify that UltraHonk verifier was called in an earlier instruction
-    require_prior_zk_verification(
-        accounts.instructions_sysvar,
-        accounts.ultrahonk_verifier.key(),
-        accounts.proof_buffer.key(),
     )?;
 
     // Update commitment tree with both new commitments and capture leaf indices
@@ -318,7 +379,6 @@ pub fn process_spend_split(
     }
 
     // Initialize stealth announcement for first output
-    // Extract encrypted amount from the packed field (bits 0-63)
     let encrypted_amount_1 = ix_data.get_output1_encrypted_amount();
     {
         let mut ann_data = accounts.stealth_announcement_1.try_borrow_mut_data()?;
@@ -383,7 +443,7 @@ pub fn process_spend_split(
         pool.set_last_update(clock.unix_timestamp);
     }
 
-    pinocchio::msg!("Split completed (UltraHonk)");
+    pinocchio::msg!("Split completed via Groth16 proof");
 
     Ok(())
 }

@@ -339,9 +339,9 @@ export async function createTestContext(): Promise<E2ETestContext> {
         chadbufferProgramId: localnetConfig.programs.chadbuffer
           ? kitAddress(localnetConfig.programs.chadbuffer)
           : LOCALNET_CONFIG.chadbufferProgramId,
-        ultrahonkVerifierProgramId: localnetConfig.programs.ultrahonkVerifier
+        sunspotVerifierProgramId: localnetConfig.programs.ultrahonkVerifier
           ? kitAddress(localnetConfig.programs.ultrahonkVerifier)
-          : LOCALNET_CONFIG.ultrahonkVerifierProgramId,
+          : LOCALNET_CONFIG.sunspotVerifierProgramId,
         poolStatePda: kitAddress(localnetConfig.accounts.poolState),
         commitmentTreePda: kitAddress(localnetConfig.accounts.commitmentTree),
         zbtcMint: kitAddress(localnetConfig.accounts.zkbtcMint),
@@ -429,7 +429,7 @@ export async function createTestContext(): Promise<E2ETestContext> {
     programs: {
       zVault: config.zvaultProgramId.toString(),
       btcLightClient: config.btcLightClientProgramId.toString(),
-      ultrahonkVerifier: config.ultrahonkVerifierProgramId.toString(),
+      ultrahonkVerifier: config.sunspotVerifierProgramId.toString(),
       chadbuffer: config.chadbufferProgramId.toString(),
     },
     accounts: {

@@ -1,14 +1,19 @@
-//! Spend Partial Public instruction (UltraHonk - Client-Side ZK)
+//! Spend Partial Public instruction (Groth16 - Client-Side ZK)
 //!
 //! Claims part of a commitment to a public wallet, with change returned as a new commitment.
 //!
 //! Input:  Unified Commitment = Poseidon2(pub_key_x, amount)
 //! Output: Public transfer + Change Commitment = Poseidon2(change_pub_key_x, change_amount)
 //!
-//! ZK Proof: UltraHonk (generated in browser via bb.js or mobile via mopro)
+//! ZK Proof: Groth16 via Sunspot (generated in browser via nargo + sunspot)
+//! Proof size: ~388 bytes (fits inline in transaction data)
 //!
-//! The UltraHonk verifier must be called in an earlier instruction of the same transaction.
-//! This instruction uses instruction introspection to verify the verifier was called.
+//! Flow:
+//! 1. User generates Groth16 proof client-side (no backend)
+//! 2. Proof is included inline in instruction data
+//! 3. On-chain Groth16 verification via BN254 precompiles (~200k CU)
+//! 4. Nullifier is recorded (prevents double-spend)
+//! 5. Public amount transferred, change commitment added to tree
 
 use pinocchio::{
     account_info::AccountInfo,
@@ -26,15 +31,18 @@ use crate::state::{
     StealthAnnouncement, NULLIFIER_RECORD_DISCRIMINATOR, STEALTH_ANNOUNCEMENT_DISCRIMINATOR,
 };
 use crate::utils::{
-    create_pda_account, transfer_zbtc,
+    create_pda_account, parse_u32_le, parse_u64_le, read_bytes32, transfer_zbtc,
     validate_account_writable, validate_program_owner, validate_token_2022_owner,
     validate_token_program_key,
 };
+use crate::shared::crypto::groth16::parse_sunspot_proof;
+use crate::shared::cpi::verify_groth16_proof_components;
 
-
-/// Spend partial public instruction data
+/// Spend partial public instruction data (Groth16 proof inline)
 ///
 /// Layout:
+/// - proof_len: u32 LE (4 bytes) - Length of proof data
+/// - proof: [u8; N] - Groth16 proof (~388 bytes including public inputs)
 /// - root: [u8; 32]
 /// - nullifier_hash: [u8; 32]
 /// - public_amount: u64
@@ -44,69 +52,59 @@ use crate::utils::{
 /// - change_ephemeral_pub_x: [u8; 32] - x-coordinate of ephemeral pubkey
 /// - change_encrypted_amount_with_sign: [u8; 32] - bits 0-63: encrypted amount, bit 64: y_sign
 ///
-/// Proof is in ChadBuffer account, verified by earlier verifier instruction in same TX.
+/// Minimum size: 4 + 260 + 32 + 32 + 8 + 32 + 32 + 32 + 32 + 32 = 496 bytes
 pub struct SpendPartialPublicData<'a> {
-    pub root: &'a [u8; 32],
-    pub nullifier_hash: &'a [u8; 32],
+    pub proof_bytes: &'a [u8],
+    pub root: [u8; 32],
+    pub nullifier_hash: [u8; 32],
     pub public_amount: u64,
-    pub change_commitment: &'a [u8; 32],
-    pub recipient: &'a [u8; 32],
-    pub vk_hash: &'a [u8; 32],
+    pub change_commitment: [u8; 32],
+    pub recipient: [u8; 32],
+    pub vk_hash: [u8; 32],
     pub change_ephemeral_pub_x: [u8; 32],
     pub change_encrypted_amount_with_sign: [u8; 32],
 }
 
 impl<'a> SpendPartialPublicData<'a> {
-    /// Size: root(32) + nullifier(32) + amount(8) + change(32) + recipient(32) + vk_hash(32) + eph_x(32) + enc_amount(32) = 232 bytes
-    pub const SIZE: usize = 32 + 32 + 8 + 32 + 32 + 32 + 32 + 32;
+    /// Minimum data size
+    pub const MIN_SIZE: usize = 4 + 260 + 32 + 32 + 8 + 32 + 32 + 32 + 32 + 32;
 
     pub fn from_bytes(data: &'a [u8]) -> Result<Self, ProgramError> {
-        if data.len() < Self::SIZE {
+        if data.len() < Self::MIN_SIZE {
             return Err(ProgramError::InvalidInstructionData);
         }
 
         let mut offset = 0;
 
-        let root: &[u8; 32] = data[offset..offset + 32]
-            .try_into()
-            .map_err(|_| ProgramError::InvalidInstructionData)?;
-        offset += 32;
+        // Parse proof length
+        let proof_len = parse_u32_le(data, &mut offset)? as usize;
 
-        let nullifier_hash: &[u8; 32] = data[offset..offset + 32]
-            .try_into()
-            .map_err(|_| ProgramError::InvalidInstructionData)?;
-        offset += 32;
+        // Validate proof length
+        if proof_len < 260 || proof_len > 1024 {
+            return Err(ZVaultError::InvalidProofSize.into());
+        }
 
-        let public_amount = u64::from_le_bytes(
-            data[offset..offset + 8]
-                .try_into()
-                .map_err(|_| ProgramError::InvalidInstructionData)?,
-        );
-        offset += 8;
+        // Validate total data size
+        let expected_size = 4 + proof_len + 32 + 32 + 8 + 32 + 32 + 32 + 32 + 32;
+        if data.len() < expected_size {
+            return Err(ProgramError::InvalidInstructionData);
+        }
 
-        let change_commitment: &[u8; 32] = data[offset..offset + 32]
-            .try_into()
-            .map_err(|_| ProgramError::InvalidInstructionData)?;
-        offset += 32;
+        // Extract proof bytes
+        let proof_bytes = &data[offset..offset + proof_len];
+        offset += proof_len;
 
-        let recipient: &[u8; 32] = data[offset..offset + 32]
-            .try_into()
-            .map_err(|_| ProgramError::InvalidInstructionData)?;
-        offset += 32;
-
-        let vk_hash: &[u8; 32] = data[offset..offset + 32]
-            .try_into()
-            .map_err(|_| ProgramError::InvalidInstructionData)?;
-        offset += 32;
-
-        let mut change_ephemeral_pub_x = [0u8; 32];
-        change_ephemeral_pub_x.copy_from_slice(&data[offset..offset + 32]);
-        offset += 32;
-
-        let mut change_encrypted_amount_with_sign = [0u8; 32];
-        change_encrypted_amount_with_sign.copy_from_slice(&data[offset..offset + 32]);
+        let root = read_bytes32(data, &mut offset)?;
+        let nullifier_hash = read_bytes32(data, &mut offset)?;
+        let public_amount = parse_u64_le(data, &mut offset)?;
+        let change_commitment = read_bytes32(data, &mut offset)?;
+        let recipient = read_bytes32(data, &mut offset)?;
+        let vk_hash = read_bytes32(data, &mut offset)?;
+        let change_ephemeral_pub_x = read_bytes32(data, &mut offset)?;
+        let change_encrypted_amount_with_sign = read_bytes32(data, &mut offset)?;
 
         Ok(Self {
+            proof_bytes,
             root,
             nullifier_hash,
             public_amount,
@@ -120,7 +118,6 @@ impl<'a> SpendPartialPublicData<'a> {
 
     /// Extract the y_sign bit from change_encrypted_amount_with_sign (bit 64)
     pub fn get_change_y_sign(&self) -> bool {
-        // Bit 64 is in byte 8, bit 0
         (self.change_encrypted_amount_with_sign[8] & 0x01) != 0
     }
 
@@ -134,14 +131,13 @@ impl<'a> SpendPartialPublicData<'a> {
     /// Reconstruct the 33-byte compressed public key from x-coordinate and y_sign
     pub fn get_change_ephemeral_pub_compressed(&self) -> [u8; 33] {
         let mut compressed = [0u8; 33];
-        // Prefix: 0x02 if y is even (y_sign=0), 0x03 if y is odd (y_sign=1)
         compressed[0] = if self.get_change_y_sign() { 0x03 } else { 0x02 };
         compressed[1..33].copy_from_slice(&self.change_ephemeral_pub_x);
         compressed
     }
 }
 
-/// Spend partial public accounts (SkipVerification mode - 13 accounts)
+/// Spend partial public accounts (11 accounts for Groth16 CPI verification)
 ///
 /// 0. pool_state (writable)
 /// 1. commitment_tree (writable)
@@ -152,10 +148,8 @@ impl<'a> SpendPartialPublicData<'a> {
 /// 6. user (signer)
 /// 7. token_program
 /// 8. system_program
-/// 9. ultrahonk_verifier - UltraHonk verifier program
-/// 10. stealth_announcement_change (writable) - StealthAnnouncement PDA for change output
-/// 11. proof_buffer (readonly) - ChadBuffer account containing proof data
-/// 12. instructions_sysvar (readonly) - For verifying prior verification instruction
+/// 9. stealth_announcement_change (writable) - StealthAnnouncement PDA for change output
+/// 10. sunspot_verifier - Sunspot verifier program for Groth16 proof verification
 pub struct SpendPartialPublicAccounts<'a> {
     pub pool_state: &'a AccountInfo,
     pub commitment_tree: &'a AccountInfo,
@@ -166,14 +160,12 @@ pub struct SpendPartialPublicAccounts<'a> {
     pub user: &'a AccountInfo,
     pub token_program: &'a AccountInfo,
     pub system_program: &'a AccountInfo,
-    pub ultrahonk_verifier: &'a AccountInfo,
     pub stealth_announcement_change: &'a AccountInfo,
-    pub proof_buffer: &'a AccountInfo,
-    pub instructions_sysvar: &'a AccountInfo,
+    pub sunspot_verifier: &'a AccountInfo,
 }
 
 impl<'a> SpendPartialPublicAccounts<'a> {
-    pub const ACCOUNT_COUNT: usize = 13;
+    pub const ACCOUNT_COUNT: usize = 11;
 
     pub fn from_accounts(accounts: &'a [AccountInfo]) -> Result<Self, ProgramError> {
         if accounts.len() < Self::ACCOUNT_COUNT {
@@ -189,10 +181,8 @@ impl<'a> SpendPartialPublicAccounts<'a> {
         let user = &accounts[6];
         let token_program = &accounts[7];
         let system_program = &accounts[8];
-        let ultrahonk_verifier = &accounts[9];
-        let stealth_announcement_change = &accounts[10];
-        let proof_buffer = &accounts[11];
-        let instructions_sysvar = &accounts[12];
+        let stealth_announcement_change = &accounts[9];
+        let sunspot_verifier = &accounts[10];
 
         // Validate user is signer (fee payer)
         if !user.is_signer() {
@@ -209,20 +199,16 @@ impl<'a> SpendPartialPublicAccounts<'a> {
             user,
             token_program,
             system_program,
-            ultrahonk_verifier,
             stealth_announcement_change,
-            proof_buffer,
-            instructions_sysvar,
+            sunspot_verifier,
         })
     }
 }
 
-/// Process spend partial public instruction (UltraHonk proof with SkipVerification)
+/// Process spend partial public instruction (Groth16 proof inline)
 ///
 /// Claims part of a commitment to a public wallet, with change returned as a new commitment.
 /// Amount conservation: input_amount == public_amount + change_amount (enforced by ZK proof)
-///
-/// Uses SkipVerification pattern: verifier must be called in earlier instruction of same TX.
 pub fn process_spend_partial_public(
     program_id: &Pubkey,
     accounts: &[AccountInfo],
@@ -251,7 +237,6 @@ pub fn process_spend_partial_public(
     let ephemeral_pub_compressed = ix_data.get_change_ephemeral_pub_compressed();
 
     // Verify stealth announcement PDA for change output
-    // Use bytes 1-32 of ephemeral_pub (skip prefix byte) - max seed length is 32 bytes
     let stealth_seeds: &[&[u8]] = &[StealthAnnouncement::SEED, &ephemeral_pub_compressed[1..33]];
     let (expected_stealth_pda, stealth_bump) = find_program_address(stealth_seeds, program_id);
     if accounts.stealth_announcement_change.key() != &expected_stealth_pda {
@@ -289,13 +274,59 @@ pub fn process_spend_partial_public(
         let tree_data = accounts.commitment_tree.try_borrow_data()?;
         let tree = CommitmentTree::from_bytes(&tree_data)?;
 
-        if !tree.is_valid_root(ix_data.root) {
+        if !tree.is_valid_root(&ix_data.root) {
             return Err(ZVaultError::InvalidRoot.into());
         }
     }
 
+    // Parse and verify Groth16 proof
+    pinocchio::msg!("Verifying Groth16 proof...");
+    let (proof_a, proof_b, proof_c, public_inputs) = parse_sunspot_proof(ix_data.proof_bytes)?;
+
+    // Verify public inputs count
+    // SpendPartialPublic circuit public inputs: [root, nullifier_hash, public_amount, change_commitment, recipient]
+    if public_inputs.len() < 5 {
+        pinocchio::msg!("Insufficient public inputs");
+        return Err(ZVaultError::PublicInputsMismatch.into());
+    }
+
+    // Verify public inputs match expected values
+    if public_inputs[0] != ix_data.root {
+        pinocchio::msg!("Merkle root mismatch in public inputs");
+        return Err(ZVaultError::PublicInputsMismatch.into());
+    }
+
+    if public_inputs[1] != ix_data.nullifier_hash {
+        pinocchio::msg!("Nullifier hash mismatch in public inputs");
+        return Err(ZVaultError::PublicInputsMismatch.into());
+    }
+
+    // Build public inputs array for verification
+    let pi_array: [[u8; 32]; 5] = [
+        public_inputs[0],
+        public_inputs[1],
+        public_inputs[2],
+        public_inputs[3],
+        public_inputs[4],
+    ];
+
+    // Verify Groth16 proof via CPI to Sunspot verifier
+    pinocchio::msg!("Verifying Groth16 proof via Sunspot verifier CPI...");
+    verify_groth16_proof_components(
+        accounts.sunspot_verifier,
+        &proof_a,
+        &proof_b,
+        &proof_c,
+        &pi_array,
+    ).map_err(|e| {
+        pinocchio::msg!("Groth16 proof verification failed");
+        e
+    })?;
+
+    pinocchio::msg!("Groth16 proof verified successfully");
+
     // Verify nullifier PDA
-    let nullifier_seeds: &[&[u8]] = &[NullifierRecord::SEED, ix_data.nullifier_hash];
+    let nullifier_seeds: &[&[u8]] = &[NullifierRecord::SEED, &ix_data.nullifier_hash];
     let (expected_nullifier_pda, nullifier_bump) = find_program_address(nullifier_seeds, program_id);
     if accounts.nullifier_record.key() != &expected_nullifier_pda {
         return Err(ProgramError::InvalidSeeds);
@@ -330,22 +361,14 @@ pub fn process_spend_partial_public(
     }
     .invoke_signed(&nullifier_signer)?;
 
-    // Verify that UltraHonk verifier was called in an earlier instruction
-    // SECURITY: require_prior_zk_verification validates the verifier program ID
-    crate::utils::require_prior_zk_verification(
-        accounts.instructions_sysvar,
-        accounts.ultrahonk_verifier.key(),
-        accounts.proof_buffer.key(),
-    )?;
-
     // Initialize nullifier record
     {
         let mut nullifier_data = accounts.nullifier_record.try_borrow_mut_data()?;
         let nullifier = NullifierRecord::init(&mut nullifier_data)?;
 
-        nullifier.nullifier_hash.copy_from_slice(ix_data.nullifier_hash);
+        nullifier.nullifier_hash.copy_from_slice(&ix_data.nullifier_hash);
         nullifier.set_spent_at(clock.unix_timestamp);
-        nullifier.spent_by.copy_from_slice(ix_data.recipient);
+        nullifier.spent_by.copy_from_slice(&ix_data.recipient);
         nullifier.set_operation_type(NullifierOperationType::Transfer);
     }
 
@@ -358,7 +381,7 @@ pub fn process_spend_partial_public(
             return Err(ZVaultError::TreeFull.into());
         }
 
-        tree.insert_leaf(ix_data.change_commitment)?
+        tree.insert_leaf(&ix_data.change_commitment)?
     };
 
     // Create stealth announcement PDA for change output (if it doesn't exist)
@@ -390,7 +413,6 @@ pub fn process_spend_partial_public(
     }
 
     // Initialize stealth announcement for change output
-    // Extract encrypted amount from the packed field (bits 0-63)
     let encrypted_amount_change = ix_data.get_change_encrypted_amount();
     {
         let mut ann_data = accounts.stealth_announcement_change.try_borrow_mut_data()?;
@@ -399,7 +421,7 @@ pub fn process_spend_partial_public(
         announcement.bump = stealth_bump;
         announcement.ephemeral_pub = ephemeral_pub_compressed;
         announcement.set_encrypted_amount(encrypted_amount_change);
-        announcement.commitment.copy_from_slice(ix_data.change_commitment);
+        announcement.commitment.copy_from_slice(&ix_data.change_commitment);
         announcement.set_leaf_index(change_leaf_index);
         announcement.set_created_at(clock.unix_timestamp);
     }
@@ -426,7 +448,7 @@ pub fn process_spend_partial_public(
         pool.set_last_update(clock.unix_timestamp);
     }
 
-    pinocchio::msg!("Spent partial to public with change (UltraHonk)");
+    pinocchio::msg!("Spent partial to public with change via Groth16 proof");
 
     Ok(())
 }

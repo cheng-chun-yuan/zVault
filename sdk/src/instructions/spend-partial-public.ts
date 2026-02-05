@@ -1,6 +1,8 @@
 /**
  * Spend Partial Public Instruction Builder
  *
+ * Groth16 proofs are only 388 bytes, so inline mode is used exclusively.
+ *
  * @module instructions/spend-partial-public
  */
 
@@ -11,10 +13,11 @@ import { addressToBytes } from "./utils";
 /**
  * Build spend_partial_public instruction data
  *
- * Format: disc(1) + root(32) + nullifier(32) + amount(8)
+ * Format: disc(1) + proof_len(4) + proof(388) + root(32) + nullifier(32) + amount(8)
  *         + change(32) + recipient(32) + vk_hash(32) + ephPubX(32) + encAmount(32)
  */
 export function buildSpendPartialPublicInstructionData(options: {
+  proofBytes: Uint8Array;
   root: Uint8Array;
   nullifierHash: Uint8Array;
   publicAmountSats: bigint;
@@ -25,6 +28,7 @@ export function buildSpendPartialPublicInstructionData(options: {
   changeEncryptedAmountWithSign: Uint8Array;
 }): Uint8Array {
   const {
+    proofBytes,
     root,
     nullifierHash,
     publicAmountSats,
@@ -36,13 +40,22 @@ export function buildSpendPartialPublicInstructionData(options: {
   } = options;
   const recipientBytes = addressToBytes(recipient);
 
-  const totalSize = 1 + 32 + 32 + 8 + 32 + 32 + 32 + 32 + 32;
+  // disc(1) + proof_len(4) + proof + root(32) + nullifier(32) + amount(8)
+  // + change(32) + recipient(32) + vk_hash(32) + ephPubX(32) + encAmount(32)
+  const totalSize = 1 + 4 + proofBytes.length + 32 + 32 + 8 + 32 + 32 + 32 + 32 + 32;
   const data = new Uint8Array(totalSize);
   const view = new DataView(data.buffer);
 
   let offset = 0;
   data[offset++] = INSTRUCTION_DISCRIMINATORS.SPEND_PARTIAL_PUBLIC;
 
+  // Proof length and bytes
+  view.setUint32(offset, proofBytes.length, true);
+  offset += 4;
+  data.set(proofBytes, offset);
+  offset += proofBytes.length;
+
+  // Public inputs
   data.set(root, offset);
   offset += 32;
   data.set(nullifierHash, offset);

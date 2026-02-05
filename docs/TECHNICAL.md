@@ -21,11 +21,11 @@ BTC Deposit ─► Taproot Address ─► SPV Verify ─► Shielded Pool ─►
 
 | Innovation | What It Does | Why It Matters |
 |------------|--------------|----------------|
-| **8 Noir ZK Circuits** | Client-side proof generation (UltraHonk) | No trusted backend, no trusted setup |
+| **6 Noir ZK Circuits** | Groth16 proofs via Sunspot | ~388 byte proofs fit inline |
+| **BN254 Precompiles** | On-chain verification via alt_bn128 | ~200k CU efficient verification |
 | **Grumpkin ECDH** | In-circuit elliptic curve operations | ~2k constraints vs ~300k for X25519 |
 | **Full SPV Bridge** | Bitcoin light client on Solana | Trustless BTC verification |
 | **Stealth Addresses** | EIP-5564/DKSAP protocol | Unlinkable one-time addresses |
-| **ChadBuffer** | On-chain large data storage | Proofs/txs exceeding Solana limits |
 | **.zkey Names** | SNS-style name registry | Human-readable stealth addresses |
 
 ---
@@ -149,11 +149,11 @@ For BTC withdrawals, 2-of-3 multi-party signing:
 
 ### Why This Matters
 
-- **Client-side proving** = user generates proofs in browser
-- **No trusted backend** = no centralized prover
-- **UltraHonk** = no trusted setup ceremony (universal setup)
+- **Groth16 via Sunspot** = Noir circuits compiled to gnark, then Groth16 proofs
+- **Compact proofs** = ~388 bytes fit inline in Solana transactions
+- **BN254 precompiles** = efficient on-chain verification (~200k CU)
 
-### 8 ZK Circuits
+### 6 ZK Circuits
 
 | Circuit | Purpose | Key Constraints | ~Constraints |
 |---------|---------|-----------------|--------------|
@@ -163,7 +163,6 @@ For BTC withdrawals, 2-of-3 multi-party signing:
 | `pool_deposit` | Enter yield pool | Unified → Pool commitment | ~20,000 |
 | `pool_withdraw` | Exit with yield | Yield calculation in-circuit | ~22,000 |
 | `pool_claim_yield` | Compound yields | Re-stake with epoch reset | ~28,000 |
-| `proof_of_innocence` | Regulatory compliance | Dual Merkle tree verification | ~30,000 |
 
 ### Unified Commitment Model
 
@@ -186,28 +185,27 @@ pub fn compute_pool_commitment(pub_key_x: Field, principal: Field, deposit_epoch
 }
 ```
 
-### Client-Side Proving Pipeline
+### Proof Generation Pipeline
 
 ```
-User Browser ─► bb.js WASM ─► Proof (2-4 sec) ─► Solana
+Noir Circuit ─► nargo compile ─► Sunspot CLI ─► Groth16 Proof (~388 bytes) ─► Solana
 ```
 
-**No server involvement in proof generation.**
+**Sunspot Flow:**
+1. `nargo compile` - Compile Noir circuit to ACIR
+2. `sunspot compile` - Convert ACIR to CCS (gnark constraint system)
+3. `sunspot setup` - Generate proving/verification keys
+4. `sunspot prove` - Generate Groth16 proof
 
-### Solving "Proof Too Big"
+### Inline Proofs (No Buffer Needed)
 
-**Problem:** Solana tx limit 1232 bytes, proofs can exceed 900+ bytes.
-
-**Solution:** ChadBuffer on-chain storage.
+**Problem Solved:** Groth16 proofs are ~388 bytes, fitting easily within Solana's 1232 byte tx limit.
 
 ```
-Large Data ──► Split into chunks ──► Upload to buffer account ──► Reference in verification
+Proof Data ──► Include inline in instruction data ──► Verify via BN254 precompiles
 ```
 
-**Flow:**
-1. Upload proof chunks to ChadBuffer
-2. Verify from buffer reference
-3. Close buffer to reclaim rent
+**No ChadBuffer required for ZK proofs** (only for large BTC transactions).
 
 ### Why Grumpkin Curve?
 
@@ -339,27 +337,37 @@ const name = await reverseLookupZkeyName(connection, spendingPubKey);
 
 ## On-Chain Verification
 
-### BN254 Syscalls
+### Groth16 via BN254 Precompiles
 
-zVault uses Solana's native `alt_bn128` syscalls for proof verification:
+zVault uses the `groth16-solana` crate with Solana's native `alt_bn128` syscalls:
 
 ```rust
-use solana_program::alt_bn128::{
-    alt_bn128_addition,
-    alt_bn128_multiplication,
-    alt_bn128_pairing,
-};
+use groth16_solana::groth16::{Groth16Verifier, Groth16Verifyingkey};
+use solana_bn254::prelude::{alt_bn128_addition, alt_bn128_multiplication, alt_bn128_pairing};
+```
+
+### Embedded Verification Keys
+
+VKs are compiled into the program for efficient verification:
+
+```rust
+// VKs embedded at compile time
+pub static CLAIM_VK_BYTES: &[u8] = include_bytes!("../../../circuits_vk/claim.vk");
+
+// Parse and verify
+let vk = get_claim_vk()?;
+verify_groth16_proof_with_vk(&proof_a, &proof_b, &proof_c, &public_inputs, &vk)?;
 ```
 
 ### Compute Unit Budget
 
 | Operation | Compute Units |
 |-----------|---------------|
-| Proof Verification | ~85,000 CU |
+| Groth16 Verification | ~200,000 CU |
 | Merkle Update | ~5,000 CU |
 | State Updates | ~5,000 CU |
-| **Total (Claim)** | **~95,000 CU** |
-| **Total (Split)** | **~100,000 CU** |
+| **Total (Claim)** | **~210,000 CU** |
+| **Total (Split)** | **~215,000 CU** |
 
 ---
 
@@ -381,7 +389,9 @@ use solana_program::alt_bn128::{
 
 | Component | Technology | Purpose |
 |-----------|------------|---------|
-| **Proof System** | UltraHonk (BN254) | ZK proof generation/verification |
+| **Proof System** | Groth16 (BN254) via Sunspot | ZK proof generation/verification |
+| **Prover** | Sunspot CLI (gnark backend) | Generates ~388 byte proofs |
+| **Verifier** | groth16-solana + alt_bn128 | On-chain verification (~200k CU) |
 | **Hash Function** | Poseidon2 | ZK-friendly hashing (~160 constraints) |
 | **Commitment** | `Poseidon2(pub_key_x, amount)` | Binding to amounts |
 | **Nullifier** | `Poseidon2(priv_key, leaf_index)` | Double-spend prevention |
@@ -432,31 +442,40 @@ use solana_program::alt_bn128::{
 |---------|---------|---------|
 | zVault | Devnet | `zKeyrLmpT8W9o8iRvhizuSihLAFLhfAGBvfM638Pbw8` |
 | BTC Light Client | Devnet | `S6rgPjCeBhkYBejWyDR1zzU3sYCMob36LAf8tjwj8pn` |
-| UltraHonk Verifier | Devnet | `5uAoTLSexeKKLU3ZXniWFE2CsCWGPzMiYPpKiywCGqsd` |
 | ChadBuffer | Devnet | `C5RpjtTMFXKVZCtXSzKXD4CDNTaWBg3dVeMfYvjZYHDF` |
+
+**Note:** Groth16 verification is done inline using embedded VKs and BN254 precompiles - no separate verifier program needed.
 
 ---
 
 ## Performance
 
-### Proof Generation (Client-Side)
+### Proof Generation (Sunspot CLI)
 
-| Circuit | Constraints | Browser Time* |
-|---------|-------------|---------------|
-| claim | ~15,000 | ~2s |
-| spend_split | ~25,000 | ~3s |
-| pool_deposit | ~20,000 | ~2.5s |
-| pool_withdraw | ~22,000 | ~2.5s |
-| proof_of_innocence | ~30,000 | ~4s |
+| Circuit | Constraints | Prove Time* | Proof Size |
+|---------|-------------|-------------|------------|
+| claim | ~15,000 | ~2s | ~388 bytes |
+| spend_split | ~25,000 | ~3s | ~388 bytes |
+| pool_deposit | ~20,000 | ~2.5s | ~388 bytes |
+| pool_withdraw | ~22,000 | ~2.5s | ~388 bytes |
+| pool_claim_yield | ~28,000 | ~3.5s | ~388 bytes |
 
-*Approximate times on modern browser with bb.js WASM
+*Approximate times with Sunspot CLI (gnark backend)
+
+### On-Chain Verification
+
+| Operation | Compute Units |
+|-----------|---------------|
+| Groth16 Proof Verification | ~200,000 CU |
+| Merkle Tree Update | ~5,000 CU |
+| State Updates | ~5,000 CU |
 
 ### Scalability
 
 - **Merkle Tree**: 2^20 = ~1 million commitments
 - **Nullifier Set**: Unbounded (PDA per nullifier)
 - **Header Chain**: ~550 bytes per header
-- **ChadBuffer**: Chunked uploads for large data
+- **Inline Proofs**: ~388 bytes (no buffer needed)
 
 ---
 

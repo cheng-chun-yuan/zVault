@@ -59,7 +59,6 @@ import {
 // Import instruction types
 import type {
   Instruction,
-  ProofSource,
   ClaimInstructionOptions,
   SplitInstructionOptions,
   SpendPartialPublicInstructionOptions,
@@ -120,8 +119,7 @@ export class InstructionBuilders {
    * Build claim instruction data
    */
   claimData(options: {
-    proofSource: ProofSource;
-    proofBytes?: Uint8Array;
+    proofBytes: Uint8Array;
     root: Uint8Array;
     nullifierHash: Uint8Array;
     amountSats: bigint;
@@ -139,7 +137,6 @@ export class InstructionBuilders {
     const vkHash = options.vkHash ?? this.getVkHashBytes("claim");
 
     const data = this.claimData({
-      proofSource: options.proofSource,
       proofBytes: options.proofBytes,
       root: options.root,
       nullifierHash: options.nullifierHash,
@@ -159,15 +156,9 @@ export class InstructionBuilders {
       { address: options.accounts.user, role: AccountRole.WRITABLE_SIGNER },
       { address: this.config.token2022ProgramId, role: AccountRole.READONLY },
       { address: SYSTEM_PROGRAM, role: AccountRole.READONLY },
-      { address: this.config.ultrahonkVerifierProgramId, role: AccountRole.READONLY },
+      { address: this.config.sunspotVerifierProgramId, role: AccountRole.READONLY },
     ];
 
-    if (options.proofSource === "buffer") {
-      if (!options.bufferAddress) {
-        throw new Error("bufferAddress required for buffer mode");
-      }
-      accounts.push({ address: options.bufferAddress, role: AccountRole.READONLY });
-    }
 
     return {
       programAddress: this.config.zvaultProgramId,
@@ -180,6 +171,7 @@ export class InstructionBuilders {
    * Build split instruction data
    */
   splitData(options: {
+    proofBytes: Uint8Array;
     root: Uint8Array;
     nullifierHash: Uint8Array;
     outputCommitment1: Uint8Array;
@@ -203,6 +195,7 @@ export class InstructionBuilders {
     const INSTRUCTIONS_SYSVAR = address("Sysvar1nstructions1111111111111111111111111");
 
     const data = this.splitData({
+      proofBytes: options.proofBytes,
       root: options.root,
       nullifierHash: options.nullifierHash,
       outputCommitment1: options.outputCommitment1,
@@ -220,10 +213,9 @@ export class InstructionBuilders {
       { address: options.accounts.nullifierRecord, role: AccountRole.WRITABLE },
       { address: options.accounts.user, role: AccountRole.WRITABLE_SIGNER },
       { address: SYSTEM_PROGRAM, role: AccountRole.READONLY },
-      { address: this.config.ultrahonkVerifierProgramId, role: AccountRole.READONLY },
+      { address: this.config.sunspotVerifierProgramId, role: AccountRole.READONLY },
       { address: options.accounts.stealthAnnouncement1, role: AccountRole.WRITABLE },
       { address: options.accounts.stealthAnnouncement2, role: AccountRole.WRITABLE },
-      { address: options.bufferAddress, role: AccountRole.READONLY },
       { address: INSTRUCTIONS_SYSVAR, role: AccountRole.READONLY },
     ];
 
@@ -238,6 +230,7 @@ export class InstructionBuilders {
    * Build spend partial public instruction data
    */
   spendPartialPublicData(options: {
+    proofBytes: Uint8Array;
     root: Uint8Array;
     nullifierHash: Uint8Array;
     publicAmountSats: bigint;
@@ -262,6 +255,7 @@ export class InstructionBuilders {
     const INSTRUCTIONS_SYSVAR = address("Sysvar1nstructions1111111111111111111111111");
 
     const data = this.spendPartialPublicData({
+      proofBytes: options.proofBytes,
       root: options.root,
       nullifierHash: options.nullifierHash,
       publicAmountSats: options.publicAmountSats,
@@ -282,9 +276,8 @@ export class InstructionBuilders {
       { address: options.accounts.user, role: AccountRole.WRITABLE_SIGNER },
       { address: this.config.token2022ProgramId, role: AccountRole.READONLY },
       { address: SYSTEM_PROGRAM, role: AccountRole.READONLY },
-      { address: this.config.ultrahonkVerifierProgramId, role: AccountRole.READONLY },
+      { address: this.config.sunspotVerifierProgramId, role: AccountRole.READONLY },
       { address: options.accounts.stealthAnnouncementChange, role: AccountRole.WRITABLE },
-      { address: options.bufferAddress, role: AccountRole.READONLY },
       { address: INSTRUCTIONS_SYSVAR, role: AccountRole.READONLY },
     ];
 
@@ -306,7 +299,6 @@ export class InstructionBuilders {
     const SYSTEM_PROGRAM = address("11111111111111111111111111111111");
 
     const data = buildPoolDepositInstructionData({
-      proofSource: options.proofSource,
       proofBytes: options.proofBytes,
       root: options.root,
       nullifierHash: options.nullifierHash,
@@ -323,15 +315,8 @@ export class InstructionBuilders {
       { address: options.accounts.poolCommitmentTree, role: AccountRole.WRITABLE },
       { address: options.accounts.user, role: AccountRole.WRITABLE_SIGNER },
       { address: SYSTEM_PROGRAM, role: AccountRole.READONLY },
-      { address: this.config.ultrahonkVerifierProgramId, role: AccountRole.READONLY },
+      { address: this.config.sunspotVerifierProgramId, role: AccountRole.READONLY },
     ];
-
-    if (options.proofSource === "buffer") {
-      if (!options.bufferAddress) {
-        throw new Error("bufferAddress required for buffer mode");
-      }
-      accounts.push({ address: options.bufferAddress, role: AccountRole.READONLY });
-    }
 
     return {
       programAddress: this.config.zvaultProgramId,
@@ -351,7 +336,6 @@ export class InstructionBuilders {
     const SYSTEM_PROGRAM = address("11111111111111111111111111111111");
 
     const data = buildPoolWithdrawInstructionData({
-      proofSource: options.proofSource,
       proofBytes: options.proofBytes,
       poolRoot: options.poolRoot,
       poolNullifierHash: options.poolNullifierHash,
@@ -368,15 +352,8 @@ export class InstructionBuilders {
       { address: options.accounts.poolNullifierRecord, role: AccountRole.WRITABLE },
       { address: options.accounts.user, role: AccountRole.WRITABLE_SIGNER },
       { address: SYSTEM_PROGRAM, role: AccountRole.READONLY },
-      { address: this.config.ultrahonkVerifierProgramId, role: AccountRole.READONLY },
+      { address: this.config.sunspotVerifierProgramId, role: AccountRole.READONLY },
     ];
-
-    if (options.proofSource === "buffer") {
-      if (!options.bufferAddress) {
-        throw new Error("bufferAddress required for buffer mode");
-      }
-      accounts.push({ address: options.bufferAddress, role: AccountRole.READONLY });
-    }
 
     return {
       programAddress: this.config.zvaultProgramId,
@@ -396,7 +373,6 @@ export class InstructionBuilders {
     const SYSTEM_PROGRAM = address("11111111111111111111111111111111");
 
     const data = buildPoolClaimYieldInstructionData({
-      proofSource: options.proofSource,
       proofBytes: options.proofBytes,
       poolRoot: options.poolRoot,
       poolNullifierHash: options.poolNullifierHash,
@@ -417,15 +393,8 @@ export class InstructionBuilders {
       { address: options.accounts.user, role: AccountRole.WRITABLE_SIGNER },
       { address: this.config.token2022ProgramId, role: AccountRole.READONLY },
       { address: SYSTEM_PROGRAM, role: AccountRole.READONLY },
-      { address: this.config.ultrahonkVerifierProgramId, role: AccountRole.READONLY },
+      { address: this.config.sunspotVerifierProgramId, role: AccountRole.READONLY },
     ];
-
-    if (options.proofSource === "buffer") {
-      if (!options.bufferAddress) {
-        throw new Error("bufferAddress required for buffer mode");
-      }
-      accounts.push({ address: options.bufferAddress, role: AccountRole.READONLY });
-    }
 
     return {
       programAddress: this.config.zvaultProgramId,
@@ -492,7 +461,7 @@ export class InstructionBuilders {
     data.set(options.vkHash, offset);
 
     return {
-      programAddress: this.config.ultrahonkVerifierProgramId,
+      programAddress: this.config.sunspotVerifierProgramId,
       accounts: [{ address: options.bufferAddress, role: AccountRole.READONLY }],
       data,
     };
@@ -918,7 +887,6 @@ export type {
   Note,
   SerializedNote,
   Instruction,
-  ProofSource,
   ClaimInstructionOptions,
   SplitInstructionOptions,
   SpendPartialPublicInstructionOptions,

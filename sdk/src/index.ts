@@ -639,23 +639,26 @@ export {
 } from "./pool";
 
 // ==========================================================================
-// UltraHonk Browser Proof Generation
+// Sunspot Groth16 Proof Generation
 // ==========================================================================
 
 export {
-  generateUltraHonkProof,
-  verifyUltraHonkProofLocal,
-  initBbJs,
-  isUltraHonkAvailable,
-  loadCircuitArtifacts,
-  getUltraHonkVerifierProgramId,
-  buildVerifyInstructionData,
-  createVerifyInstruction,
-  proveAndBuildTransaction,
-  type UltraHonkProofResult,
-  type CircuitArtifacts,
-  type UltraHonkCircuit,
-} from "./ultrahonk";
+  configureSunspot,
+  getSunspotConfig,
+  isSunspotAvailable,
+  getSunspotVerifierProgramId,
+  generateGroth16Proof,
+  generateClaimProofGroth16,
+  generateSplitProofGroth16,
+  generatePartialPublicProofGroth16,
+  getVerificationKey as getSunspotVk,
+  getVkHash as getSunspotVkHash,
+  verifyGroth16Proof,
+  GROTH16_PROOF_SIZE,
+  canFitInline,
+  type SunspotProofResult,
+  type SunspotConfig,
+} from "./prover/sunspot";
 
 // ==========================================================================
 // Low-level Instruction Builders
@@ -681,13 +684,11 @@ export {
   buildPoolWithdrawInstruction,
   buildPoolClaimYieldInstruction,
   // Verifier instruction builders (for instruction introspection pattern)
-  buildVerifyFromBufferInstruction,
+  buildVerifyInstruction,
   buildClaimVerifierInputs,
   buildPartialPublicVerifierInputs,
   buildSplitVerifierInputs,
   // Utilities
-  needsBuffer,
-  calculateAvailableProofSpace,
   hexToBytes as instructionHexToBytes,
   bytesToHex as instructionBytesToHex,
   bigintTo32Bytes,
@@ -696,7 +697,6 @@ export {
   SYSTEM_PROGRAM_ADDRESS,
   INSTRUCTIONS_SYSVAR,
   type Instruction,
-  type ProofSource,
   type ClaimInstructionOptions,
   type SplitInstructionOptions,
   type SpendPartialPublicInstructionOptions,

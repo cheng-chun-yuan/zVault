@@ -275,7 +275,7 @@ async function main() {
 
   console.log(`   Program ID: ${programId.toBase58()}`);
   console.log(`   ChadBuffer: ${config.chadbufferProgramId}`);
-  console.log(`   UltraHonk Verifier: ${config.ultrahonkVerifierProgramId}`);
+  console.log(`   UltraHonk Verifier: ${config.sunspotVerifierProgramId}`);
 
   // Check connection
   try {
@@ -517,7 +517,7 @@ async function main() {
   } else {
     console.log(`   ATA already exists: ${recipientAta.toBase58()}`);
   }
-  const ultrahonkVerifier = new PublicKey(config.ultrahonkVerifierProgramId);
+  const ultrahonkVerifier = new PublicKey(config.sunspotVerifierProgramId);
 
   // VK hash (use claim VK hash from config, or zeros for testing)
   const vkHash = hexToBytes(config.vkHashes.claim || "0".repeat(64));

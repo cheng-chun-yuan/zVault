@@ -30,11 +30,10 @@ Bitcoin's transparent blockchain makes privacy challenging:
 
 | Layer | Technology | Innovation |
 |-------|------------|------------|
-| **ZK Circuits** | Noir + UltraHonk | 8 specialized privacy circuits |
-| **On-Chain Verifier** | BN254 alt_bn128 syscalls | Client-side proof generation |
-| **Smart Contracts** | Pinocchio (Solana) | Zero-copy, ~95k CU verification |
+| **ZK Circuits** | Noir + Groth16 (Sunspot) | 6 specialized privacy circuits |
+| **On-Chain Verifier** | BN254 alt_bn128 precompiles | ~200k CU inline verification |
+| **Smart Contracts** | Pinocchio (Solana) | Zero-copy, embedded VK verification |
 | **Bitcoin Integration** | Taproot + SPV | Permissionless light client |
-| **Data Publishing** | ChadBuffer | Large tx & proof upload on-chain |
 | **Name Service** | .zkey.sol (SNS-style) | Human-readable stealth addresses |
 | **Stealth Addresses** | EIP-5564/DKSAP + Grumpkin | ~2k constraint ECDH (vs 300k X25519) |
 | **RPC Infrastructure** | Helius | Priority fee estimation |
@@ -47,9 +46,9 @@ Bitcoin's transparent blockchain makes privacy challenging:
 
 ## Key Innovations
 
-### 1. Noir ZK Circuits (8 Specialized Circuits)
+### 1. Noir ZK Circuits (6 Specialized Circuits)
 
-Built on Aztec's Noir language with UltraHonk proofs for efficient client-side proving:
+Built on Aztec's Noir language compiled to Groth16 via Sunspot for compact proofs (~388 bytes):
 
 | Circuit | Purpose | Key Constraints |
 |---------|---------|-----------------|
@@ -59,7 +58,6 @@ Built on Aztec's Noir language with UltraHonk proofs for efficient client-side p
 | `pool_deposit` | Enter yield pool | Unified → Pool commitment |
 | `pool_withdraw` | Exit with yield | Yield calculation in-circuit |
 | `pool_claim_yield` | Compound yields | Re-stake with epoch reset |
-| `proof_of_innocence` | Regulatory compliance | Dual Merkle tree verification |
 
 **Unified Commitment Model:**
 ```
@@ -86,21 +84,20 @@ Sender:                              Recipient:
 - **Spending Key**: Generate nullifier and claim funds
 - **Grumpkin Curve**: ~2,000 constraints (vs ~300,000 for X25519)
 
-### 3. ChadBuffer Integration
+### 3. Inline Groth16 Proofs (No Buffer Needed)
 
-On-chain large data publishing for Bitcoin transactions and ZK proofs:
+Groth16 proofs via Sunspot are ~388 bytes and fit inline in Solana transactions:
 
 ```typescript
-// Upload Bitcoin transaction for SPV verification
-const bufferAddress = await uploadTransactionToBuffer(rpc, payer, rawBtcTx);
-
-// Upload large UltraHonk proof (>900 bytes)
-const { bufferAddress, usedBuffer } = await uploadProofToBuffer(rpc, payer, proofBytes);
+// Proof is included directly in instruction data
+// No buffer upload needed (unlike UltraHonk which required ChadBuffer)
+const proof = await generateClaimProofGroth16(inputs);
+// proof.proof is ~388 bytes - fits in single TX
 ```
 
-- **Program ID**: `C5RpjtTMFXKVZCtXSzKXD4CDNTaWBg3dVeMfYvjZYHDF`
-- **Chunked Uploads**: Handles data larger than Solana tx limits
-- **Rent Reclaimable**: Close buffer to recover lamports
+- **Proof Size**: ~388 bytes (vs ~2-4 KB for UltraHonk)
+- **Single Transaction**: No multi-TX buffer uploads
+- **Verification**: ~200k CU via BN254 alt_bn128 precompiles
 
 ### 4. .zkey Name Registry (SNS-Style)
 
@@ -269,7 +266,6 @@ bun run test         # Run circuit tests
 |---------|---------|---------|
 | zVault | Devnet | `zKeyrLmpT8W9o8iRvhizuSihLAFLhfAGBvfM638Pbw8` |
 | BTC Light Client | Devnet | `S6rgPjCeBhkYBejWyDR1zzU3sYCMob36LAf8tjwj8pn` |
-| UltraHonk Verifier | Devnet | `5uAoTLSexeKKLU3ZXniWFE2CsCWGPzMiYPpKiywCGqsd` |
 | ChadBuffer | Devnet | `C5RpjtTMFXKVZCtXSzKXD4CDNTaWBg3dVeMfYvjZYHDF` |
 
 ### Deployed Accounts (Devnet)
@@ -299,13 +295,14 @@ bun run test         # Run circuit tests
 
 | Component | Technology |
 |-----------|------------|
-| Proof System | UltraHonk (BN254) |
+| Proof System | Groth16 (BN254) via Sunspot |
 | Hash Function | Poseidon2 (ZK-friendly) |
 | Commitment | `Poseidon2(pub_key_x, amount)` |
 | Nullifier | `Poseidon2(priv_key, leaf_index)` |
 | Stealth | Grumpkin ECDH (EIP-5564) |
 | BTC Deposits | Taproot (BIP-341) |
 | Merkle Tree | Depth 20 (~1M leaves) |
+| On-Chain Verification | BN254 alt_bn128 precompiles |
 
 ---
 

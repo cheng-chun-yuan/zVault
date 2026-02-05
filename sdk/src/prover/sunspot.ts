@@ -12,6 +12,7 @@ import { spawn, execSync } from "child_process";
 import * as fs from "fs";
 import * as path from "path";
 import * as os from "os";
+import { computeUnifiedCommitmentSync } from "../poseidon";
 
 export interface SunspotProofResult {
   proof: Uint8Array;
@@ -163,15 +164,32 @@ export async function generateGroth16Proof(
   console.log(`[Sunspot] Executing circuit with nargo...`);
   await runCommand(`nargo execute witness`, circuitPath);
 
-  const witnessPath = path.join(targetPath, "witness.gz");
+  // Witness is generated in the target directory
+  let witnessPath = path.join(targetPath, "witness.gz");
+
+  // If circuitPath is a symlink, nargo writes to the resolved path's parent target
+  // Always copy fresh witness to ensure we have the latest
+  const realCircuitPath = fs.realpathSync(circuitPath);
+  const realParentTarget = path.join(path.dirname(realCircuitPath), "target");
+  const altWitnessPath = path.join(realParentTarget, "witness.gz");
+  if (fs.existsSync(altWitnessPath)) {
+    // Always copy fresh witness to SDK target directory
+    fs.copyFileSync(altWitnessPath, witnessPath);
+  }
+
   if (!fs.existsSync(witnessPath)) {
     throw new Error(`Witness not generated at ${witnessPath}`);
   }
 
-  // Step 3: Run sunspot prove
+  // Step 3: Run sunspot prove (use absolute paths)
   console.log(`[Sunspot] Generating Groth16 proof...`);
+  const absAcirPath = path.resolve(acirPath);
+  const absWitnessPath = path.resolve(witnessPath);
+  const absCcsPath = path.resolve(ccsPath);
+  const absPkPath = path.resolve(pkPath);
+
   await runCommand(
-    `${config.sunspotPath} prove ${acirPath} ${witnessPath} ${ccsPath} ${pkPath}`,
+    `${config.sunspotPath} prove "${absAcirPath}" "${absWitnessPath}" "${absCcsPath}" "${absPkPath}"`,
     targetPath
   );
 
@@ -341,6 +359,11 @@ export interface SpendSplitInputs {
   output1Amount: bigint;
   output2PubKeyX: bigint;
   output2Amount: bigint;
+  // Stealth output metadata (for on-chain announcement)
+  output1EphemeralPubX?: bigint;
+  output1EncryptedAmountWithSign?: bigint;
+  output2EphemeralPubX?: bigint;
+  output2EncryptedAmountWithSign?: bigint;
 }
 
 /**
@@ -349,6 +372,10 @@ export interface SpendSplitInputs {
 export async function generateSplitProofGroth16(inputs: SpendSplitInputs): Promise<SunspotProofResult> {
   const nullifier = computeNullifierSync(inputs.privKey, inputs.leafIndex);
   const nullifierHash = hashNullifierSync(nullifier);
+
+  // Compute output commitments: Poseidon(pubKeyX, amount)
+  const outputCommitment1 = computeUnifiedCommitmentSync(inputs.output1PubKeyX, inputs.output1Amount);
+  const outputCommitment2 = computeUnifiedCommitmentSync(inputs.output2PubKeyX, inputs.output2Amount);
 
   const circuitInputs: Record<string, string | string[]> = {
     priv_key: inputs.privKey.toString(),
@@ -363,6 +390,14 @@ export async function generateSplitProofGroth16(inputs: SpendSplitInputs): Promi
     output1_amount: inputs.output1Amount.toString(),
     output2_pub_key_x: inputs.output2PubKeyX.toString(),
     output2_amount: inputs.output2Amount.toString(),
+    // Public inputs: output commitments
+    output_commitment1: "0x" + outputCommitment1.toString(16),
+    output_commitment2: "0x" + outputCommitment2.toString(16),
+    // Stealth metadata (public inputs for on-chain announcement)
+    output1_ephemeral_pub_x: (inputs.output1EphemeralPubX ?? 0n).toString(),
+    output1_encrypted_amount_with_sign: (inputs.output1EncryptedAmountWithSign ?? 0n).toString(),
+    output2_ephemeral_pub_x: (inputs.output2EphemeralPubX ?? 0n).toString(),
+    output2_encrypted_amount_with_sign: (inputs.output2EncryptedAmountWithSign ?? 0n).toString(),
   };
 
   return generateGroth16Proof("spend_split", circuitInputs);
@@ -379,6 +414,9 @@ export interface SpendPartialPublicInputs {
   changePubKeyX: bigint;
   changeAmount: bigint;
   recipient: bigint;
+  // Stealth output metadata (for on-chain announcement)
+  changeEphemeralPubX?: bigint;
+  changeEncryptedAmountWithSign?: bigint;
 }
 
 /**
@@ -389,6 +427,9 @@ export async function generatePartialPublicProofGroth16(
 ): Promise<SunspotProofResult> {
   const nullifier = computeNullifierSync(inputs.privKey, inputs.leafIndex);
   const nullifierHash = hashNullifierSync(nullifier);
+
+  // Compute change commitment: Poseidon(changePubKeyX, changeAmount)
+  const changeCommitment = computeUnifiedCommitmentSync(inputs.changePubKeyX, inputs.changeAmount);
 
   const circuitInputs: Record<string, string | string[]> = {
     priv_key: inputs.privKey.toString(),
@@ -402,7 +443,12 @@ export async function generatePartialPublicProofGroth16(
     public_amount: inputs.publicAmount.toString(),
     change_pub_key_x: inputs.changePubKeyX.toString(),
     change_amount: inputs.changeAmount.toString(),
+    // Public inputs
+    change_commitment: "0x" + changeCommitment.toString(16),
     recipient: "0x" + inputs.recipient.toString(16),
+    // Stealth metadata (public inputs for on-chain announcement)
+    change_ephemeral_pub_x: (inputs.changeEphemeralPubX ?? 0n).toString(),
+    change_encrypted_amount_with_sign: (inputs.changeEncryptedAmountWithSign ?? 0n).toString(),
   };
 
   return generateGroth16Proof("spend_partial_public", circuitInputs);

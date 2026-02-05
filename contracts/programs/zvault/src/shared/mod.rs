@@ -31,11 +31,11 @@ pub use accounts::{
     validate_program_owners, validate_rent_exempt, validate_system_program,
     validate_token_2022_owner, validate_token_mint, validate_token_program_key,
     verify_and_create_nullifier, verify_nullifier_pda, create_nullifier_record,
-    read_bytes32, parse_u64_le, parse_u16_le, parse_u8, read_bytes, ensure_min_len,
+    read_bytes32, parse_u64_le, parse_u32_le, parse_u16_le, parse_u8, read_bytes, ensure_min_len,
 };
 
 pub use constants::{
-    MAX_BTC_ADDRESS_LEN, MAX_BTC_TXID_LEN, MAX_POOL_PRINCIPAL, MAX_ULTRAHONK_PROOF_SIZE,
+    MAX_BTC_ADDRESS_LEN, MAX_BTC_TXID_LEN, MAX_POOL_PRINCIPAL, MAX_GROTH16_PROOF_SIZE,
     MAX_YIELD_EPOCHS, MIN_DEPOSIT_SATS, MAX_DEPOSIT_SATS, REQUIRED_CONFIRMATIONS,
     TOKEN_2022_PROGRAM_ID,
 };
@@ -54,9 +54,4 @@ pub use cpi::token_2022::{burn_zbtc, burn_zbtc_signed, mint_zbtc, transfer_zbtc}
 pub use cpi::chadbuffer::{
     get_buffer_authority, read_transaction_from_buffer, validate_buffer_account,
     BUFFER_HEADER_SIZE, CHADBUFFER_PROGRAM_ID,
-};
-
-pub use introspection::{
-    require_prior_zk_verification, verify_prior_buffer_verification,
-    verify_prior_verification_any, verifier_instruction,
 };

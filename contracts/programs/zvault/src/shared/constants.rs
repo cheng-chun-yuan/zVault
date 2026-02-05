@@ -40,11 +40,13 @@ pub const MAX_BTC_ADDRESS_LEN: usize = 62;
 pub const MAX_BTC_TXID_LEN: usize = 64;
 
 // =============================================================================
-// Proof Configuration
+// Proof Configuration (Groth16 via Sunspot)
 // =============================================================================
 
-/// Maximum UltraHonk proof size in bytes (8-20KB typical)
-pub const MAX_ULTRAHONK_PROOF_SIZE: usize = 20_000;
+/// Maximum Groth16 proof size in bytes
+/// Sunspot format: proof_core(256) + pi_count(4) + public_inputs(N*32)
+/// With up to 10 public inputs: 256 + 4 + 320 = 580 bytes max
+pub const MAX_GROTH16_PROOF_SIZE: usize = 1024;
 
 // =============================================================================
 // Program IDs

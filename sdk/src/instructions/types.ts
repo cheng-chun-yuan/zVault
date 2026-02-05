@@ -2,6 +2,7 @@
  * Instruction Types
  *
  * Type definitions for ZVault instructions.
+ * Groth16 proofs are small (388 bytes) and always fit inline.
  *
  * @module instructions/types
  */
@@ -19,8 +20,6 @@ export interface Instruction {
   data: Uint8Array;
 }
 
-/** Proof source for legacy instructions (claim, pool operations) */
-export type ProofSource = "inline" | "buffer";
 
 // =============================================================================
 // Instruction Options
@@ -28,12 +27,8 @@ export type ProofSource = "inline" | "buffer";
 
 /** Claim instruction options */
 export interface ClaimInstructionOptions {
-  /** Proof source mode */
-  proofSource: ProofSource;
-  /** Proof bytes (required for inline mode) */
-  proofBytes?: Uint8Array;
-  /** ChadBuffer account address (required for buffer mode) */
-  bufferAddress?: Address;
+  /** Groth16 proof bytes (388 bytes) */
+  proofBytes: Uint8Array;
   /** Merkle root */
   root: Uint8Array;
   /** Nullifier hash */
@@ -53,13 +48,15 @@ export interface ClaimInstructionOptions {
     poolVault: Address;
     recipientAta: Address;
     user: Address;
+    /** VK registry PDA for claim circuit */
+    vkRegistry: Address;
   };
 }
 
 /** Split instruction options */
 export interface SplitInstructionOptions {
-  /** ChadBuffer account address containing the proof */
-  bufferAddress: Address;
+  /** Groth16 proof bytes (388 bytes) */
+  proofBytes: Uint8Array;
   /** Merkle root */
   root: Uint8Array;
   /** Nullifier hash */
@@ -93,8 +90,8 @@ export interface SplitInstructionOptions {
 
 /** SpendPartialPublic instruction options */
 export interface SpendPartialPublicInstructionOptions {
-  /** ChadBuffer account address containing the proof */
-  bufferAddress: Address;
+  /** Groth16 proof bytes (388 bytes) */
+  proofBytes: Uint8Array;
   /** Merkle root */
   root: Uint8Array;
   /** Nullifier hash */
@@ -127,12 +124,8 @@ export interface SpendPartialPublicInstructionOptions {
 
 /** Pool deposit instruction options */
 export interface PoolDepositInstructionOptions {
-  /** Proof source mode */
-  proofSource: ProofSource;
-  /** Proof bytes (required for inline mode) */
-  proofBytes?: Uint8Array;
-  /** ChadBuffer account address (required for buffer mode) */
-  bufferAddress?: Address;
+  /** Groth16 proof bytes (388 bytes) */
+  proofBytes: Uint8Array;
   /** Merkle root */
   root: Uint8Array;
   /** Nullifier hash */
@@ -156,12 +149,8 @@ export interface PoolDepositInstructionOptions {
 
 /** Pool withdraw instruction options */
 export interface PoolWithdrawInstructionOptions {
-  /** Proof source mode */
-  proofSource: ProofSource;
-  /** Proof bytes (required for inline mode) */
-  proofBytes?: Uint8Array;
-  /** ChadBuffer account address (required for buffer mode) */
-  bufferAddress?: Address;
+  /** Groth16 proof bytes (388 bytes) */
+  proofBytes: Uint8Array;
   /** Pool merkle root */
   poolRoot: Uint8Array;
   /** Pool nullifier hash */
@@ -185,12 +174,8 @@ export interface PoolWithdrawInstructionOptions {
 
 /** Pool claim yield instruction options */
 export interface PoolClaimYieldInstructionOptions {
-  /** Proof source mode */
-  proofSource: ProofSource;
-  /** Proof bytes (required for inline mode) */
-  proofBytes?: Uint8Array;
-  /** ChadBuffer account address (required for buffer mode) */
-  bufferAddress?: Address;
+  /** Groth16 proof bytes (388 bytes) */
+  proofBytes: Uint8Array;
   /** Pool merkle root */
   poolRoot: Uint8Array;
   /** Pool nullifier hash */
@@ -246,13 +231,16 @@ export const INSTRUCTION_DISCRIMINATORS = {
   CLAIM_POOL_YIELD: 33,
 } as const;
 
-/** UltraHonk verifier instruction discriminators */
+/** Sunspot Groth16 verifier instruction discriminators */
 export const VERIFIER_DISCRIMINATORS = {
+  /** Inline proof verification (primary method for Groth16) */
   VERIFY: 0,
+  /** Verify with on-chain VK account */
   VERIFY_WITH_VK_ACCOUNT: 1,
+  /** Initialize VK account */
   INIT_VK: 2,
+  /** Read proof from buffer (deprecated for Groth16) */
   VERIFY_FROM_BUFFER: 3,
+  /** Write VK data in chunks */
   WRITE_VK_CHUNK: 4,
-  /** Read both proof and VK from ChadBuffer accounts */
-  VERIFY_FROM_BUFFERS: 5,
 } as const;

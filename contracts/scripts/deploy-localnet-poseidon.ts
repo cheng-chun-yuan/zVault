@@ -139,7 +139,7 @@ interface DeployResult {
   zvaultProgramId: PublicKey;
   btcLightClientProgramId: PublicKey;
   chadbufferProgramId: PublicKey;
-  ultrahonkVerifierProgramId: PublicKey;
+  sunspotVerifierProgramId: PublicKey;
 }
 
 interface InitResult {
@@ -215,8 +215,10 @@ async function deployPrograms(skipDeploy: boolean): Promise<DeployResult> {
   const zvaultKeypairPath = path.join(TARGET_DIR, "zvault_pinocchio-keypair.json");
   const btclcKeypairPath = path.join(TARGET_DIR, "btc_light_client-keypair.json");
   const chadbufferKeypairPath = path.join(CONTRACTS_DIR, "programs/chadbuffer/chadbuffer-keypair.json");
-  const ultrahonkKeypairPath = path.join(TARGET_DIR, "ultrahonk_verifier-keypair.json");
+  const sunspotKeypairPath = path.join(CONTRACTS_DIR, "sunspot-verifier-keypair.json");
   const chadbufferSoPath = path.join(CONTRACTS_DIR, "programs/chadbuffer/chadbuffer.so");
+  // Sunspot-generated verifier from circuits
+  const sunspotVerifierSoPath = path.join(CONTRACTS_DIR, "../circuits/target/zvault_claim.so");
 
   if (!fs.existsSync(zvaultKeypairPath) || !fs.existsSync(btclcKeypairPath)) {
     throw new Error("Program keypairs not found. Run 'cargo build-sbf' first (WITHOUT --features localnet).");
@@ -226,7 +228,7 @@ async function deployPrograms(skipDeploy: boolean): Promise<DeployResult> {
   const btclcKeypair = await loadKeypair(btclcKeypairPath);
 
   let chadbufferKeypair: Keypair;
-  let ultrahonkKeypair: Keypair;
+  let sunspotKeypair: Keypair;
 
   if (fs.existsSync(chadbufferKeypairPath)) {
     chadbufferKeypair = await loadKeypair(chadbufferKeypairPath);
@@ -235,25 +237,26 @@ async function deployPrograms(skipDeploy: boolean): Promise<DeployResult> {
     fs.writeFileSync(chadbufferKeypairPath, JSON.stringify(Array.from(chadbufferKeypair.secretKey)));
   }
 
-  if (fs.existsSync(ultrahonkKeypairPath)) {
-    ultrahonkKeypair = await loadKeypair(ultrahonkKeypairPath);
+  if (fs.existsSync(sunspotKeypairPath)) {
+    sunspotKeypair = await loadKeypair(sunspotKeypairPath);
   } else {
-    ultrahonkKeypair = Keypair.generate();
+    sunspotKeypair = Keypair.generate();
+    fs.writeFileSync(sunspotKeypairPath, JSON.stringify(Array.from(sunspotKeypair.secretKey)));
   }
 
   const zvaultProgramId = zvaultKeypair.publicKey;
   const btcLightClientProgramId = btclcKeypair.publicKey;
   const chadbufferProgramId = chadbufferKeypair.publicKey;
-  const ultrahonkVerifierProgramId = ultrahonkKeypair.publicKey;
+  const sunspotVerifierProgramId = sunspotKeypair.publicKey;
 
   log(`zVault Program ID: ${zvaultProgramId.toBase58()}`);
   log(`BTC Light Client Program ID: ${btcLightClientProgramId.toBase58()}`);
   log(`ChadBuffer Program ID: ${chadbufferProgramId.toBase58()}`);
-  log(`UltraHonk Verifier Program ID: ${ultrahonkVerifierProgramId.toBase58()}`);
+  log(`Sunspot Verifier Program ID: ${sunspotVerifierProgramId.toBase58()}`);
 
   if (skipDeploy) {
     log("Skipping deployment (--skip-deploy flag)");
-    return { zvaultProgramId, btcLightClientProgramId, chadbufferProgramId, ultrahonkVerifierProgramId };
+    return { zvaultProgramId, btcLightClientProgramId, chadbufferProgramId, sunspotVerifierProgramId };
   }
 
   // Deploy zVault (built without localnet feature = uses Poseidon)
@@ -306,29 +309,31 @@ async function deployPrograms(skipDeploy: boolean): Promise<DeployResult> {
     }
   }
 
-  // Deploy UltraHonk Verifier
-  const ultrahonkSoPath = path.join(TARGET_DIR, "ultrahonk_verifier.so");
-  if (fs.existsSync(ultrahonkSoPath)) {
-    log("Deploying UltraHonk Verifier program...");
+  // Deploy Sunspot Verifier (Groth16 claim circuit verifier)
+  if (fs.existsSync(sunspotVerifierSoPath)) {
+    log("Deploying Sunspot Groth16 Verifier program...");
     try {
       execSync(
-        `solana program deploy ${ultrahonkSoPath} --program-id ${ultrahonkKeypairPath} -u localhost`,
+        `solana program deploy ${sunspotVerifierSoPath} --program-id ${sunspotKeypairPath} -u localhost`,
         { stdio: "inherit" }
       );
-      log("UltraHonk Verifier deployed successfully");
+      log("Sunspot Verifier deployed successfully");
     } catch (e: any) {
       if (e.message?.includes("already in use")) {
-        log("UltraHonk Verifier program already deployed");
+        log("Sunspot Verifier program already deployed");
       } else {
         throw e;
       }
     }
+  } else {
+    log(`Warning: Sunspot verifier not found at ${sunspotVerifierSoPath}`);
+    log("Generate it with: cd ../circuits && bun run sunspot:compile");
   }
 
   log("Waiting for programs to be ready...");
   await sleep(3000);
 
-  return { zvaultProgramId, btcLightClientProgramId, chadbufferProgramId, ultrahonkVerifierProgramId };
+  return { zvaultProgramId, btcLightClientProgramId, chadbufferProgramId, sunspotVerifierProgramId };
 }
 
 // =============================================================================
@@ -773,7 +778,7 @@ function saveConfig(deployResult: DeployResult, initResult: InitResult): void {
       zVault: deployResult.zvaultProgramId.toBase58(),
       btcLightClient: deployResult.btcLightClientProgramId.toBase58(),
       chadbuffer: deployResult.chadbufferProgramId.toBase58(),
-      ultrahonkVerifier: deployResult.ultrahonkVerifierProgramId.toBase58(),
+      sunspotVerifier: deployResult.sunspotVerifierProgramId.toBase58(),
     },
     accounts: {
       poolState: initResult.poolStatePda.toBase58(),

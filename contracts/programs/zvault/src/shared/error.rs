@@ -111,6 +111,21 @@ pub enum ZVaultError {
     #[error("Insufficient funds in shielded pool")]
     InsufficientFunds = 6030,
 
+    #[error("Invalid Groth16 proof size")]
+    InvalidProofSize = 6031,
+
+    #[error("Too many public inputs")]
+    TooManyPublicInputs = 6032,
+
+    #[error("Public inputs mismatch")]
+    PublicInputsMismatch = 6033,
+
+    #[error("Groth16 proof verification failed")]
+    ProofVerificationFailed = 6034,
+
+    #[error("Invalid proof format")]
+    InvalidProofFormat = 6035,
+
     // =========================================================================
     // Yield Pool Errors (6040-6059)
     // =========================================================================
@@ -169,6 +184,12 @@ pub enum ZVaultError {
 
     #[error("Invalid verifier program ID")]
     InvalidVerifierProgram = 6066,
+
+    #[error("Invalid circuit type")]
+    InvalidCircuitType = 6067,
+
+    #[error("Invalid VK hash")]
+    InvalidVkHash = 6068,
 }
 
 impl From<ZVaultError> for ProgramError {

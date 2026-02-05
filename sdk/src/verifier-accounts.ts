@@ -1,8 +1,8 @@
 /**
- * UltraHonk Verifier Account Management
+ * Sunspot Groth16 Verifier Account Management
  *
  * Utilities for creating and managing VK (Verification Key) accounts
- * in the UltraHonk verifier program.
+ * in the Sunspot Groth16 verifier program.
  *
  * @module verifier-accounts
  */
@@ -11,10 +11,10 @@ import { Connection, Keypair, PublicKey, SystemProgram, Transaction, Transaction
 import { address, type Address, AccountRole } from "@solana/kit";
 import { VERIFIER_DISCRIMINATORS } from "./instructions/types";
 import type { Instruction } from "./instructions/types";
-import type { CircuitType } from "./prover/web";
+import type { CircuitType } from "./prover/sunspot";
 
 /**
- * Build INIT_VK instruction for UltraHonk verifier
+ * Build INIT_VK instruction for Sunspot Groth16 verifier
  *
  * This initializes a VK account with the verification key bytes.
  * The VK account must be pre-created with enough space.
@@ -60,8 +60,8 @@ const WRITE_VK_CHUNK_DISCRIMINATOR = 4;
  * @param connection - Solana connection
  * @param payer - Payer keypair (pays for account creation)
  * @param vkKeypair - Keypair for the new VK account
- * @param verifierProgramId - UltraHonk verifier program ID
- * @param vkBytes - Raw verification key bytes from bb.js
+ * @param verifierProgramId - Sunspot Groth16 verifier program ID
+ * @param vkBytes - Raw verification key bytes
  * @returns Transaction signature
  */
 export async function createAndInitializeVkAccount(

@@ -95,14 +95,13 @@
     "copy-circuits": "mkdir -p circuits && cp ../noir-circuits/target/zvault_*.json circuits/",
     "e2e": "bun run scripts/e2e-instructions.ts",
     "e2e:localnet": "NETWORK=localnet bun run scripts/e2e-instructions.ts",
-    "e2e:devnet": "NETWORK=devnet bun run scripts/e2e-instructions.ts"
+    "e2e:devnet": "NETWORK=devnet bun run scripts/e2e-instructions.ts",
+    "e2e:localnet-poseidon": "NETWORK=localnet POSEIDON_ENABLED=true bun run scripts/e2e-instructions.ts",
+    "test:e2e:localnet-poseidon": "NETWORK=localnet POSEIDON_ENABLED=true bun test test/e2e/"
   },
   "dependencies": {
-    "@aztec/bb.js": "3.0.0-nightly.20251104",
     "@noble/hashes": "^1.8.0",
-    "@noir-lang/acvm_js": "1.0.0-beta.15",
     "@noir-lang/noir_js": "1.0.0-beta.15",
-    "@noir-lang/noirc_abi": "1.0.0-beta.15",
     "@solana-program/system": "^0.10.0",
     "@solana/kit": "^5.5.0",
     "@solana/spl-token": "^0.4.14",

@@ -478,7 +478,7 @@ export async function relaySpendPartialPublic(
 ): Promise<RelayResult> {
   const config = getConfig();
   const zvaultProgram = address(config.zvaultProgramId);
-  const ultrahonkVerifier = address(config.ultrahonkVerifierProgramId);
+  const ultrahonkVerifier = address(config.sunspotVerifierProgramId);
 
   onProgress?.("Creating buffer...");
 
@@ -615,7 +615,7 @@ export async function relaySpendSplit(
 ): Promise<RelayResult> {
   const config = getConfig();
   const zvaultProgram = address(config.zvaultProgramId);
-  const ultrahonkVerifier = address(config.ultrahonkVerifierProgramId);
+  const ultrahonkVerifier = address(config.sunspotVerifierProgramId);
 
   onProgress?.("Creating buffer...");
 

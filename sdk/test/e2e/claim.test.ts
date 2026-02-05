@@ -63,12 +63,10 @@ import {
 
 import { initPoseidon } from "../../src/poseidon";
 import { derivePoolStatePDA, deriveCommitmentTreePDA, deriveNullifierRecordPDA, deriveStealthAnnouncementPDA } from "../../src/pda";
-import { buildClaimInstruction, buildVerifyFromBufferInstruction, hexToBytes } from "../../src/instructions";
+import { buildClaimInstruction, hexToBytes } from "../../src/instructions";
 import { DEMO_INSTRUCTION } from "../../src/demo";
 import { generateClaimProof, verifyProof, getVerificationKey } from "../../src/prover/web";
-import { createChadBuffer, uploadProofToBuffer, closeChadBuffer } from "../../src/relay";
 import { bigintToBytes } from "../../src/crypto";
-import { getOrCreateVkAccount } from "../../src/verifier-accounts";
 
 // =============================================================================
 // Test Context
@@ -182,13 +180,13 @@ describe("CLAIM E2E", () => {
   // ===========================================================================
 
   describe("Instruction Building", () => {
-    it("should build valid claim instruction with buffer proof", async () => {
+    it("should build valid claim instruction with inline proof", async () => {
       const note = createTestNote(TEST_AMOUNTS.small);
       const proof = createRealMerkleProof(note.commitment);
       const vkHash = getVkHashForCircuit("claim");
 
-      // Mock buffer address
-      const bufferAddress = address(PublicKey.default.toBase58());
+      // Mock 388-byte Groth16 proof
+      const mockProofBytes = new Uint8Array(388).fill(0x42);
 
       // Derive PDAs
       const [poolState] = await derivePoolStatePDA(ctx.config.zvaultProgramId);
@@ -198,10 +196,9 @@ describe("CLAIM E2E", () => {
         ctx.config.zvaultProgramId
       );
 
-      // Build claim instruction (buffer mode - required for UltraHonk)
+      // Build claim instruction (inline Groth16 proof)
       const claimIx = buildClaimInstruction({
-        proofSource: "buffer",
-        bufferAddress,
+        proofBytes: mockProofBytes,
         root: bigintToBytes32(proof.root),
         nullifierHash: note.nullifierHashBytes,
         amountSats: note.amount,
@@ -226,18 +223,17 @@ describe("CLAIM E2E", () => {
       // Verify discriminator (CLAIM = 9)
       expect(claimIx.data[0]).toBe(9);
 
-      // Buffer mode: first byte after discriminator is start of root, not proof_source
-      // Instruction data size: 1 (disc) + 32 (root) + 32 (nullifier) + 8 (amount) + 32 (recipient) + 32 (vk_hash) = 137
-      expect(claimIx.data.length).toBe(137);
+      // Inline mode: 1 (disc) + 4 (proof_len) + 388 (proof) + 32 (root) + 32 (nullifier) + 8 (amount) + 32 (recipient) + 32 (vk_hash) = 529
+      expect(claimIx.data.length).toBe(529);
     });
 
-    it("should build claim instruction with correct accounts for buffer mode", async () => {
+    it("should build claim instruction with correct accounts for inline mode", async () => {
       const note = createTestNote(TEST_AMOUNTS.small);
       const proof = createRealMerkleProof(note.commitment);
       const vkHash = getVkHashForCircuit("claim");
 
-      // Mock buffer address
-      const bufferAddress = address(PublicKey.default.toBase58());
+      // Mock 388-byte Groth16 proof
+      const mockProofBytes = new Uint8Array(388).fill(0x42);
 
       // Derive PDAs
       const [poolState] = await derivePoolStatePDA(ctx.config.zvaultProgramId);
@@ -247,10 +243,9 @@ describe("CLAIM E2E", () => {
         ctx.config.zvaultProgramId
       );
 
-      // Build claim instruction with buffer
+      // Build claim instruction with inline proof
       const claimIx = buildClaimInstruction({
-        proofSource: "buffer",
-        bufferAddress,
+        proofBytes: mockProofBytes,
         root: bigintToBytes32(proof.root),
         nullifierHash: note.nullifierHashBytes,
         amountSats: note.amount,
@@ -273,7 +268,7 @@ describe("CLAIM E2E", () => {
       // Verify discriminator (CLAIM = 9)
       expect(claimIx.data[0]).toBe(9);
 
-      // Verify 12 accounts for buffer mode
+      // Verify 12 accounts for inline mode (includes vk_registry, no buffer account)
       expect(claimIx.accounts.length).toBe(12);
     });
 
@@ -301,14 +296,13 @@ describe("CLAIM E2E", () => {
 
   describe("On-Chain Tests", () => {
     it(
-      "should build claim instruction with buffer mode for proof verification",
+      "should build claim instruction with inline proof for verification",
       async () => {
         if (ctx.skipOnChain) {
           console.log("⚠️  Skipping: validator not available");
           return;
         }
         // This test validates that the instruction building works correctly
-        // Actual on-chain verification requires proof in ChadBuffer
 
         const note = createTestNote(TEST_AMOUNTS.small);
         const merkleProof = createRealMerkleProof(note.commitment);
@@ -321,13 +315,12 @@ describe("CLAIM E2E", () => {
           ctx.config.zvaultProgramId
         );
 
-        // Buffer address would contain the proof in real scenario
-        const bufferAddress = address(PublicKey.default.toBase58());
+        // Mock 388-byte Groth16 proof
+        const mockProofBytes = new Uint8Array(388).fill(0x42);
 
-        // Build claim instruction with buffer mode (proof is in ChadBuffer, not instruction)
+        // Build claim instruction with inline proof
         const claimIx = buildClaimInstruction({
-          proofSource: "buffer",
-          bufferAddress,
+          proofBytes: mockProofBytes,
           root: bigintToBytes32(merkleProof.root),
           nullifierHash: note.nullifierHashBytes,
           amountSats: note.amount,
@@ -346,10 +339,9 @@ describe("CLAIM E2E", () => {
 
         // Instruction should build correctly
         expect(claimIx.data[0]).toBe(9); // CLAIM discriminator
-        expect(claimIx.data.length).toBe(137); // Buffer mode: no proof in instruction
+        expect(claimIx.data.length).toBe(529); // Inline mode: 1 + 4 + 388 + 32 + 32 + 8 + 32 + 32
 
-        console.log("  → Built claim instruction (buffer mode)");
-        console.log("  → On-chain: proof is read from ChadBuffer via verifier introspection");
+        console.log("  → Built claim instruction (inline Groth16 proof)");
       },
       TEST_TIMEOUT
     );
@@ -374,13 +366,12 @@ describe("CLAIM E2E", () => {
           ctx.config.zvaultProgramId
         );
 
-        // Mock buffer address
-        const bufferAddress = address(PublicKey.default.toBase58());
+        // Mock 388-byte Groth16 proof
+        const mockProofBytes = new Uint8Array(388).fill(0x42);
 
-        // Build claim instruction with invalid root (buffer mode)
+        // Build claim instruction with invalid root (inline mode)
         const claimIx = buildClaimInstruction({
-          proofSource: "buffer",
-          bufferAddress,
+          proofBytes: mockProofBytes,
           root: invalidRoot,
           nullifierHash: note.nullifierHashBytes,
           amountSats: note.amount,
@@ -399,10 +390,10 @@ describe("CLAIM E2E", () => {
 
         // Instruction should still build (validation happens on-chain)
         expect(claimIx.data[0]).toBe(9);
-        expect(claimIx.data.length).toBe(137); // Buffer mode
+        expect(claimIx.data.length).toBe(529); // Inline mode
 
         // In a full on-chain test, submitting this would fail with InvalidRoot
-        console.log("  → Built claim instruction with invalid merkle root (buffer mode)");
+        console.log("  → Built claim instruction with invalid merkle root (inline mode)");
         console.log("  → On-chain submission would fail with InvalidRoot error");
       },
       TEST_TIMEOUT
@@ -415,6 +406,14 @@ describe("CLAIM E2E", () => {
 
   describe("Integration Flow", () => {
     it("should simulate complete claim flow", async () => {
+      // On localnet without Poseidon, the on-chain Merkle tree uses SHA256 hashes
+      // which can exceed BN254 field modulus. Real proof generation requires Poseidon.
+      if (!POSEIDON_ENABLED) {
+        console.log("⚠️  Skipping: Poseidon not enabled (SHA256 values exceed BN254 field modulus)");
+        console.log("   Run with NETWORK=devnet or POSEIDON_ENABLED=true for full proof testing");
+        return;
+      }
+
       console.log("\n=== Complete Claim Flow Simulation ===\n");
 
       // Step 1: Create user note
@@ -460,12 +459,10 @@ describe("CLAIM E2E", () => {
       console.log(`   Commitment Tree: ${commitmentTree.toString()}`);
       console.log(`   Nullifier Record: ${nullifierRecord.toString()}`);
 
-      // Step 5: Build claim instruction (buffer mode - UltraHonk proofs are too large for inline)
-      console.log("\n5. Building claim instruction (buffer mode)");
-      const bufferAddress = address(PublicKey.default.toBase58()); // Mock buffer for simulation
+      // Step 5: Build claim instruction (inline Groth16 proof - only 388 bytes)
+      console.log("\n5. Building claim instruction (inline Groth16)");
       const claimIx = buildClaimInstruction({
-        proofSource: "buffer",
-        bufferAddress,
+        proofBytes,
         root: bigintToBytes32(merkleProof.root),
         nullifierHash: note.nullifierHashBytes,
         amountSats: note.amount,
@@ -489,7 +486,7 @@ describe("CLAIM E2E", () => {
       console.log("   a. Verify merkle root is valid (in root history)");
       console.log("   b. Check nullifier not already spent");
       console.log("   c. Create nullifier record PDA");
-      console.log("   d. Verify UltraHonk proof via CPI to verifier");
+      console.log("   d. Verify Groth16 proof via CPI to Sunspot verifier");
       console.log("   e. Mint zkBTC to recipient ATA");
 
       console.log("\n=== Flow Complete ===\n");
@@ -497,9 +494,9 @@ describe("CLAIM E2E", () => {
       // Assertions
       expect(note.commitment).toBeGreaterThan(0n);
       expect(merkleProof.root).toBeGreaterThan(0n);
-      expect(proofBytes.length).toBeGreaterThan(0);
+      expect(proofBytes.length).toBe(388); // Groth16 proof size
       expect(claimIx.data[0]).toBe(9); // CLAIM discriminator
-      expect(claimIx.data.length).toBe(137); // Buffer mode: discriminator(1) + root(32) + nullifier(32) + amount(8) + recipient(32) + vk_hash(32)
+      expect(claimIx.data.length).toBe(529); // Inline: disc(1) + proof_len(4) + proof(388) + root(32) + nullifier(32) + amount(8) + recipient(32) + vk_hash(32)
     });
   });
 
@@ -598,28 +595,8 @@ describe("CLAIM E2E", () => {
         console.log(`   Local verification: ${isValid ? "PASSED" : "FAILED"}`);
         expect(isValid).toBe(true);
 
-        // Step 6: Upload proof to ChadBuffer
-        console.log("\n6. Uploading proof to ChadBuffer...");
-        const { keypair: bufferKeypair } = await createChadBuffer(
-          ctx.rpc,
-          ctx.rpcSubscriptions,
-          ctx.payerSigner,
-          proof.proof.length
-        );
-        console.log(`   Buffer address: ${bufferKeypair.address}`);
-
-        await uploadProofToBuffer(
-          ctx.rpc,
-          ctx.rpcSubscriptions,
-          ctx.payerSigner,
-          bufferKeypair.address,
-          proof.proof,
-          (uploaded, total) => {
-            const pct = Math.round((uploaded / total) * 100);
-            process.stdout.write(`\r   Uploading: ${pct}%`);
-          }
-        );
-        console.log("\n   Upload complete!");
+        // Note: Groth16 proofs are only 388 bytes - no buffer needed (inline in TX)
+        console.log("\n6. Proof fits inline (388 bytes) - no buffer needed");
 
         // Step 7: Create recipient ATA
         console.log("\n7. Creating recipient ATA...");
@@ -635,43 +612,8 @@ describe("CLAIM E2E", () => {
         );
         console.log(`   Recipient ATA: ${recipientAta.address.toBase58()}`);
 
-        // Step 8: Create VK account for claim circuit (if not exists)
-        console.log("\n8. Setting up VK account for on-chain verification...");
-        const verifierProgramId = new PublicKey(ctx.config.ultrahonkVerifierProgramId.toString());
-
-        // Debug: Get VK bytes and compute hash
-        const vkBytesForAccount = await getVerificationKey("claim");
-        console.log(`   VK bytes size: ${vkBytesForAccount.length}`);
-        console.log(`   VK first 32 bytes: ${Buffer.from(vkBytesForAccount.slice(0, 32)).toString("hex")}`);
-        console.log(`   VK last 32 bytes: ${Buffer.from(vkBytesForAccount.slice(-32)).toString("hex")}`);
-
-        const { address: vkAccountAddress } = await getOrCreateVkAccount(
-          ctx.connection,
-          ctx.payer,
-          verifierProgramId,
-          "claim",
-          () => Promise.resolve(vkBytesForAccount) // Use the same bytes we logged
-        );
-        console.log(`   VK account: ${vkAccountAddress.toBase58()}`);
-
-        // Debug: Read VK account data back and verify hash
-        const vkAccountInfo = await ctx.connection.getAccountInfo(vkAccountAddress);
-        if (vkAccountInfo) {
-          console.log(`   VK account data size: ${vkAccountInfo.data.length}`);
-          console.log(`   VK account first 32 bytes: ${Buffer.from(vkAccountInfo.data.slice(0, 32)).toString("hex")}`);
-          console.log(`   VK account last 32 bytes: ${Buffer.from(vkAccountInfo.data.slice(-32)).toString("hex")}`);
-
-          // Compute hash of account data
-          const { keccak_256 } = await import("@noble/hashes/sha3");
-          const accountDataHash = keccak_256(vkAccountInfo.data);
-          const expectedHash = getVkHashForCircuit("claim");
-          console.log(`   VK account data hash: ${Buffer.from(accountDataHash).toString("hex").slice(0, 32)}...`);
-          console.log(`   Expected VK hash: ${Buffer.from(expectedHash).toString("hex").slice(0, 32)}...`);
-          console.log(`   Account data matches expected: ${Buffer.from(accountDataHash).equals(Buffer.from(expectedHash))}`);
-        }
-
-        // Step 9: Build 2-instruction claim transaction (verifier + claim)
-        console.log("\n9. Building 2-instruction transaction (verifier + claim)...");
+        // Step 8: Build claim instruction (inline Groth16 proof)
+        console.log("\n8. Building claim instruction (inline Groth16)...");
         const [poolState] = await derivePoolStatePDA(ctx.config.zvaultProgramId);
         const [commitmentTree] = await deriveCommitmentTreePDA(ctx.config.zvaultProgramId);
         const [nullifierRecord] = await deriveNullifierRecordPDA(
@@ -682,32 +624,10 @@ describe("CLAIM E2E", () => {
         const vkHash = getVkHashForCircuit("claim");
         const recipientAddress = address(ctx.payer.publicKey.toBase58());
 
-        // 9a: Use public inputs directly from proof (bb.js handles correct ordering)
-        // The proof.publicInputs contains all 20 public inputs in the correct order
-        console.log(`   Verifier public inputs: ${proof.publicInputs.length} (from bb.js proof)`);
-
-        // Debug: Get fresh VK hash and compare
-        const { getVkHash } = await import("../../src/prover/web");
-        const freshVkHash = await getVkHash("claim");
-        console.log(`   Fresh VK hash: ${Buffer.from(freshVkHash).toString("hex").slice(0, 32)}...`);
-        console.log(`   Cached VK hash: ${Buffer.from(vkHash).toString("hex").slice(0, 32)}...`);
-        console.log(`   VK hashes match: ${Buffer.from(freshVkHash).equals(Buffer.from(vkHash))}`);
-
-        // 9b: Build VERIFY_FROM_BUFFER instruction (IX #1)
-        // IMPORTANT: Use proof.publicInputs directly, NOT manually constructed inputs
-        const verifyIx = buildVerifyFromBufferInstruction({
-          verifierProgramId: ctx.config.ultrahonkVerifierProgramId,
-          bufferAddress: bufferKeypair.address,
-          vkAddress: address(vkAccountAddress.toBase58()),
-          publicInputs: proof.publicInputs, // Use bb.js public inputs directly!
-          vkHash,
-        });
-        console.log(`   IX #1 (verifier VERIFY_FROM_BUFFER): ${verifyIx.data.length} bytes`);
-
-        // 9c: Build claim instruction (IX #2)
+        // Build claim instruction with inline Groth16 proof (388 bytes)
+        // Groth16 proofs are small enough to fit inline in the instruction data
         const claimIx = buildClaimInstruction({
-          proofSource: "buffer",
-          bufferAddress: bufferKeypair.address,
+          proofBytes: proof.proof, // Inline 388-byte Groth16 proof
           root: bigintToBytes(claimData.merkleProof.root, 32),
           nullifierHash: claimData.nullifierHashBytes,
           amountSats: claimData.scannedNote.amount,
@@ -723,55 +643,30 @@ describe("CLAIM E2E", () => {
             user: address(ctx.payer.publicKey.toBase58()),
           },
         });
-        console.log(`   IX #2 (zVault claim): ${claimIx.data.length} bytes`);
+        console.log(`   IX (zVault claim with inline Groth16): ${claimIx.data.length} bytes`);
 
-        // Step 10: Submit 2-instruction claim transaction
-        console.log("\n10. Submitting 2-instruction claim transaction ON-CHAIN...");
+        // Step 9: Submit claim transaction with inline Groth16 proof
+        console.log("\n9. Submitting claim transaction ON-CHAIN (inline Groth16)...");
         let claimSuccess = false;
         let claimError = "";
         try {
-          // Convert verifier instruction to legacy format
-          const legacyVerifyIx = new TransactionInstruction({
-            programId: new PublicKey(verifyIx.programAddress.toString()),
-            keys: verifyIx.accounts.map((acc: any) => ({
-              pubkey: new PublicKey(acc.address.toString()),
-              isSigner: acc.role === 2 || acc.role === 3,
-              isWritable: acc.role === 1 || acc.role === 3,
-            })),
-            data: Buffer.from(verifyIx.data),
-          });
-
-          // Add signer to the user account in the claim instruction
-          const claimIxWithSigner: Instruction = {
-            programAddress: claimIx.programAddress,
-            accounts: claimIx.accounts.map((acc: any, idx: number) => {
-              if (idx === 6) {
-                return { ...acc, signer: ctx.payerSigner };
-              }
-              return acc;
-            }),
-            data: claimIx.data,
-          };
-
           // Convert claim instruction to legacy format
           const legacyClaimIx = new TransactionInstruction({
-            programId: new PublicKey(claimIxWithSigner.programAddress.toString()),
-            keys: claimIxWithSigner.accounts.map((acc: any) => ({
+            programId: new PublicKey(claimIx.programAddress.toString()),
+            keys: claimIx.accounts.map((acc: any) => ({
               pubkey: new PublicKey(acc.address.toString()),
               isSigner: acc.role === 2 || acc.role === 3,
               isWritable: acc.role === 1 || acc.role === 3,
             })),
-            data: Buffer.from(claimIxWithSigner.data),
+            data: Buffer.from(claimIx.data),
           });
 
-          // Build transaction: compute budget + IX #1 (verifier) + IX #2 (claim)
-          // Request max compute units for UltraHonk verification (1.4M)
+          // Build transaction with compute budget for Groth16 verification
           const computeBudgetIx = ComputeBudgetProgram.setComputeUnitLimit({
-            units: 1_400_000, // Max allowed
+            units: 500_000, // Groth16 verification needs ~200k CU
           });
           const legacyTx = new Transaction()
             .add(computeBudgetIx)
-            .add(legacyVerifyIx)
             .add(legacyClaimIx);
           legacyTx.feePayer = ctx.payer.publicKey;
           legacyTx.recentBlockhash = (await ctx.connection.getLatestBlockhash()).blockhash;
@@ -780,7 +675,7 @@ describe("CLAIM E2E", () => {
           legacyTx.sign(ctx.payer);
 
           // Simulate first to get logs
-          console.log("   Simulating 2-instruction transaction...");
+          console.log("   Simulating claim transaction...");
           const simResult = await ctx.connection.simulateTransaction(legacyTx);
           if (simResult.value.err) {
             console.log(`   Simulation error: ${JSON.stringify(simResult.value.err)}`);
@@ -807,9 +702,9 @@ describe("CLAIM E2E", () => {
           console.log(`   ✗ Claim transaction failed: ${claimError.slice(0, 500)}`);
         }
 
-        // Step 11: Verify nullifier was created (if claim succeeded)
+        // Step 10: Verify nullifier was created (if claim succeeded)
         if (claimSuccess) {
-          console.log("\n11. Verifying on-chain state...");
+          console.log("\n10. Verifying on-chain state...");
           const nullifierExists = await checkNullifierExists(
             ctx,
             claimData.nullifierHashBytes
@@ -818,37 +713,19 @@ describe("CLAIM E2E", () => {
           expect(nullifierExists).toBe(true);
         }
 
-        // Step 12: Close ChadBuffer
-        console.log("\n12. Closing ChadBuffer...");
-        try {
-          const closeSig = await closeChadBuffer(
-            ctx.rpc,
-            ctx.rpcSubscriptions,
-            ctx.payerSigner,
-            bufferKeypair.address
-          );
-          console.log(`   Buffer closed: ${closeSig}`);
-        } catch (e) {
-          console.log(`   Buffer close skipped (may already be closed)`);
-        }
-
-        // Step 13: Verify results
-        console.log("\n13. Verification:");
+        // Step 11: Verify results
+        console.log("\n11. Verification:");
         console.log(`   ✓ Stealth deposit created and submitted`);
         console.log(`   ✓ Note scanned with viewing key`);
-        console.log(`   ✓ Real ZK proof generated (${proofTime}s)`);
-        console.log(`   ✓ Proof verified locally`);
-        console.log(`   ✓ Proof uploaded to ChadBuffer`);
-        console.log(`   ✓ VK account created for on-chain verification`);
-        console.log(`   ✓ 2-instruction TX built (verifier + claim)`);
+        console.log(`   ✓ Real Groth16 proof generated (${proofTime}s)`);
+        console.log(`   ✓ Proof verified locally (388 bytes)`);
         if (claimSuccess) {
-          console.log(`   ✓ On-chain ZK proof verification PASSED`);
+          console.log(`   ✓ On-chain Groth16 verification PASSED`);
           console.log(`   ✓ Claim transaction executed ON-CHAIN`);
           console.log(`   ✓ Nullifier record created`);
         } else {
           console.log(`   ⚠ Claim transaction failed: ${claimError.slice(0, 100)}`);
         }
-        console.log(`   ✓ ChadBuffer closed`);
 
         console.log("\n" + "=".repeat(60));
         console.log("FULL STEALTH CLAIM FLOW COMPLETE");

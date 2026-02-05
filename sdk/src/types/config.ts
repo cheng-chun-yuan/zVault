@@ -67,8 +67,8 @@ export interface ZVaultSDKConfig {
   /** ChadBuffer program ID (for large proof uploads) */
   chadbufferProgramId?: Address;
 
-  /** UltraHonk verifier program ID */
-  ultrahonkVerifierProgramId?: Address;
+  /** Sunspot Groth16 verifier program ID */
+  sunspotVerifierProgramId?: Address;
 
   // -------------------------------------------------------------------------
   // VK Hashes (optional overrides)
@@ -116,7 +116,7 @@ export interface ResolvedConfig {
   /** BTC Light Client program ID */
   btcLightClientProgramId: Address;
 
-  /** ChadBuffer program ID (for SPV verification) */
+  /** ChadBuffer program ID (for SPV data uploads) */
   chadbufferProgramId: Address;
 
   /** Token-2022 program ID */
@@ -125,8 +125,8 @@ export interface ResolvedConfig {
   /** Associated Token Account program ID */
   ataProgramId: Address;
 
-  /** UltraHonk verifier program ID */
-  ultrahonkVerifierProgramId: Address;
+  /** Sunspot Groth16 verifier program ID */
+  sunspotVerifierProgramId: Address;
 
   // -------------------------------------------------------------------------
   // Deployed Accounts (PDAs and Mints)

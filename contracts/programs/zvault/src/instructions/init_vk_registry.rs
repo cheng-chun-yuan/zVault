@@ -1,7 +1,7 @@
-//! Initialize VK Registry instruction (UltraHonk)
+//! Initialize VK Registry instruction (Groth16)
 //!
 //! Creates and initializes a verification key hash registry for a specific circuit type.
-//! The VK hash is used for CPI to the ultrahonk-verifier program.
+//! The VK hash is used for inline Groth16 verification via groth16-solana.
 //!
 //! # Security
 //! - Only the pool authority can initialize VK registries
@@ -20,11 +20,11 @@ use crate::error::ZVaultError;
 use crate::state::{CircuitType, PoolState, VkRegistry, VK_REGISTRY_DISCRIMINATOR};
 use crate::utils::{create_pda_account, validate_program_owner};
 
-/// Initialize VK Registry instruction data (UltraHonk)
+/// Initialize VK Registry instruction data (Groth16)
 ///
 /// Layout:
 /// - circuit_type: u8 (which circuit this VK hash is for)
-/// - vk_hash: [u8; 32] (UltraHonk verification key hash)
+/// - vk_hash: [u8; 32] (Groth16 verification key hash)
 pub struct InitVkRegistryData {
     pub circuit_type: u8,
     pub vk_hash: [u8; 32],
@@ -141,7 +141,7 @@ pub fn process_init_vk_registry(
         registry.vk_hash.copy_from_slice(&ix_data.vk_hash);
     }
 
-    pinocchio::msg!("VK registry initialized (UltraHonk)");
+    pinocchio::msg!("VK registry initialized (Groth16)");
 
     Ok(())
 }
@@ -199,7 +199,7 @@ pub fn process_update_vk_registry(
         registry.vk_hash.copy_from_slice(&ix_data.vk_hash);
     }
 
-    pinocchio::msg!("VK registry updated (UltraHonk)");
+    pinocchio::msg!("VK registry updated (Groth16)");
 
     Ok(())
 }

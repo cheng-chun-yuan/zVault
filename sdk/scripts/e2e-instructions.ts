@@ -833,7 +833,7 @@ async function main() {
   log.data("Submit TX", SUBMIT_TX.toString());
   log.data("zVault Program", config.zvaultProgramId.toString());
   log.data("ChadBuffer Program", CHADBUFFER_PROGRAM_ID.toString());
-  log.data("UltraHonk Verifier", config.ultrahonkVerifierProgramId.toString());
+  log.data("UltraHonk Verifier", config.sunspotVerifierProgramId.toString());
 
   // Load or generate keypair
   const keypairPath = process.env.KEYPAIR_PATH || DEFAULT_KEYPAIR_PATH;

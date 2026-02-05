@@ -37,6 +37,21 @@ pub fn parse_u64_le(data: &[u8], offset: &mut usize) -> Result<u64, ProgramError
     Ok(value)
 }
 
+/// Parse a u32 in little-endian format from instruction data
+#[inline]
+pub fn parse_u32_le(data: &[u8], offset: &mut usize) -> Result<u32, ProgramError> {
+    if data.len() < *offset + 4 {
+        return Err(ProgramError::InvalidInstructionData);
+    }
+    let value = u32::from_le_bytes(
+        data[*offset..*offset + 4]
+            .try_into()
+            .map_err(|_| ProgramError::InvalidInstructionData)?
+    );
+    *offset += 4;
+    Ok(value)
+}
+
 /// Parse a u16 in little-endian format from instruction data
 #[inline]
 pub fn parse_u16_le(data: &[u8], offset: &mut usize) -> Result<u16, ProgramError> {

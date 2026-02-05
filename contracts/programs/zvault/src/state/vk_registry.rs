@@ -1,7 +1,7 @@
 //! Verification Key Registry state account
 //!
-//! Stores UltraHonk verification key hashes on-chain for different circuit types.
-//! Actual verification happens via CPI to the ultrahonk-verifier program.
+//! Stores Groth16 verification key hashes on-chain for different circuit types.
+//! Actual verification happens inline using groth16-solana or via Sunspot CPI.
 
 use pinocchio::program_error::ProgramError;
 
@@ -56,17 +56,17 @@ impl CircuitType {
     }
 }
 
-/// On-chain verification key hash storage (UltraHonk)
+/// On-chain verification key hash storage (Groth16)
 ///
-/// For UltraHonk, we store the VK hash which is used to lookup
-/// the full VK in the ultrahonk-verifier program.
+/// For Groth16, we store the VK hash which is used to lookup
+/// the full VK in the Sunspot verifier program or for inline verification.
 ///
 /// Layout (256 bytes total):
 /// - discriminator: 1 byte
 /// - circuit_type: 1 byte
 /// - version: 2 bytes (for upgrades)
 /// - authority: 32 bytes (who can update)
-/// - vk_hash: 32 bytes (hash of the UltraHonk verification key)
+/// - vk_hash: 32 bytes (hash of the Groth16 verification key)
 /// - reserved: 188 bytes
 #[repr(C)]
 pub struct VkRegistry {
@@ -78,7 +78,7 @@ pub struct VkRegistry {
     version: [u8; 2],
     /// Authority that can update this VK hash
     pub authority: [u8; 32],
-    /// UltraHonk verification key hash
+    /// Groth16 verification key hash
     pub vk_hash: [u8; 32],
     /// Reserved for future use
     _reserved: [u8; 188],
@@ -140,7 +140,7 @@ impl VkRegistry {
         CircuitType::from_u8(self.circuit_type)
     }
 
-    /// Get VK hash for CPI to ultrahonk-verifier
+    /// Get VK hash for Groth16 verification
     pub fn get_vk_hash(&self) -> &[u8; 32] {
         &self.vk_hash
     }
