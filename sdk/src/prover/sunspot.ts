@@ -28,12 +28,12 @@ export interface SunspotConfig {
 // Environment detection
 const isBrowser = typeof window !== "undefined";
 
-// Default paths
-const DEFAULT_SUNSPOT_PATH = path.join(os.homedir(), "sunspot", "go", "sunspot");
+// Default paths (guarded for browser where path/os are empty objects)
+const DEFAULT_SUNSPOT_PATH = isBrowser ? "" : path.join(os.homedir(), "sunspot", "go", "sunspot");
 
 let config: SunspotConfig = {
   sunspotPath: DEFAULT_SUNSPOT_PATH,
-  circuitsBasePath: path.resolve(__dirname, "../../../circuits"),
+  circuitsBasePath: isBrowser ? "" : path.resolve(__dirname, "../../../circuits"),
 };
 
 /**
