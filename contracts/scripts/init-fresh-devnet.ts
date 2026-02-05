@@ -26,9 +26,9 @@ import { fileURLToPath } from "url";
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-// Fresh program ID (zKey vanity address)
-const ZVAULT_PROGRAM_ID = new PublicKey("zKeyrLmpT8W9o8iRvhizuSihLAFLhfAGBvfM638Pbw8");
-const ULTRAHONK_VERIFIER_ID = new PublicKey("5uAoTLSexeKKLU3ZXniWFE2CsCWGPzMiYPpKiywCGqsd");
+// Fresh program ID (deployment 2026-02-05)
+const ZVAULT_PROGRAM_ID = new PublicKey("3B98dVdvQCLGVavcSz35igiby3ZqVv1SNUBCvDkVGMbq");
+const SUNSPOT_VERIFIER_ID = new PublicKey("3Sd1FJPA64zrUrbNQPFcsP7BXp2nu4ow3D1qaeZiwS1Y");
 const CHADBUFFER_ID = new PublicKey("C5RpjtTMFXKVZCtXSzKXD4CDNTaWBg3dVeMfYvjZYHDF");
 
 const RPC_URL = "https://solana-devnet.g.alchemy.com/v2/y1zYW-ovVofq7OzZo0Z6IHenRnyq_Pbd";
@@ -130,7 +130,7 @@ async function main() {
       rpcUrl: RPC_URL,
       programs: {
         zVault: ZVAULT_PROGRAM_ID.toBase58(),
-        ultrahonkVerifier: ULTRAHONK_VERIFIER_ID.toBase58(),
+        sunspotVerifier: SUNSPOT_VERIFIER_ID.toBase58(),
         chadbuffer: CHADBUFFER_ID.toBase58(),
       },
       accounts: {
@@ -219,7 +219,7 @@ async function main() {
     rpcUrl: RPC_URL,
     programs: {
       zVault: ZVAULT_PROGRAM_ID.toBase58(),
-      ultrahonkVerifier: ULTRAHONK_VERIFIER_ID.toBase58(),
+      sunspotVerifier: SUNSPOT_VERIFIER_ID.toBase58(),
       chadbuffer: CHADBUFFER_ID.toBase58(),
     },
     accounts: {

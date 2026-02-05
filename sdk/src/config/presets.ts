@@ -55,28 +55,28 @@ const EMPTY_VK_HASHES: VKHashes = {
 // =============================================================================
 
 /**
- * Devnet Configuration (v2.1.0)
+ * Devnet Configuration (v2.2.0)
  *
- * Fresh deployment 2026-02-02:
- * - Simplified instruction format (no proof_source byte for split/partial-public)
- * - Instruction introspection pattern for verifier
- * - Program ID: GqdjVMBDmFEd6wSV4TzRsvnVWnE4pMMdhVo8U4iXvYUX
+ * Fresh deployment 2026-02-05:
+ * - Groth16 via Sunspot CPI (replaced UltraHonk)
+ * - No localnet verification skips
+ * - Program ID: 3B98dVdvQCLGVavcSz35igiby3ZqVv1SNUBCvDkVGMbq
  */
 export const DEVNET_PRESET: ResolvedConfig = {
   network: "devnet",
 
-  // Program IDs (fresh deployment 2026-02-02)
-  zvaultProgramId: address("GqdjVMBDmFEd6wSV4TzRsvnVWnE4pMMdhVo8U4iXvYUX"),
+  // Program IDs (fresh deployment 2026-02-05)
+  zvaultProgramId: address("3B98dVdvQCLGVavcSz35igiby3ZqVv1SNUBCvDkVGMbq"),
   btcLightClientProgramId: address("S6rgPjCeBhkYBejWyDR1zzU3sYCMob36LAf8tjwj8pn"),
   chadbufferProgramId: CHADBUFFER_PROGRAM_ID,
   token2022ProgramId: TOKEN_2022_PROGRAM_ID,
   ataProgramId: ATA_PROGRAM_ID,
 
-  // Deployed Accounts (fresh deployment 2026-02-02)
-  poolStatePda: address("Bq8FTMnpyspkygAr3yN6tU8dzDhD5Ag19oVN3xXwy3gg"),
-  commitmentTreePda: address("M4hjajsFJU98xdx6ZtLuzgVPUKP6TTKXjfFpBiNE272"),
-  zbtcMint: address("AUuocP2KQVkUnt8pFtBx5CHpDargEPQNeq29hwtQoxFY"),
-  poolVault: address("5VCCporx5wvF2y8W97o55r1FiEb4pxp6RLRJMm3wQ1Ck"),
+  // Deployed Accounts (fresh deployment 2026-02-05)
+  poolStatePda: address("HoSZ1ywBeAEWSNSSzxLNmAs6CodCM4b1Y3rzLGNarffm"),
+  commitmentTreePda: address("Exd9HHYjm5MsMpxxCFSKwCUuWBM77BJMA1pnkwHUXBZo"),
+  zbtcMint: address("FPXFZ2eMuLJXnBq1JkppggWvaMCPtENiqT7foodeabgy"),
+  poolVault: address("7GJruCrMQs97M6exQ8KyPcwqRyndQjSq8tk8HsQY1aoP"),
 
   // RPC Endpoints
   solanaRpcUrl: "https://api.devnet.solana.com",
