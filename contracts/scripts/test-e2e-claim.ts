@@ -34,11 +34,12 @@ import {
   setCircuitPath,
   generateClaimProof,
   cleanupProver,
+  initPoseidon,
+  poseidonHashSync,
   type ClaimInputs,
-  poseidon2Hash,
-  computeUnifiedCommitment,
-  computeNullifier,
-  hashNullifier,
+  computeUnifiedCommitmentSync,
+  computeNullifierSync,
+  hashNullifierSync,
   ZVAULT_PROGRAM_ID,
   derivePoolStatePDA,
   deriveCommitmentTreePDA,
@@ -218,10 +219,13 @@ async function main() {
   console.log(`Pool State: ${poolState}`);
   console.log(`Commitment Tree: ${commitmentTree}\n`);
 
-  // Initialize prover
+  // Initialize prover and Poseidon
   console.log("------------------------------------------------------------");
-  console.log("Step 1: Initialize SDK Prover");
+  console.log("Step 1: Initialize SDK Prover & Poseidon");
   console.log("------------------------------------------------------------\n");
+
+  await initPoseidon();
+  console.log("✓ Poseidon initialized");
 
   const circuitPath = path.resolve(__dirname, "../../sdk/circuits");
   setCircuitPath(circuitPath);
@@ -234,10 +238,10 @@ async function main() {
   console.log("------------------------------------------------------------\n");
 
   const privKey = randomFieldElement();
-  const pubKeyX = poseidon2Hash([privKey]);
+  const pubKeyX = poseidonHashSync([privKey]);
   const amount = 10000n; // 0.0001 BTC
 
-  const commitment = computeUnifiedCommitment(pubKeyX, amount);
+  const commitment = computeUnifiedCommitmentSync(pubKeyX, amount);
   const commitmentBytes = bigintToBytes32(commitment);
 
   // Generate random ephemeral key for stealth deposit (33 bytes compressed)
@@ -317,8 +321,8 @@ async function main() {
   const leafIndex = 0n;
 
   // Compute nullifier
-  const nullifier = computeNullifier(privKey, leafIndex);
-  const nullifierHash = hashNullifier(nullifier);
+  const nullifier = computeNullifierSync(privKey, leafIndex);
+  const nullifierHash = hashNullifierSync(nullifier);
   const nullifierHashBytes = bigintToBytes32(nullifierHash);
 
   console.log(`Leaf Index: ${leafIndex}`);
@@ -334,7 +338,7 @@ async function main() {
   // Compute merkle root
   let current = commitment;
   for (let i = 0; i < TREE_DEPTH; i++) {
-    current = poseidon2Hash([current, siblings[i]]);
+    current = poseidonHashSync([current, siblings[i]]);
   }
   const merkleRoot = current;
   const merkleRootBytes = bigintToBytes32(merkleRoot);

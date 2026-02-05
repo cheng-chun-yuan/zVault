@@ -7,7 +7,7 @@
 //!
 //! All proofs are cryptographically verified regardless of network.
 
-use crate::bn254::{pairing_check, G2Point};
+use crate::bn254::{pairing_check, G2Point, BARY_DENOM_INV, BARY_DOMAIN};
 use crate::constants::{
     BATCHED_RELATION_PARTIAL_LENGTH, NUMBER_OF_ALPHAS,
     NUMBER_OF_ENTITIES, SRS_G2_GENERATOR, SRS_G2_X,
@@ -360,54 +360,40 @@ fn verify_sumcheck(
 /// evaluate at point x using:
 ///   P(x) = B(x) * sum_i(y_i / (d_i * (x - i)))
 /// where B(x) = prod_i(x - i) and d_i = prod_{j != i}(i - j)
+///
+/// Optimized: uses precomputed Montgomery-form constants for domain values and
+/// denominator inverses, plus batch inversion for the (x - i) terms.
 fn evaluate_univariate_barycentric(
     univariate: &[Fr; BATCHED_RELATION_PARTIAL_LENGTH],
     challenge: &Fr,
 ) -> Fr {
     let n = BATCHED_RELATION_PARTIAL_LENGTH;
 
-    // Precomputed denominators d_i = prod_{j != i}(i - j)
-    // For n = 8: [5040, -720, 240, -120, 48, -24, 6, -1] (factorials with alternating signs)
-    // These are: 7!, -6!, 5!/2, -4!/6, 3!/24, -2!/120, 1!/720, -0!/5040
-    // Simplified to signed integers for efficiency
-    let denominators: [i64; 8] = [5040, -720, 240, -120, 48, -24, 6, -1];
-
-    // Compute B(x) = prod_i(x - i) for i = 0..n-1
+    // Compute (x - i) for i = 0..n-1 using precomputed domain values
+    let mut x_minus_i = [Fr::zero(); 8];
     let mut b_x = Fr::one();
     for i in 0..n {
-        let i_fr = Fr::from_u64(i as u64);
-        let term = challenge.sub(&i_fr);
-        b_x = b_x.mul(&term);
+        x_minus_i[i] = challenge.sub(&Fr(BARY_DOMAIN[i]));
+        b_x = b_x.mul(&x_minus_i[i]);
     }
 
     // If challenge is one of the evaluation points, return that value directly
-    // (avoids division by zero)
     for i in 0..n {
-        let i_fr = Fr::from_u64(i as u64);
-        if challenge.sub(&i_fr).is_zero() {
+        if x_minus_i[i].is_zero() {
             return univariate[i];
         }
     }
 
-    // Compute sum_i(y_i / (d_i * (x - i)))
+    // Batch invert all (x - i) terms: 1 inversion + 3*(n-1) multiplications
+    let x_minus_i_inv = Fr::batch_inverse(&x_minus_i);
+
+    // Compute sum_i(y_i * (1/d_i) * (1/(x - i)))
+    // Using precomputed 1/d_i constants (BARY_DENOM_INV)
     let mut sum = Fr::zero();
     for i in 0..n {
-        let i_fr = Fr::from_u64(i as u64);
-        let x_minus_i = challenge.sub(&i_fr);
-
-        // d_i as field element (handling negative values)
-        let d_i = if denominators[i] >= 0 {
-            Fr::from_u64(denominators[i] as u64)
-        } else {
-            Fr::from_u64((-denominators[i]) as u64).negate()
-        };
-
-        // Compute d_i * (x - i) and invert
-        let denom = d_i.mul(&x_minus_i);
-        if let Some(denom_inv) = denom.inverse() {
-            let term = univariate[i].mul(&denom_inv);
-            sum = sum.add(&term);
-        }
+        // term = y_i * (1/d_i) * (1/(x-i))
+        let term = univariate[i].mul(&Fr(BARY_DENOM_INV[i])).mul(&x_minus_i_inv[i]);
+        sum = sum.add(&term);
     }
 
     // P(x) = B(x) * sum
@@ -438,21 +424,23 @@ fn verify_shplemini(
     }
 
     // Compute the denominator inverses for shplonk
-    // pos_denom = 1 / (z - r)
-    // neg_denom = 1 / (z + r)
+    // Batch invert 3 values using Montgomery's trick: 1 inversion + 6 muls
+    // instead of 3 separate inversions (~3x faster)
     let z_minus_r = tp.shplonk_z.sub(&powers_of_r[0]);
     let z_plus_r = tp.shplonk_z.add(&powers_of_r[0]);
 
-    let pos_denom_inv = z_minus_r.inverse()
+    let p01 = z_minus_r.mul(&z_plus_r);
+    let p012 = p01.mul(&tp.gemini_r);
+    let inv_all = p012.inverse()
         .ok_or(UltraHonkError::InvalidProofFormat)?;
-    let neg_denom_inv = z_plus_r.inverse()
-        .ok_or(UltraHonkError::InvalidProofFormat)?;
+    let gemini_r_inv = p01.mul(&inv_all);
+    let tmp = tp.gemini_r.mul(&inv_all);
+    let pos_denom_inv = z_plus_r.mul(&tmp);  // 1/(z - r)
+    let neg_denom_inv = z_minus_r.mul(&tmp);  // 1/(z + r)
 
     // Compute unshifted and shifted scalars
     let _unshifted_scalar = pos_denom_inv.add(&tp.shplonk_nu.mul(&neg_denom_inv));
 
-    let gemini_r_inv = tp.gemini_r.inverse()
-        .ok_or(UltraHonkError::InvalidProofFormat)?;
     let _shifted_scalar = gemini_r_inv.mul(
         &pos_denom_inv.sub(&tp.shplonk_nu.mul(&neg_denom_inv))
     );
@@ -483,7 +471,7 @@ fn verify_shplemini(
 
     // Compute P = shplonk_q - z * kzg_quotient
     // For a valid proof, this should satisfy the pairing equation
-    let z_scalar = tp.shplonk_z.0;
+    let z_scalar = tp.shplonk_z.to_bytes();
     let z_times_kzg = kzg_quotient_affine.mul(&z_scalar)?;
     let p = shplonk_q_affine.add(&z_times_kzg.negate())?;
 
@@ -509,17 +497,22 @@ mod tests {
 
     #[test]
     fn test_split_challenge() {
-        let challenge = Fr([
+        let bytes: [u8; 32] = [
             0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08,
             0x09, 0x0a, 0x0b, 0x0c, 0x0d, 0x0e, 0x0f, 0x10,
             0x11, 0x12, 0x13, 0x14, 0x15, 0x16, 0x17, 0x18,
             0x19, 0x1a, 0x1b, 0x1c, 0x1d, 0x1e, 0x1f, 0x20,
-        ]);
+        ];
+        let challenge = Fr::from_bytes(&bytes).unwrap();
+        let challenge_bytes = challenge.to_bytes();
 
         let (lower, upper) = split_challenge(&challenge);
+        let lower_bytes = lower.to_bytes();
+        let upper_bytes = upper.to_bytes();
+
         // Lower should have bytes 16-31 in positions 16-31
-        assert_eq!(lower.0[16..32], challenge.0[16..32]);
+        assert_eq!(lower_bytes[16..32], challenge_bytes[16..32]);
         // Upper should have bytes 0-15 in positions 16-31
-        assert_eq!(upper.0[16..32], challenge.0[0..16]);
+        assert_eq!(upper_bytes[16..32], challenge_bytes[0..16]);
     }
 }

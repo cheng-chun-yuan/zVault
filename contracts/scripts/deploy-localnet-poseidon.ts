@@ -53,9 +53,11 @@ import {
 import {
   initProver,
   getVkHash,
+  getVerificationKey,
   setCircuitPath,
   type CircuitType,
 } from "../../sdk/dist/prover/web.js";
+import { keccak_256 } from "@noble/hashes/sha3.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -149,6 +151,7 @@ interface InitResult {
   zkbtcMint: PublicKey;
   poolVault: PublicKey;
   authority: PublicKey;
+  ultrahonkVkAccount?: PublicKey;
 }
 
 // =============================================================================
@@ -747,6 +750,95 @@ async function initializeVkRegistries(
   log("VK registry initialization complete");
 }
 
+/**
+ * Initialize UltraHonk verifier VK account for the claim circuit.
+ *
+ * Creates an account owned by the verifier program and writes the bb.js VK data
+ * using WRITE_VK_CHUNK instructions (3680 bytes, requires multiple transactions).
+ */
+async function initializeUltraHonkVkAccount(
+  connection: Connection,
+  authority: Keypair,
+  verifierProgramId: PublicKey,
+): Promise<PublicKey> {
+  logSection("Initializing UltraHonk Verifier VK Account");
+
+  // Get raw VK bytes from SDK prover (bb.js format, 3680 bytes)
+  const vkBytes = await getVerificationKey("claim" as CircuitType);
+  const hashLen = vkBytes.length >= 3680 ? 3680 : Math.min(vkBytes.length, 1760);
+  const vkHash = new Uint8Array(keccak_256(vkBytes.slice(0, hashLen)));
+
+  log(`VK size: ${vkBytes.length} bytes`);
+  log(`VK hash (keccak256): ${Buffer.from(vkHash).toString("hex").slice(0, 32)}...`);
+
+  const vkKeypair = Keypair.generate();
+  const rentExemption = await connection.getMinimumBalanceForRentExemption(vkBytes.length);
+
+  // Create account owned by verifier program
+  const createAccountIx = SystemProgram.createAccount({
+    fromPubkey: authority.publicKey,
+    newAccountPubkey: vkKeypair.publicKey,
+    lamports: rentExemption,
+    space: vkBytes.length,
+    programId: verifierProgramId,
+  });
+
+  // Write first chunk in same TX
+  const FIRST_CHUNK_SIZE = Math.min(800, vkBytes.length);
+  const firstChunk = vkBytes.slice(0, FIRST_CHUNK_SIZE);
+
+  const firstWriteData = new Uint8Array(1 + 4 + firstChunk.length);
+  firstWriteData[0] = 4; // WRITE_VK_CHUNK discriminator
+  // offset = 0 (LE u32)
+  firstWriteData[1] = 0; firstWriteData[2] = 0; firstWriteData[3] = 0; firstWriteData[4] = 0;
+  firstWriteData.set(firstChunk, 5);
+
+  const firstWriteIx = new TransactionInstruction({
+    programId: verifierProgramId,
+    keys: [
+      { pubkey: vkKeypair.publicKey, isWritable: true, isSigner: false },
+      { pubkey: authority.publicKey, isWritable: true, isSigner: true },
+    ],
+    data: Buffer.from(firstWriteData),
+  });
+
+  const createTx = new Transaction().add(createAccountIx, firstWriteIx);
+  await sendAndConfirmTransaction(connection, createTx, [authority, vkKeypair], { commitment: "confirmed" });
+  log(`✓ VK account created + ${FIRST_CHUNK_SIZE} bytes written: ${vkKeypair.publicKey.toBase58().slice(0, 20)}...`);
+
+  // Write remaining chunks
+  let currentOffset = FIRST_CHUNK_SIZE;
+  const MAX_CHUNK = 950;
+
+  while (currentOffset < vkBytes.length) {
+    const chunkSize = Math.min(MAX_CHUNK, vkBytes.length - currentOffset);
+    const chunk = vkBytes.slice(currentOffset, currentOffset + chunkSize);
+
+    const writeData = new Uint8Array(1 + 4 + chunk.length);
+    writeData[0] = 4; // WRITE_VK_CHUNK
+    const view = new DataView(writeData.buffer);
+    view.setUint32(1, currentOffset, true);
+    writeData.set(chunk, 5);
+
+    const writeIx = new TransactionInstruction({
+      programId: verifierProgramId,
+      keys: [
+        { pubkey: vkKeypair.publicKey, isWritable: true, isSigner: false },
+        { pubkey: authority.publicKey, isWritable: true, isSigner: true },
+      ],
+      data: Buffer.from(writeData),
+    });
+
+    const writeTx = new Transaction().add(writeIx);
+    await sendAndConfirmTransaction(connection, writeTx, [authority], { commitment: "confirmed" });
+    log(`  Wrote VK chunk at offset ${currentOffset}, ${chunkSize} bytes`);
+    currentOffset += chunkSize;
+  }
+
+  log(`✓ VK account fully initialized (${vkBytes.length} bytes): ${vkKeypair.publicKey.toBase58()}`);
+  return vkKeypair.publicKey;
+}
+
 function bigintToBytes32(value: bigint): Uint8Array {
   const bytes = new Uint8Array(32);
   let temp = value;
@@ -781,6 +873,7 @@ function saveConfig(deployResult: DeployResult, initResult: InitResult): void {
       zkbtcMint: initResult.zkbtcMint.toBase58(),
       poolVault: initResult.poolVault.toBase58(),
       authority: initResult.authority.toBase58(),
+      ...(initResult.ultrahonkVkAccount ? { ultrahonkVkAccount: initResult.ultrahonkVkAccount.toBase58() } : {}),
     },
     btcLightClient: {
       pda: initResult.btcLightClientPda.toBase58(),
@@ -884,6 +977,19 @@ async function main() {
     initResult.poolStatePda
   );
 
+  // Initialize UltraHonk verifier VK account (for VERIFY_FROM_BUFFER)
+  try {
+    const vkAccount = await initializeUltraHonkVkAccount(
+      connection,
+      authority,
+      deployResult.ultrahonkVerifierProgramId,
+    );
+    initResult.ultrahonkVkAccount = vkAccount;
+  } catch (error: any) {
+    log(`Warning: Failed to initialize UltraHonk VK account: ${error.message}`);
+    log(`  The E2E test script will create it on-demand`);
+  }
+
   // Add demo notes
   if (!skipDemo) {
     await initPoseidon();
@@ -907,6 +1013,7 @@ async function main() {
   console.log("Summary:");
   console.log(`  Poseidon Enabled:     YES`);
   console.log(`  VK Registries:        INITIALIZED (real circuit VK hashes)`);
+  console.log(`  UltraHonk VK Account: ${initResult.ultrahonkVkAccount?.toBase58() ?? "NOT SET"}`);
   console.log(`  zVault Program:       ${deployResult.zvaultProgramId.toBase58()}`);
   console.log(`  Pool State PDA:       ${initResult.poolStatePda.toBase58()}`);
   console.log(`  Commitment Tree PDA:  ${initResult.commitmentTreePda.toBase58()}`);

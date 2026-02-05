@@ -36,7 +36,7 @@ import {
 import * as fs from "fs";
 import * as path from "path";
 import { fileURLToPath } from "url";
-import { sha256 } from "@noble/hashes/sha2.js";
+import { keccak_256 } from "@noble/hashes/sha3.js";
 
 // SDK imports
 import {
@@ -65,6 +65,12 @@ import {
   type StealthMetaAddress,
   type ScannedNote,
 } from "@zvault/sdk";
+
+// Import prover functions for VK data
+import {
+  getVerificationKey,
+  type CircuitType,
+} from "../../sdk/dist/prover/web.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -268,21 +274,18 @@ function computeMerkleProof(
 // VK Hash Computation
 // =============================================================================
 
+// VK size constants (must match on-chain)
+const BBJS_VK_SIZE = 3680;
+
 /**
- * Compute VK hash from circuit JSON (for UltraHonk verification)
- * The VK hash is sha256 of the circuit's verification key bytes
+ * Compute VK hash matching on-chain logic: keccak256 of VK bytes.
+ *
+ * On-chain (compute_vk_hash): For bb.js format (>= 3680 bytes), hash first 3680 bytes.
+ * Uses the SDK's getVerificationKey() to get the raw bb.js VK bytes.
  */
-async function computeVkHash(circuitName: string): Promise<Uint8Array> {
-  const circuitPath = path.resolve(__dirname, "../../sdk/circuits", `${circuitName}.json`);
-  const circuitJson = JSON.parse(fs.readFileSync(circuitPath, "utf-8"));
-
-  // For UltraHonk, the VK is derived from the circuit
-  // Use a deterministic hash of the circuit bytecode as VK identifier
-  const bytecode = circuitJson.bytecode;
-  const bytecodeBytes = Buffer.from(bytecode, "base64");
-
-  // Hash the bytecode to get VK hash
-  const hash = sha256(bytecodeBytes);
+async function computeVkHash(vkBytes: Uint8Array): Promise<Uint8Array> {
+  const hashLen = vkBytes.length >= BBJS_VK_SIZE ? BBJS_VK_SIZE : Math.min(vkBytes.length, 1760);
+  const hash = keccak_256(vkBytes.slice(0, hashLen));
   return new Uint8Array(hash);
 }
 
@@ -485,25 +488,27 @@ async function uploadProofToBuffer(
 // =============================================================================
 
 /**
- * Build claim instruction data for BUFFER mode (proof_source=1)
- * Buffer mode: discriminator(1) + proof_source(1) + root(32) + nullifier(32) + amount(8) + recipient(32) + vk_hash(32)
+ * Build claim instruction data (buffer mode - proof in ChadBuffer, verified by prior instruction)
+ *
+ * On-chain layout after discriminator is stripped:
+ *   root(32) + nullifier_hash(32) + amount_sats(8) + recipient(32) + vk_hash(32) = 136 bytes
+ *
+ * Total with discriminator: 137 bytes
  */
-function buildClaimDataBufferMode(
+function buildClaimData(
   root: Uint8Array,
   nullifierHash: Uint8Array,
   amountSats: bigint,
   recipient: PublicKey,
   vkHash: Uint8Array
 ): Uint8Array {
-  const totalSize = 1 + 1 + 32 + 32 + 8 + 32 + 32; // 138 bytes
+  const totalSize = 1 + 32 + 32 + 8 + 32 + 32; // 137 bytes
   const data = new Uint8Array(totalSize);
   const view = new DataView(data.buffer);
   let offset = 0;
 
   // Discriminator
   data[offset++] = DISCRIMINATOR.CLAIM;
-  // Proof source (1 = buffer)
-  data[offset++] = 1;
   // Root
   data.set(root, offset);
   offset += 32;
@@ -522,47 +527,146 @@ function buildClaimDataBufferMode(
   return data;
 }
 
-function buildClaimData(
-  proof: Uint8Array,
-  root: Uint8Array,
-  nullifierHash: Uint8Array,
-  amountSats: bigint,
-  recipient: PublicKey,
+/**
+ * Build VERIFY_FROM_BUFFER instruction for UltraHonk verifier.
+ *
+ * Data format: discriminator(1) + public_inputs_count(4 LE) + public_inputs(N×32) + vk_hash(32)
+ * Accounts: [proof_buffer, vk_account]
+ */
+function buildVerifyFromBufferData(
+  publicInputs: Uint8Array[],
   vkHash: Uint8Array
 ): Uint8Array {
-  // Inline mode: discriminator(1) + proof_source(1) + proof_len(4) + proof + root(32) + nullifier(32) + amount(8) + recipient(32) + vk_hash(32)
-  const proofLen = proof.length;
-  const totalSize = 1 + 1 + 4 + proofLen + 32 + 32 + 8 + 32 + 32;
+  const piCount = publicInputs.length;
+  const totalSize = 1 + 4 + piCount * 32 + 32;
   const data = new Uint8Array(totalSize);
   const view = new DataView(data.buffer);
   let offset = 0;
 
-  // Discriminator
-  data[offset++] = DISCRIMINATOR.CLAIM;
-  // Proof source (0 = inline)
-  data[offset++] = 0;
-  // Proof length (little endian)
-  view.setUint32(offset, proofLen, true);
+  // Discriminator (3 = VERIFY_FROM_BUFFER)
+  data[offset++] = 3;
+  // Public inputs count (little endian u32)
+  view.setUint32(offset, piCount, true);
   offset += 4;
-  // Proof bytes
-  data.set(proof, offset);
-  offset += proofLen;
-  // Root
-  data.set(root, offset);
-  offset += 32;
-  // Nullifier hash
-  data.set(nullifierHash, offset);
-  offset += 32;
-  // Amount (little endian)
-  view.setBigUint64(offset, amountSats, true);
-  offset += 8;
-  // Recipient
-  data.set(recipient.toBytes(), offset);
-  offset += 32;
+  // Public inputs (each 32 bytes)
+  for (const pi of publicInputs) {
+    data.set(pi, offset);
+    offset += 32;
+  }
   // VK hash
   data.set(vkHash, offset);
 
   return data;
+}
+
+// =============================================================================
+// VK Account Initialization (for UltraHonk verifier)
+// =============================================================================
+
+/**
+ * Initialize a VK account for the UltraHonk verifier program.
+ *
+ * The VK is 3680 bytes (bb.js format). Since this exceeds single TX size:
+ * 1. Create account owned by verifier program via SystemProgram.createAccount
+ * 2. Write VK data in chunks via WRITE_VK_CHUNK (discriminator 4)
+ *
+ * Note: INIT_VK (disc 2) requires the account to be owned by system program,
+ * but createAccount already transfers ownership. So we use WRITE_VK_CHUNK directly.
+ */
+async function initializeVkAccount(
+  connection: Connection,
+  authority: Keypair,
+  verifierProgramId: PublicKey,
+  vkBytes: Uint8Array
+): Promise<PublicKey> {
+  const vkKeypair = Keypair.generate();
+  const vkSize = vkBytes.length;
+
+  log(`Creating VK account (${vkSize} bytes)...`);
+
+  // Calculate rent
+  const rentExemption = await connection.getMinimumBalanceForRentExemption(vkSize);
+
+  // Create account owned by verifier program
+  const createAccountIx = SystemProgram.createAccount({
+    fromPubkey: authority.publicKey,
+    newAccountPubkey: vkKeypair.publicKey,
+    lamports: rentExemption,
+    space: vkSize,
+    programId: verifierProgramId,
+  });
+
+  const priorityFeeIx = NETWORK === "devnet"
+    ? ComputeBudgetProgram.setComputeUnitPrice({ microLamports: 1_000_000 })
+    : null;
+
+  // Write first chunk in the same TX as createAccount
+  const FIRST_CHUNK_SIZE = Math.min(800, vkSize);
+  const firstChunk = vkBytes.slice(0, FIRST_CHUNK_SIZE);
+
+  // WRITE_VK_CHUNK data: disc(1) + offset(4 LE) + chunk_data
+  const firstWriteData = new Uint8Array(1 + 4 + firstChunk.length);
+  firstWriteData[0] = 4; // WRITE_VK_CHUNK discriminator
+  // offset = 0 (little-endian u32)
+  firstWriteData[1] = 0; firstWriteData[2] = 0; firstWriteData[3] = 0; firstWriteData[4] = 0;
+  firstWriteData.set(firstChunk, 5);
+
+  const firstWriteIx = new TransactionInstruction({
+    programId: verifierProgramId,
+    keys: [
+      { pubkey: vkKeypair.publicKey, isWritable: true, isSigner: false },
+      { pubkey: authority.publicKey, isWritable: true, isSigner: true },
+    ],
+    data: Buffer.from(firstWriteData),
+  });
+
+  const createTx = new Transaction();
+  if (priorityFeeIx) createTx.add(priorityFeeIx);
+  createTx.add(createAccountIx, firstWriteIx);
+
+  await sendAndConfirmTransaction(connection, createTx, [authority, vkKeypair], {
+    commitment: "confirmed",
+    skipPreflight: NETWORK === "devnet",
+  });
+  log(`✓ VK account created + first ${FIRST_CHUNK_SIZE} bytes written: ${vkKeypair.publicKey.toBase58().slice(0, 16)}...`);
+
+  // Write remaining chunks via WRITE_VK_CHUNK
+  let currentOffset = FIRST_CHUNK_SIZE;
+  const MAX_CHUNK_SIZE = 950;
+
+  while (currentOffset < vkSize) {
+    const chunkSize = Math.min(MAX_CHUNK_SIZE, vkSize - currentOffset);
+    const chunk = vkBytes.slice(currentOffset, currentOffset + chunkSize);
+
+    const writeData = new Uint8Array(1 + 4 + chunk.length);
+    writeData[0] = 4; // WRITE_VK_CHUNK discriminator
+    const offsetView = new DataView(writeData.buffer);
+    offsetView.setUint32(1, currentOffset, true);
+    writeData.set(chunk, 5);
+
+    const writeIx = new TransactionInstruction({
+      programId: verifierProgramId,
+      keys: [
+        { pubkey: vkKeypair.publicKey, isWritable: true, isSigner: false },
+        { pubkey: authority.publicKey, isWritable: true, isSigner: true },
+      ],
+      data: Buffer.from(writeData),
+    });
+
+    const writeTx = new Transaction();
+    if (priorityFeeIx) writeTx.add(priorityFeeIx);
+    writeTx.add(writeIx);
+
+    await sendAndConfirmTransaction(connection, writeTx, [authority], {
+      commitment: "confirmed",
+      skipPreflight: NETWORK === "devnet",
+    });
+    log(`  Wrote VK chunk at offset ${currentOffset}, ${chunkSize} bytes`);
+    currentOffset += chunkSize;
+  }
+
+  log(`✓ VK account fully initialized (${vkSize} bytes)`);
+  return vkKeypair.publicKey;
 }
 
 // =============================================================================
@@ -829,10 +933,42 @@ async function main() {
   // ==========================================================================
   // Step 7: Compute VK hash
   // ==========================================================================
-  logSection("Step 7: Compute VK Hash");
+  // Step 7: Get VK bytes + Initialize VK Account
+  // ==========================================================================
+  logSection("Step 7: Initialize Verifier VK Account");
 
-  const vkHash = await computeVkHash("zvault_claim");
-  log(`VK hash: 0x${Buffer.from(vkHash).toString("hex").slice(0, 32)}...`);
+  // Get raw VK bytes from SDK prover (bb.js format, 3680 bytes)
+  const vkBytes = await getVerificationKey("claim" as CircuitType);
+  const vkHash = await computeVkHash(vkBytes);
+  log(`VK size: ${vkBytes.length} bytes`);
+  log(`VK hash (keccak256): 0x${Buffer.from(vkHash).toString("hex").slice(0, 32)}...`);
+
+  // Check if VK account already exists (from a previous run)
+  // We store the VK account address in localnet config if available
+  let vkAccountPubkey: PublicKey;
+
+  if (localConfig.accounts?.ultrahonkVkAccount) {
+    vkAccountPubkey = new PublicKey(localConfig.accounts.ultrahonkVkAccount);
+    const existing = await connection.getAccountInfo(vkAccountPubkey);
+    if (existing && existing.owner.equals(ultrahonkVerifierId)) {
+      log(`✓ VK account already initialized: ${vkAccountPubkey.toBase58()}`);
+    } else {
+      log("VK account not found or not owned by verifier, re-creating...");
+      vkAccountPubkey = await initializeVkAccount(
+        connection, authority, ultrahonkVerifierId, vkBytes
+      );
+    }
+  } else {
+    vkAccountPubkey = await initializeVkAccount(
+      connection, authority, ultrahonkVerifierId, vkBytes
+    );
+    // Save to config for future runs
+    localConfig.accounts = localConfig.accounts || {};
+    localConfig.accounts.ultrahonkVkAccount = vkAccountPubkey.toBase58();
+    fs.writeFileSync(configPath, JSON.stringify(localConfig, null, 2) + "\n");
+    log(`Saved VK account to config`);
+  }
+  log(`VK account: ${vkAccountPubkey.toBase58()}`);
 
   // ==========================================================================
   // Step 8: Upload Proof to ChadBuffer
@@ -854,9 +990,9 @@ async function main() {
   log(`✓ Proof buffer: ${proofBuffer.toBase58()}`);
 
   // ==========================================================================
-  // Step 9: Submit On-Chain Claim (Buffer Mode)
+  // Step 9: Submit On-Chain Claim (Verify + Claim in one TX)
   // ==========================================================================
-  logSection("Step 9: Submit On-Chain Claim (Buffer Mode)");
+  logSection("Step 9: Submit On-Chain Claim");
 
   // Create recipient ATA if needed
   const recipientAta = getAssociatedTokenAddressSync(
@@ -890,8 +1026,26 @@ async function main() {
   // Derive nullifier PDA
   const [nullifierPda] = deriveNullifierPDA(nullifierHashBytes, programId);
 
-  // Build claim instruction data in BUFFER MODE (proof_source=1)
-  const claimData = buildClaimDataBufferMode(
+  // --- Build VERIFY_FROM_BUFFER instruction (must precede claim) ---
+  // Convert proof public inputs to 32-byte arrays
+  const publicInputArrays: Uint8Array[] = proofData.publicInputs.map((pi: string) => {
+    const bigVal = BigInt(pi);
+    return bigintToBytes32(bigVal);
+  });
+
+  const verifyData = buildVerifyFromBufferData(publicInputArrays, vkHash);
+  const verifyIx = new TransactionInstruction({
+    programId: ultrahonkVerifierId,
+    keys: [
+      { pubkey: proofBuffer, isWritable: false, isSigner: false },       // 0: proof_buffer
+      { pubkey: vkAccountPubkey, isWritable: false, isSigner: false },   // 1: vk_account
+    ],
+    data: Buffer.from(verifyData),
+  });
+  log(`VERIFY_FROM_BUFFER ix: ${verifyData.length} bytes, ${publicInputArrays.length} public inputs`);
+
+  // --- Build claim instruction ---
+  const claimData = buildClaimData(
     bigintToBytes32(treeState.currentRoot),
     nullifierHashBytes,
     DEMO_AMOUNT,
@@ -899,16 +1053,12 @@ async function main() {
     vkHash
   );
 
-  // Add compute budget and priority fee for devnet
-  const computeIx = ComputeBudgetProgram.setComputeUnitLimit({
-    units: 1_400_000,
-  });
-  const claimPriorityIx = NETWORK === "devnet"
-    ? ComputeBudgetProgram.setComputeUnitPrice({ microLamports: 1_000_000 })
-    : null;
+  // Instructions sysvar for introspection
+  const INSTRUCTIONS_SYSVAR = new PublicKey("Sysvar1nstructions1111111111111111111111111");
 
-  // Build claim instruction with proof buffer account
-  // Account order: pool_state, commitment_tree, nullifier, zbtc_mint, pool_vault, recipient_ata, user, token_program, system_program, ultrahonk_verifier, proof_buffer
+  // Account order: pool_state, commitment_tree, nullifier, zbtc_mint, pool_vault,
+  //   recipient_ata, user, token_program, system_program, ultrahonk_verifier,
+  //   proof_buffer, instructions_sysvar
   const claimIx = new TransactionInstruction({
     programId,
     keys: [
@@ -922,19 +1072,28 @@ async function main() {
       { pubkey: TOKEN_2022_PROGRAM_ID, isWritable: false, isSigner: false }, // 7: token_program
       { pubkey: SystemProgram.programId, isWritable: false, isSigner: false }, // 8: system_program
       { pubkey: ultrahonkVerifierId, isWritable: false, isSigner: false }, // 9: ultrahonk_verifier
-      { pubkey: proofBuffer, isWritable: false, isSigner: false },         // 10: proof_buffer (buffer mode)
+      { pubkey: proofBuffer, isWritable: false, isSigner: false },         // 10: proof_buffer
+      { pubkey: INSTRUCTIONS_SYSVAR, isWritable: false, isSigner: false }, // 11: instructions_sysvar
     ],
     data: Buffer.from(claimData),
   });
 
+  // Add compute budget and priority fee
+  const computeIx = ComputeBudgetProgram.setComputeUnitLimit({ units: 1_400_000 });
+  const claimPriorityIx = NETWORK === "devnet"
+    ? ComputeBudgetProgram.setComputeUnitPrice({ microLamports: 1_000_000 })
+    : null;
+
+  // Transaction: [compute_budget] + [priority_fee?] + [VERIFY_FROM_BUFFER] + [claim]
   const claimTx = new Transaction();
   if (claimPriorityIx) claimTx.add(claimPriorityIx);
-  claimTx.add(computeIx, claimIx);
+  claimTx.add(computeIx, verifyIx, claimIx);
 
-  log(`Instruction size: ${claimData.length} bytes (buffer mode)`);
+  log(`Claim data: ${claimData.length} bytes`);
   log(`Nullifier PDA: ${nullifierPda.toBase58()}`);
   log(`Proof buffer: ${proofBuffer.toBase58()}`);
-  log("Submitting claim transaction...");
+  log(`VK account: ${vkAccountPubkey.toBase58()}`);
+  log("Submitting [VERIFY_FROM_BUFFER + CLAIM] transaction...");
 
   try {
     // Simulate first

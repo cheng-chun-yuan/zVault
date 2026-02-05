@@ -45,10 +45,11 @@ impl Transcript {
         self.buffer.extend_from_slice(data);
     }
 
-    /// Absorb a field element (big-endian, 32 bytes)
+    /// Absorb a field element (as big-endian 32 bytes)
     #[inline]
     pub fn absorb_fr(&mut self, fr: &Fr) {
-        self.absorb_bytes(&fr.0);
+        let bytes = fr.to_bytes();
+        self.absorb_bytes(&bytes);
     }
 
     /// Absorb a u64 value (big-endian, 32 bytes padded)
@@ -72,7 +73,7 @@ impl Transcript {
         self.state = hash;
         self.buffer.clear();
 
-        // Reduce to field element (mod r)
+        // Reduce to field element (mod r) and convert to Montgomery form
         reduce_to_field(&hash)
     }
 
@@ -86,21 +87,19 @@ impl Transcript {
 /// Reduce 32-byte hash to field element (mod r)
 ///
 /// This matches bb.js behavior: interpret as big-endian and reduce mod scalar field order.
+/// Single subtraction reduction matches bb.js transcript behavior.
 fn reduce_to_field(hash: &[u8; 32]) -> Fr {
-    // For values close to 2^256, we need proper modular reduction
-    // Since Fr modulus is ~2^254, most 256-bit values need reduction
-
-    // Simple reduction: if hash >= modulus, subtract modulus
-    // This gives negligible bias for uniformly random input
     let mut result = *hash;
 
-    // Compare with modulus (big-endian)
+    // Compare with modulus (big-endian) and subtract once if >= modulus
+    // This matches bb.js behavior for Fiat-Shamir transcript compatibility
     if compare_be(&result, &SCALAR_MODULUS) >= 0 {
-        // Subtract modulus
         subtract_be(&mut result, &SCALAR_MODULUS);
     }
 
-    Fr(result)
+    // Convert reduced bytes to Montgomery form
+    // from_bytes handles any remaining reduction via Montgomery multiplication
+    Fr::from_bytes(&result).unwrap_or(Fr::zero())
 }
 
 /// Compare two 32-byte big-endian numbers
@@ -139,17 +138,21 @@ fn subtract_be(a: &mut [u8; 32], b: &[u8; 32]) {
 /// - lower comes from bytes 16-31
 /// - upper comes from bytes 0-15
 pub fn split_challenge(challenge: &Fr) -> (Fr, Fr) {
+    // Convert from Montgomery form to big-endian bytes
+    let bytes = challenge.to_bytes();
+
     let mut lower = [0u8; 32];
     let mut upper = [0u8; 32];
 
     // In big-endian: bytes 0-15 are upper 128 bits, bytes 16-31 are lower 128 bits
-    // Lower 128 bits go into a 256-bit field element (zero-padded upper bytes)
-    lower[16..32].copy_from_slice(&challenge.0[16..32]);
+    lower[16..32].copy_from_slice(&bytes[16..32]);
+    upper[16..32].copy_from_slice(&bytes[0..16]);
 
-    // Upper 128 bits go into a 256-bit field element (zero-padded upper bytes)
-    upper[16..32].copy_from_slice(&challenge.0[0..16]);
-
-    (Fr(lower), Fr(upper))
+    // Convert back to Montgomery form (values < 2^128 so always < modulus)
+    (
+        Fr::from_bytes(&lower).unwrap_or(Fr::zero()),
+        Fr::from_bytes(&upper).unwrap_or(Fr::zero()),
+    )
 }
 
 #[cfg(test)]
@@ -186,25 +189,29 @@ mod tests {
 
     #[test]
     fn test_split_challenge() {
-        // Test with a known value
-        let challenge = Fr([
+        // Create an Fr from known bytes
+        let bytes: [u8; 32] = [
             0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08,
             0x09, 0x0a, 0x0b, 0x0c, 0x0d, 0x0e, 0x0f, 0x10,
             0x11, 0x12, 0x13, 0x14, 0x15, 0x16, 0x17, 0x18,
             0x19, 0x1a, 0x1b, 0x1c, 0x1d, 0x1e, 0x1f, 0x20,
-        ]);
+        ];
+        let challenge = Fr::from_bytes(&bytes).unwrap();
+        let challenge_bytes = challenge.to_bytes();
 
         let (lower, upper) = split_challenge(&challenge);
+        let lower_bytes = lower.to_bytes();
+        let upper_bytes = upper.to_bytes();
 
-        // Lower should have bytes 16-31 of challenge in positions 16-31
-        assert_eq!(&lower.0[16..32], &challenge.0[16..32]);
+        // Lower should have bytes 16-31 of challenge
+        assert_eq!(&lower_bytes[16..32], &challenge_bytes[16..32]);
         // Upper bytes of lower should be zero
-        assert_eq!(&lower.0[0..16], &[0u8; 16]);
+        assert_eq!(&lower_bytes[0..16], &[0u8; 16]);
 
         // Upper should have bytes 0-15 of challenge in positions 16-31
-        assert_eq!(&upper.0[16..32], &challenge.0[0..16]);
+        assert_eq!(&upper_bytes[16..32], &challenge_bytes[0..16]);
         // Upper bytes of upper should be zero
-        assert_eq!(&upper.0[0..16], &[0u8; 16]);
+        assert_eq!(&upper_bytes[0..16], &[0u8; 16]);
     }
 
     #[test]
@@ -228,5 +235,15 @@ mod tests {
         c[31] = 1;
         assert_eq!(compare_be(&c, &a), 1);
         assert_eq!(compare_be(&a, &c), -1);
+    }
+
+    #[test]
+    fn test_absorb_fr_roundtrip() {
+        // Absorbing an Fr should produce the same bytes as to_bytes
+        let val = Fr::from_u64(42);
+        let mut t = Transcript::new();
+        t.absorb_fr(&val);
+        assert_eq!(t.buffer.len(), 32);
+        assert_eq!(&t.buffer[..], &val.to_bytes()[..]);
     }
 }
