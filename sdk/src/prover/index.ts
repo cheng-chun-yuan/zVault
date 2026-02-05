@@ -33,6 +33,7 @@ export {
 
   // Types
   type SunspotProofResult,
+  type SunspotProofResult as ProofData,
   type SunspotConfig,
   type CircuitType,
   type MerkleProofInput,
@@ -40,3 +41,29 @@ export {
   type SpendSplitInputs,
   type SpendPartialPublicInputs,
 } from "./sunspot";
+
+// Re-export legacy compat functions from web prover
+export {
+  // Legacy aliases
+  generateClaimProof,
+  generateSpendSplitProof,
+  generateSpendPartialPublicProof,
+
+  // Legacy compat
+  initProver,
+  isProverAvailable,
+  setCircuitPath,
+  getCircuitPath,
+  circuitExists,
+  proofToBytes,
+  verifyProof,
+  cleanup,
+
+  // Pool stubs
+  generatePoolDepositProof,
+  generatePoolWithdrawProof,
+  generatePoolClaimYieldProof,
+  type PoolDepositInputs,
+  type PoolWithdrawInputs,
+  type PoolClaimYieldInputs,
+} from "./web";

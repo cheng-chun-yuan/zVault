@@ -62,8 +62,10 @@ export const TOKEN_2022_PROGRAM_ID = new PublicKey(DEVNET_CONFIG.token2022Progra
 /** zBTC Mint Address */
 export const ZBTC_MINT_ADDRESS = new PublicKey(DEVNET_CONFIG.zbtcMint);
 
-/** UltraHonk Verifier Program ID */
-export const ULTRAHONK_VERIFIER_PROGRAM_ID = new PublicKey(DEVNET_CONFIG.ultrahonkVerifierProgramId);
+/** Sunspot Groth16 Verifier Program IDs (per-circuit) */
+export const SUNSPOT_CLAIM_VERIFIER = new PublicKey(DEVNET_CONFIG.sunspotVerifiers.claim);
+export const SUNSPOT_SPLIT_VERIFIER = new PublicKey(DEVNET_CONFIG.sunspotVerifiers.split);
+export const SUNSPOT_PARTIAL_VERIFIER = new PublicKey(DEVNET_CONFIG.sunspotVerifiers.spendPartialPublic);
 
 // =============================================================================
 // PDA Derivation (using SDK seeds)
@@ -216,7 +218,6 @@ export async function buildClaimTransaction(
 
   // Use SDK instruction data builder
   const instructionData = sdkBuildClaimInstructionData({
-    proofSource: "inline",
     proofBytes: zkProof,
     root: merkleRoot,
     nullifierHash,
@@ -237,7 +238,7 @@ export async function buildClaimTransaction(
       { pubkey: userPubkey, isSigner: true, isWritable: true },
       { pubkey: TOKEN_2022_PROGRAM_ID, isSigner: false, isWritable: false },
       { pubkey: SystemProgram.programId, isSigner: false, isWritable: false },
-      { pubkey: ULTRAHONK_VERIFIER_PROGRAM_ID, isSigner: false, isWritable: false },
+      { pubkey: SUNSPOT_CLAIM_VERIFIER, isSigner: false, isWritable: false },
     ],
     data: Buffer.from(instructionData),
   });
@@ -303,6 +304,7 @@ export async function buildSplitTransaction(
 
   // Use SDK instruction data builder
   const instructionData = sdkBuildSplitInstructionData({
+    proofBytes: zkProof,
     root: merkleRoot,
     nullifierHash: inputNullifierHash,
     outputCommitment1,
@@ -322,7 +324,7 @@ export async function buildSplitTransaction(
       { pubkey: nullifierPDA, isSigner: false, isWritable: true },
       { pubkey: userPubkey, isSigner: true, isWritable: true },
       { pubkey: SystemProgram.programId, isSigner: false, isWritable: false },
-      { pubkey: ULTRAHONK_VERIFIER_PROGRAM_ID, isSigner: false, isWritable: false },
+      { pubkey: SUNSPOT_SPLIT_VERIFIER, isSigner: false, isWritable: false },
     ],
     data: Buffer.from(instructionData),
   });
@@ -386,6 +388,7 @@ export async function buildSpendPartialPublicTransaction(
 
   // Use SDK instruction data builder
   const instructionData = sdkBuildSpendPartialPublicInstructionData({
+    proofBytes: zkProof,
     root: merkleRoot,
     nullifierHash,
     publicAmountSats: publicAmount,
@@ -408,7 +411,7 @@ export async function buildSpendPartialPublicTransaction(
       { pubkey: userPubkey, isSigner: true, isWritable: true },
       { pubkey: TOKEN_2022_PROGRAM_ID, isSigner: false, isWritable: false },
       { pubkey: SystemProgram.programId, isSigner: false, isWritable: false },
-      { pubkey: ULTRAHONK_VERIFIER_PROGRAM_ID, isSigner: false, isWritable: false },
+      { pubkey: SUNSPOT_PARTIAL_VERIFIER, isSigner: false, isWritable: false },
     ],
     data: Buffer.from(instructionData),
   });
@@ -717,6 +720,7 @@ export async function buildSpendPartialPublicWithBuffer(
 
   // Use SDK instruction data builder
   const instructionData = sdkBuildSpendPartialPublicInstructionData({
+    proofBytes: zkProof,
     root: merkleRoot,
     nullifierHash,
     publicAmountSats: publicAmount,
@@ -739,7 +743,7 @@ export async function buildSpendPartialPublicWithBuffer(
       { pubkey: userPubkey, isSigner: true, isWritable: true },
       { pubkey: TOKEN_2022_PROGRAM_ID, isSigner: false, isWritable: false },
       { pubkey: SystemProgram.programId, isSigner: false, isWritable: false },
-      { pubkey: ULTRAHONK_VERIFIER_PROGRAM_ID, isSigner: false, isWritable: false },
+      { pubkey: SUNSPOT_PARTIAL_VERIFIER, isSigner: false, isWritable: false },
       { pubkey: bufferKeypair.publicKey, isSigner: false, isWritable: false }, // Buffer account
     ],
     data: Buffer.from(instructionData),

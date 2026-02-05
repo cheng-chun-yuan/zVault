@@ -45,7 +45,9 @@ import {
   ZVAULT_PROGRAM_ID,
   TOKEN_2022_PROGRAM_ID,
   ZBTC_MINT_ADDRESS,
-  ULTRAHONK_VERIFIER_PROGRAM_ID,
+  SUNSPOT_CLAIM_VERIFIER,
+  SUNSPOT_SPLIT_VERIFIER,
+  SUNSPOT_PARTIAL_VERIFIER,
   derivePoolStatePDA,
   deriveCommitmentTreePDA,
   deriveNullifierPDA,
@@ -321,7 +323,8 @@ async function closeBuffer(
 function buildVerifyFromBufferIx(
   bufferPubkey: PublicKey,
   publicInputs: Uint8Array[],
-  vkHashBytes: Uint8Array
+  vkHashBytes: Uint8Array,
+  verifierProgramId: PublicKey = SUNSPOT_CLAIM_VERIFIER,
 ): TransactionInstruction {
   const piCount = publicInputs.length;
   const totalSize = 1 + 4 + (piCount * 32) + 32;
@@ -344,7 +347,7 @@ function buildVerifyFromBufferIx(
   Buffer.from(vkHashBytes).copy(data, offset);
 
   return new TransactionInstruction({
-    programId: ULTRAHONK_VERIFIER_PROGRAM_ID,
+    programId: verifierProgramId,
     keys: [
       { pubkey: bufferPubkey, isSigner: false, isWritable: false },
     ],
@@ -482,7 +485,7 @@ async function buildSpendPartialPublicIx(
         { pubkey: relayer.publicKey, isSigner: true, isWritable: true },
         { pubkey: TOKEN_2022_PROGRAM_ID, isSigner: false, isWritable: false },
         { pubkey: SystemProgram.programId, isSigner: false, isWritable: false },
-        { pubkey: ULTRAHONK_VERIFIER_PROGRAM_ID, isSigner: false, isWritable: false },
+        { pubkey: SUNSPOT_PARTIAL_VERIFIER, isSigner: false, isWritable: false },
         { pubkey: new PublicKey(stealthAnnouncementChange), isSigner: false, isWritable: true },
         { pubkey: bufferPubkey, isSigner: false, isWritable: false },
         { pubkey: INSTRUCTIONS_SYSVAR, isSigner: false, isWritable: false },
@@ -546,7 +549,7 @@ async function buildSpendSplitIx(
         { pubkey: nullifierPDA, isSigner: false, isWritable: true },
         { pubkey: relayer.publicKey, isSigner: true, isWritable: true },
         { pubkey: SystemProgram.programId, isSigner: false, isWritable: false },
-        { pubkey: ULTRAHONK_VERIFIER_PROGRAM_ID, isSigner: false, isWritable: false },
+        { pubkey: SUNSPOT_SPLIT_VERIFIER, isSigner: false, isWritable: false },
         { pubkey: new PublicKey(stealthAnnouncement1), isSigner: false, isWritable: true },
         { pubkey: new PublicKey(stealthAnnouncement2), isSigner: false, isWritable: true },
         { pubkey: bufferPubkey, isSigner: false, isWritable: false },
