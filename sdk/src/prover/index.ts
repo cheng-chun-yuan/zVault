@@ -10,6 +10,10 @@
 // Re-export everything from the web prover (default for browser/Node.js)
 export * from "./web";
 
+// Re-export proof conversion utilities
+export { convertBBJSProofToAffine } from "./convertProof";
+export { convertBBJSProofToSolana } from "./convertBBJSProof";
+
 // Re-export types
 export type {
   MerkleProofInput,

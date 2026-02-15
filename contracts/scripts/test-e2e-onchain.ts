@@ -60,6 +60,7 @@ import {
   createStealthMetaAddress,
   prepareClaimInputs,
   bytesToBigint,
+  convertBBJSProofToSolana,
   type ClaimInputs,
   type ZVaultKeys,
   type StealthMetaAddress,
@@ -980,12 +981,17 @@ async function main() {
   log(`ChadBuffer Program: ${chadbufferProgramId.toBase58()}`);
   log(`Proof size: ${proofData.proof.length} bytes`);
 
+  // Convert bb.js format to Solana verifier format
+  log(`Converting bb.js proof to Solana format...`);
+  const solanaProof = convertBBJSProofToSolana(proofData.proof, proofData.publicInputs);
+  log(`✓ Converted: ${solanaProof.length} bytes (${solanaProof.length - proofData.proof.length > 0 ? '+' : ''}${solanaProof.length - proofData.proof.length} bytes)`);
+
   // Upload proof to buffer
   const proofBuffer = await uploadProofToBuffer(
     connection,
     chadbufferProgramId,
     authority,
-    proofData.proof
+    solanaProof
   );
   log(`✓ Proof buffer: ${proofBuffer.toBase58()}`);
 

@@ -23,6 +23,10 @@ pub enum UltraHonkError {
     Bn254SyscallError,
     /// VK hash mismatch - computed hash doesn't match provided hash
     VkHashMismatch,
+    /// Invalid verification state (magic, phase, or integrity check failed)
+    InvalidVerificationState,
+    /// Proof buffer key mismatch between state PDA and provided account
+    ProofBufferMismatch,
 }
 
 impl From<UltraHonkError> for ProgramError {
@@ -37,6 +41,8 @@ impl From<UltraHonkError> for ProgramError {
             UltraHonkError::PairingCheckFailed => ProgramError::InvalidArgument,
             UltraHonkError::Bn254SyscallError => ProgramError::InvalidArgument,
             UltraHonkError::VkHashMismatch => ProgramError::InvalidArgument,
+            UltraHonkError::InvalidVerificationState => ProgramError::InvalidAccountData,
+            UltraHonkError::ProofBufferMismatch => ProgramError::InvalidArgument,
         }
     }
 }

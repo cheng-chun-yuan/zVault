@@ -267,8 +267,8 @@ async function generateProof(
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const { witness } = await noir.execute(inputs as any);
 
-  console.log(`[Prover] Generating UltraHonk proof...`);
-  const proof = await backend.generateProof(witness);
+  console.log(`[Prover] Generating UltraHonk proof (keccak non-ZK mode)...`);
+  const proof = await backend.generateProof(witness, { keccak: true });
 
   const elapsed = (typeof performance !== "undefined" ? performance.now() : Date.now()) - startTime;
   console.log(`[Prover] Proof generated in ${elapsed.toFixed(0)}ms`);
@@ -853,7 +853,7 @@ const vkHashCache = new Map<CircuitType, Uint8Array>();
  */
 export async function getVerificationKey(circuitType: CircuitType): Promise<Uint8Array> {
   const backend = await getBackend(circuitType);
-  const vk = await backend.getVerificationKey();
+  const vk = await backend.getVerificationKey({ keccak: true });
   return vk;
 }
 
@@ -928,3 +928,7 @@ function bytesToHex(bytes: Uint8Array): string {
     .map((b) => b.toString(16).padStart(2, "0"))
     .join("");
 }
+
+// Re-export proof conversion utilities
+export { convertBBJSProofToAffine } from "./convertProof";
+export { convertBBJSProofToSolana } from "./convertBBJSProof";

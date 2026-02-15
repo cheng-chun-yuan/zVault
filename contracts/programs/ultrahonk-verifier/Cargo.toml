@@ -14,14 +14,20 @@ no-entrypoint = []
 cpi = ["no-entrypoint"]
 # devnet feature only affects log verbosity, NOT verification logic
 devnet = []
+# Enable CU profiling checkpoints (adds ~8K CU overhead from sol_log_compute_units calls)
+cu_profile = []
 
 [dependencies]
 pinocchio = "0.9"
 solana-bn254 = "~2.1"
+
+# Software keccak fallback — only needed for non-Solana targets (tests, native builds)
+# On Solana BPF, the sol_keccak256 syscall is used instead.
+[target.'cfg(not(target_os = "solana"))'.dependencies]
 solana-nostd-keccak = "0.1"
 
 [dev-dependencies]
 solana-sdk = "2.1"
 
 [lints.rust]
-unexpected_cfgs = { level = "allow", check-cfg = ["cfg(target_os, values(\"solana\"))"] }
+unexpected_cfgs = { level = "allow", check-cfg = ["cfg(target_os, values(\"solana\"))", "cfg(feature, values(\"cu_profile\"))"] }

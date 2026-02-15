@@ -272,6 +272,8 @@ export {
   circuitExists,
   proofToBytes,
   cleanup as cleanupProver,
+  convertBBJSProofToAffine,
+  convertBBJSProofToSolana,
   type ProofData,
   type MerkleProofInput,
   type CircuitType,

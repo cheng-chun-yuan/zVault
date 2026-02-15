@@ -6,6 +6,7 @@
 use crate::error::UltraHonkError;
 use solana_bn254::prelude::{alt_bn128_addition, alt_bn128_multiplication, alt_bn128_pairing};
 
+
 /// G1 point size in bytes (x, y coordinates)
 pub const G1_POINT_SIZE: usize = 64;
 
@@ -333,7 +334,9 @@ impl Fr {
     }
 
     /// Compute modular inverse using Fermat's little theorem: a^(-1) = a^(r-2) mod r
-    /// Uses an optimized addition chain for BN254 Fr.
+    ///
+    /// Uses 4-bit windowed exponentiation (~325 mont_muls).
+    /// Note: sol_big_mod_exp syscall is NOT available on devnet/mainnet (feature gate inactive).
     pub fn inverse(&self) -> Option<Self> {
         if self.is_zero() {
             return None;
@@ -397,6 +400,19 @@ impl Fr {
         result
     }
 
+    /// Convert to standard-form limbs (Montgomery → standard) without byte conversion
+    /// Returns [u64; 4] little-endian limbs in standard form
+    #[inline]
+    pub fn to_limbs_standard(&self) -> [u64; 4] {
+        mont_mul(&self.0, &[1, 0, 0, 0])
+    }
+
+    /// Convert from standard-form limbs to Montgomery form without byte conversion
+    #[inline]
+    pub fn from_limbs_standard(limbs: [u64; 4]) -> Self {
+        Self(mont_mul(&limbs, &R2))
+    }
+
     /// Create field element from u64 (converts to Montgomery form)
     #[inline]
     pub fn from_u64(value: u64) -> Self {
@@ -451,6 +467,12 @@ impl Fr {
 
 /// Multi-scalar multiplication (MSM)
 /// Computes: sum(scalars[i] * points[i])
+///
+/// Uses alt_bn128_multiplication + alt_bn128_addition syscalls per point.
+/// CU cost: ~3,840 per scalar mul + ~334 per addition ≈ ~220K CU for 51 points.
+///
+/// CRITICAL: `#[inline(never)]` prevents inlining into Phase 4's stack frame.
+#[inline(never)]
 pub fn msm(points: &[G1Point], scalars: &[Fr]) -> Result<G1Point, UltraHonkError> {
     if points.len() != scalars.len() {
         return Err(UltraHonkError::InvalidG1Point);
@@ -458,13 +480,11 @@ pub fn msm(points: &[G1Point], scalars: &[Fr]) -> Result<G1Point, UltraHonkError
 
     let mut acc = G1Point::identity();
 
-    for (point, scalar) in points.iter().zip(scalars.iter()) {
-        if scalar.is_zero() || point.is_identity() {
+    for i in 0..points.len() {
+        if scalars[i].is_zero() || points[i].is_identity() {
             continue;
         }
-
-        let scalar_bytes = scalar.to_bytes();
-        let term = point.mul(&scalar_bytes)?;
+        let term = points[i].mul_fr(&scalars[i])?;
         acc = acc.add(&term)?;
     }
 
@@ -477,11 +497,14 @@ pub fn pairing_check(pairs: &[(G1Point, G2Point)]) -> Result<bool, UltraHonkErro
     if pairs.is_empty() {
         return Ok(true);
     }
+    if pairs.len() > 2 {
+        return Err(UltraHonkError::InvalidG1Point);
+    }
 
-    // Build pairing input: concatenate (G1, G2) pairs
-    // Each pair: 64 (G1) + 128 (G2) = 192 bytes
+    // Use stack-allocated array for 2 pairs (avoids heap allocation that may fail)
+    // Each pair: 64 (G1) + 128 (G2) = 192 bytes, max 2 pairs = 384 bytes
+    let mut input = [0u8; 384];
     let input_size = pairs.len() * 192;
-    let mut input = vec![0u8; input_size];
 
     for (i, (g1, g2)) in pairs.iter().enumerate() {
         let offset = i * 192;
@@ -489,11 +512,20 @@ pub fn pairing_check(pairs: &[(G1Point, G2Point)]) -> Result<bool, UltraHonkErro
         input[offset + 64..offset + 192].copy_from_slice(&g2.0);
     }
 
-    let result = alt_bn128_pairing(&input)
-        .map_err(|_| UltraHonkError::Bn254SyscallError)?;
+    pinocchio::msg!("pairing: calling syscall");
+    let result = alt_bn128_pairing(&input[..input_size])
+        .map_err(|_e| {
+            pinocchio::msg!("pairing: syscall error");
+            UltraHonkError::Bn254SyscallError
+        })?;
 
+    pinocchio::msg!("pairing: syscall OK");
     // Pairing returns 32 bytes, last byte is 1 if successful
-    Ok(result.len() == 32 && result[31] == 1)
+    let success = result.len() == 32 && result[31] == 1;
+    if !success {
+        pinocchio::msg!("pairing: result not 1");
+    }
+    Ok(success)
 }
 
 // ============================================================================
